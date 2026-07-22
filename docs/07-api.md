@@ -25,6 +25,7 @@ injected into routes via FastAPI dependencies.
 |--------|----------------------------------------|---------------------|
 | POST   | `/api/players/{u}/sync`                | Run ingestion from `latest_game_time`; upsert + classify openings; return counts |
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging) |
+| GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed) |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
 | POST   | `/api/players/{u}/analyze`             | Enqueue unanalyzed games (or body `game_ids`); 202 |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |

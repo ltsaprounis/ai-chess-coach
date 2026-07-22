@@ -30,12 +30,17 @@ class StorageConfig(BaseModel):
     db_path: Path = Path("coach.sqlite3")
 
 
+class OpeningsConfig(BaseModel):
+    book_dir: Path | None = None  # None -> <repo root>/vendor/chess-openings
+
+
 class AppConfig(BaseModel):
     engine: EngineConfig = Field(default_factory=EngineConfig)
     thresholds: Thresholds = Field(default_factory=Thresholds)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    openings: OpeningsConfig = Field(default_factory=OpeningsConfig)
     anthropic_api_key: str | None = None
 
 

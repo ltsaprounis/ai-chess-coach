@@ -9,12 +9,14 @@ from chess_coach.domain import Opening
 from chess_coach.storage import (
     Db,
     GameFilters,
+    games_missing_opening,
     games_needing_analysis,
     get_game,
     latest_game_time,
     list_analyses,
     list_games,
     open_db,
+    opening_stats,
     save_analysis,
     set_opening,
     upsert_games,
@@ -113,6 +115,35 @@ def test_games_needing_analysis_respects_depth(db: Db) -> None:
 
     save_analysis(db, make_analysis(depth=16))
     assert games_needing_analysis(db, "testuser", 16) == []
+
+
+def test_opening_stats_aggregates_records_most_played_first(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="r1", result="win", end_time=1),
+            make_game(id="r2", result="loss", end_time=2),
+            make_game(id="r3", result="draw", end_time=3),
+            make_game(id="q1", result="win", end_time=4),
+            make_game(id="n1", result="win", end_time=5),  # stays unclassified
+        ],
+    )
+    for game_id in ("r1", "r2", "r3"):
+        set_opening(db, game_id, RUY_LOPEZ)
+    set_opening(db, "q1", Opening(eco="D06", name="Queen's Gambit", ply=3))
+
+    stats = opening_stats(db, "testuser")
+    assert [(s.eco, s.games, s.wins, s.losses, s.draws) for s in stats] == [
+        ("C60", 3, 1, 1, 1),
+        ("D06", 1, 1, 0, 0),
+    ]
+    assert all(s.avg_cp_loss is None for s in stats)
+
+
+def test_games_missing_opening(db: Db) -> None:
+    upsert_games(db, [make_game(id="a", end_time=1), make_game(id="b", end_time=2)])
+    set_opening(db, "a", RUY_LOPEZ)
+    assert [g.id for g in games_missing_opening(db, "testuser")] == ["b"]
 
 
 def test_reopen_persists_data_and_migrations_are_idempotent(tmp_path: Path) -> None:

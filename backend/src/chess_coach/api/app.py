@@ -12,9 +12,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from chess_coach.api.routes import router
 from chess_coach.config import AppConfig, load_config
 from chess_coach.ingestion import UnknownUserError
+from chess_coach.openings import load_opening_book
 from chess_coach.storage import open_db
 
-_WEB_DIST = Path(__file__).resolve().parents[4] / "web" / "dist"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_WEB_DIST = _REPO_ROOT / "web" / "dist"
+_DEFAULT_BOOK_DIR = _REPO_ROOT / "vendor" / "chess-openings"
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -25,6 +28,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         cfg = load_config() if config is None else config
         app.state.cfg = cfg
         app.state.db = open_db(cfg.storage.db_path)
+        app.state.book = load_opening_book(cfg.openings.book_dir or _DEFAULT_BOOK_DIR)
         yield
         app.state.db.close()
 

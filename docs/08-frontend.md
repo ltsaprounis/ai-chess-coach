@@ -18,8 +18,10 @@ hand-written.
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
    move syncs board + graph.
-4. **Dashboard** — `GET /players/{u}/report`: ACPL by phase, judgment
-   totals, per-opening record table sorted worst-first.
+4. **Dashboard** — repertoire record table from
+   `GET /players/{u}/openings`, sorted worst-first; ACPL by phase
+   and judgment totals join from `GET /players/{u}/report` once
+   analysis ships.
 5. **Coach** — `POST /coach`; renders the advice (markdown) and the
    generated prompt with a copy button (the manual-use fallback).
 

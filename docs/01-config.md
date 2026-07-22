@@ -19,6 +19,7 @@ class AppConfig(BaseModel):
                                 # "azure-foundry"; model; max_tokens
     server: ServerConfig        # port
     storage: StorageConfig      # db_path
+    openings: OpeningsConfig    # book_dir; None -> repo submodule
     anthropic_api_key: str | None   # from env, never from the file
 ```
 

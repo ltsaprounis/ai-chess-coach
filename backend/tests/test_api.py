@@ -1,6 +1,6 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,11 +10,13 @@ from fastapi.testclient import TestClient
 
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
-from chess_coach.config import AppConfig, StorageConfig
+from chess_coach.config import AppConfig, OpeningsConfig, StorageConfig
 from chess_coach.domain import Game
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import open_db, save_analysis, upsert_games
 from tests.factories import make_analysis, make_game
+
+TESTDATA = Path(__file__).parent / "testdata"
 
 
 def get(
@@ -35,7 +37,9 @@ def db_path(tmp_path: Path) -> Path:
 @pytest.fixture
 def client(db_path: Path) -> Iterator[TestClient]:
     config = AppConfig(
-        storage=StorageConfig(db_path=db_path), anthropic_api_key="sk-test"
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
     )
     with TestClient(create_app(config)) as test_client:
         yield test_client
@@ -109,6 +113,66 @@ def test_sync_stores_games_and_reports_count(
 
     listed: Any = get(client, "/api/players/testuser/games").json()
     assert [g["id"] for g in listed] == ["g-new-2", "g-new-1"]
+
+
+SyncFn = Callable[[str, int | None], AsyncIterator[list[Game]]]
+
+
+def fake_sync_yielding(*batches: list[Game]) -> SyncFn:
+    def fake_sync(username: str, since: int | None = None) -> AsyncIterator[list[Game]]:
+        async def generate() -> AsyncIterator[list[Game]]:
+            for batch in batches:
+                yield batch
+
+        return generate()
+
+    return fake_sync
+
+
+def test_sync_classifies_new_games_and_backfills_old_ones(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stored, unclassified game from before openings shipped.
+    seed(db_path, [make_game(id="g-old", end_time=1, san_moves=["d4", "d5", "c4"])])
+
+    ruy = make_game(
+        id="g-ruy", end_time=50, san_moves=["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"]
+    )
+    monkeypatch.setattr(routes, "sync_games", fake_sync_yielding([ruy]))
+    post(client, "/api/players/testuser/sync")
+
+    listed: Any = get(client, "/api/players/testuser/games").json()
+    openings = {g["id"]: g["opening"] for g in listed}
+    assert openings["g-ruy"]["eco"] == "C60"
+    assert openings["g-ruy"]["name"] == "Ruy Lopez"
+    assert openings["g-old"]["eco"] == "D06"  # backfilled
+
+
+def test_openings_endpoint_aggregates_records(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ruy_moves = ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    seed(
+        db_path,
+        [
+            make_game(id="r-win", end_time=1, result="win", san_moves=ruy_moves),
+            make_game(id="r-loss", end_time=2, result="loss", san_moves=ruy_moves),
+            make_game(
+                id="q-draw", end_time=3, result="draw", san_moves=["d4", "d5", "c4"]
+            ),
+        ],
+    )
+    monkeypatch.setattr(routes, "sync_games", fake_sync_yielding())
+    post(client, "/api/players/testuser/sync")  # classifies the backlog
+
+    stats: Any = get(client, "/api/players/testuser/openings").json()
+    assert [
+        (s["eco"], s["games"], s["wins"], s["losses"], s["draws"]) for s in stats
+    ] == [
+        ("C60", 2, 1, 1, 0),
+        ("D06", 1, 0, 0, 1),
+    ]
+    assert all(s["avg_cp_loss"] is None for s in stats)
 
 
 def test_unknown_user_maps_to_404_envelope(

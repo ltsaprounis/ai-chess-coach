@@ -11,6 +11,7 @@ from chess_coach.domain import (
     GameDetail,
     GameSummary,
     Opening,
+    OpeningStats,
     Result,
     TimeClass,
 )
@@ -151,6 +152,47 @@ def games_needing_analysis(db: Db, username: str, depth: int) -> list[Game]:
         (username, depth),
     ).fetchall()
     return [Game.model_validate(_game_fields(row)) for row in rows]
+
+
+def games_missing_opening(db: Db, username: str) -> list[Game]:
+    """Games not yet classified (new, or from before openings shipped)."""
+    rows = db.execute(
+        "SELECT * FROM games WHERE username = ? AND opening_eco IS NULL",
+        (username,),
+    ).fetchall()
+    return [Game.model_validate(_game_fields(row)) for row in rows]
+
+
+def opening_stats(db: Db, username: str) -> list[OpeningStats]:
+    """Per-opening record over classified games, most-played first.
+
+    avg_cp_loss stays None until engine analysis exists (milestone 4).
+    """
+    rows = db.execute(
+        """
+        SELECT opening_eco AS eco, opening_name AS name,
+               COUNT(*) AS games,
+               SUM(result = 'win') AS wins,
+               SUM(result = 'loss') AS losses,
+               SUM(result = 'draw') AS draws
+        FROM games
+        WHERE username = ? AND opening_eco IS NOT NULL
+        GROUP BY opening_eco, opening_name
+        ORDER BY games DESC, eco
+        """,
+        (username,),
+    ).fetchall()
+    return [
+        OpeningStats(
+            eco=row["eco"],
+            name=row["name"],
+            games=row["games"],
+            wins=row["wins"],
+            losses=row["losses"],
+            draws=row["draws"],
+        )
+        for row in rows
+    ]
 
 
 def set_opening(db: Db, game_id: str, opening: Opening) -> None:

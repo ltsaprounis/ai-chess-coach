@@ -70,12 +70,14 @@ class Opening(BaseModel):
     ply: int
 
 
-class OpeningStats(Opening):
+class OpeningStats(BaseModel):
+    eco: str
+    name: str
     games: int
     wins: int
     losses: int
     draws: int
-    avg_cp_loss: float
+    avg_cp_loss: float | None = None  # None until games are analyzed
 
 
 class CriticalPosition(BaseModel):

@@ -21,3 +21,6 @@ server:
 
 storage:
   db_path: coach.sqlite3
+
+# openings:
+#   book_dir: vendor/chess-openings   # default: the repo submodule
