@@ -1,15 +1,33 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type GameFilters, type GameSummary } from "../api.ts";
+import { useAnalysisProgress } from "../useAnalysisProgress.ts";
 
 export default function Games() {
   const { username = "" } = useParams();
   const [filters, setFilters] = useState<GameFilters>({});
+  const [analyzing, setAnalyzing] = useState(false);
+  const queryClient = useQueryClient();
 
   const games = useQuery({
     queryKey: ["games", username, filters],
     queryFn: () => api.games(username, filters),
+  });
+
+  const analyze = useMutation({
+    mutationFn: () => api.analyze(username),
+    onSuccess: (result) => {
+      if (result.queued > 0) {
+        setAnalyzing(true);
+      }
+    },
+  });
+
+  const progress = useAnalysisProgress(username, analyzing, () => {
+    setAnalyzing(false);
+    void queryClient.invalidateQueries({ queryKey: ["games"] });
+    void queryClient.invalidateQueries({ queryKey: ["openings"] });
   });
 
   return (
@@ -45,7 +63,26 @@ export default function Games() {
           <option value="rapid">rapid</option>
           <option value="daily">daily</option>
         </select>
+        <button
+          type="button"
+          disabled={analyzing || analyze.isPending}
+          onClick={() => analyze.mutate()}
+        >
+          {analyzing ? "Analyzing…" : "Analyze all"}
+        </button>
       </div>
+
+      {analyze.isError && <p role="alert">{analyze.error.message}</p>}
+      {progress && (
+        <p className="progress-row">
+          <progress value={progress.gamesDone} max={progress.gamesTotal} />{" "}
+          {progress.gamesDone}/{progress.gamesTotal} games
+          {progress.currentPly !== undefined
+            ? ` — current game ply ${progress.currentPly}/${progress.totalPlies}`
+            : ""}
+          {progress.failed ? " — run failed, see server logs" : ""}
+        </p>
+      )}
 
       {games.isPending && <p>Loading…</p>}
       {games.isError && <p role="alert">{games.error.message}</p>}
@@ -69,7 +106,11 @@ export default function Games() {
           <tbody>
             {games.data.map((game: GameSummary) => (
               <tr key={game.id}>
-                <td>{new Date(game.end_time * 1000).toLocaleDateString()}</td>
+                <td>
+                  <Link to={`/games/${game.id}`}>
+                    {new Date(game.end_time * 1000).toLocaleDateString()}
+                  </Link>
+                </td>
                 <td>{game.color}</td>
                 <td>
                   {game.opponent} ({game.opponent_rating})

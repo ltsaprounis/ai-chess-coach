@@ -78,10 +78,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Player
+         * @description Queue engine analysis; follow progress via the SSE endpoint.
+         */
+        post: operations["analyze_player_api_players__username__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{username}/analyze/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Analyze Progress
+         * @description SSE stream for the player's current analysis run.
+         */
+        get: operations["analyze_progress_api_players__username__analyze_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnalyzeRequest */
+        AnalyzeRequest: {
+            /** Game Ids */
+            game_ids?: string[] | null;
+        };
+        /** AnalyzeResult */
+        AnalyzeResult: {
+            /** Queued */
+            queued: number;
+        };
         /** GameAnalysis */
         GameAnalysis: {
             /** Game Id */
@@ -90,6 +140,8 @@ export interface components {
             depth: number;
             /** Evals */
             evals: components["schemas"]["MoveEval"][];
+            /** Overall Acpl */
+            overall_acpl: number;
             /** Acpl By Phase */
             acpl_by_phase: {
                 [key: string]: number;
@@ -379,6 +431,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GameDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_player_api_players__username__analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_progress_api_players__username__analyze_progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

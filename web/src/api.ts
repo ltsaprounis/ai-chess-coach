@@ -12,6 +12,10 @@ export type SyncResult =
   paths["/api/players/{username}/sync"]["post"]["responses"]["200"]["content"]["application/json"];
 export type OpeningStats =
   paths["/api/players/{username}/openings"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type AnalyzeResult =
+  paths["/api/players/{username}/analyze"]["post"]["responses"]["202"]["content"]["application/json"];
+export type GameAnalysis = NonNullable<GameDetail["analysis"]>;
+export type MoveEval = GameAnalysis["evals"][number];
 
 export type GameFilters = {
   result?: string;
@@ -71,4 +75,21 @@ export const api = {
     ),
   openings: async (username: string): Promise<OpeningStats[]> =>
     json(await fetch(`/api/players/${encodeURIComponent(username)}/openings`)),
+  game: async (gameId: string): Promise<GameDetail> =>
+    json(await fetch(`/api/games/${encodeURIComponent(gameId)}`)),
+  analyze: async (
+    username: string,
+    gameIds?: string[],
+  ): Promise<AnalyzeResult> =>
+    json(
+      await fetch(`/api/players/${encodeURIComponent(username)}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(gameIds ? { game_ids: gameIds } : {}),
+      }),
+    ),
 };
+
+export function progressUrl(username: string): string {
+  return `/api/players/${encodeURIComponent(username)}/analyze/progress`;
+}
