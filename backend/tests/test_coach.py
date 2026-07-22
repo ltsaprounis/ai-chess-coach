@@ -186,6 +186,34 @@ async def test_agent_sdk_provider_collects_text(
     assert captured["model"] == "claude-opus-4-8"
 
 
+async def test_agent_sdk_provider_surfaces_error_detail_from_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from claude_agent_sdk import ResultMessage
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            yield ResultMessage(
+                subtype="success",  # the SDK really does this on auth errors
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=True,
+                num_turns=0,
+                session_id="s",
+                result="Not logged in · Please run /login",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    with pytest.raises(CoachProviderError, match="Not logged in"):
+        await provider.complete("coach me")
+
+
 async def test_agent_sdk_provider_wraps_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

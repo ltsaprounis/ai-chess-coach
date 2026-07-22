@@ -48,8 +48,11 @@ class ClaudeAgentSdkProvider:
                 elif isinstance(message, ResultMessage):
                     fallback = message.result
                     if message.is_error:
+                        # The actionable detail (e.g. "Not logged in")
+                        # arrives in `result`, not `subtype`.
+                        detail = message.result or message.subtype
                         raise CoachProviderError(
-                            f"claude-agent-sdk run failed: {message.subtype}"
+                            f"claude-agent-sdk run failed: {detail}"
                         )
                     if message.total_cost_usd is not None:
                         logger.info(
