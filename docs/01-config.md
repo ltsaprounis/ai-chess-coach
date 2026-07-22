@@ -2,7 +2,9 @@
 
 Loads and validates all tunable settings once at startup, producing a
 single typed `AppConfig` object. Everything configurable lives here;
-no other component reads files or environment variables.
+no other component reads configuration or environment variables —
+components touch data files (TSVs, the DB, the engine binary) only
+at paths injected from this config.
 
 ## Interface
 
@@ -20,6 +22,10 @@ class AppConfig(BaseModel):
     anthropic_api_key: str | None   # from env, never from the file
 ```
 
+`Thresholds` and `LlmConfig` are domain types — [engine](04-engine.md)
+and [coach](06-coach.md) consume them too. The other sub-models
+(`EngineConfig`, `ServerConfig`, `StorageConfig`) are config-local.
+
 Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
 is required when `llm.provider` is `anthropic`. `load_config` fails
 fast with a readable error when the file is invalid or a required
@@ -27,9 +33,9 @@ secret is missing for the selected provider.
 
 ## Dependencies
 
-- None on other components. Uses pydantic v2 (+ its YAML loading via
-  `yaml.safe_load` → model validation).
-- Consumed by the [API layer](07-server.md), which injects individual
+- `chess_coach.domain` (`Thresholds`, `LlmConfig`). Libraries:
+  pydantic v2 and PyYAML (`yaml.safe_load` → model validation).
+- Consumed by the [API layer](07-api.md), which injects individual
   values into [engine](04-engine.md) and [coach](06-coach.md). Those
   components receive plain arguments and never import this module.
 

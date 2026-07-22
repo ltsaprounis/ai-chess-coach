@@ -60,7 +60,7 @@ aborted) are skipped with a warning, never raised.
 ## Dependencies
 
 - `chess_coach.domain` (`Game`), httpx, python-chess. Nothing else.
-- Consumed by the [API layer](07-server.md), which pipes yielded
+- Consumed by the [API layer](07-api.md), which pipes yielded
   batches into [storage](03-storage.md). The `since` value comes from
   storage via the API layer — ingestion itself is stateless.
 

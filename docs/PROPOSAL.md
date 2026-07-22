@@ -2,8 +2,8 @@
 
 ## Goal
 Browser app that pulls a user's chess.com games, analyzes them with
-Stockfish, classifies the opening of each game, and emits a structured
-"coach me" prompt for an LLM chess coach.
+Stockfish, classifies openings, and coaches the player via an LLM.
+Build plans: [README.md](README.md) and the per-component docs.
 
 ## Stack
 - Frontend: Vite + React + TypeScript — board UI, eval graphs, reports.
@@ -24,25 +24,25 @@ Stockfish, classifies the opening of each game, and emits a structured
 ## Data flow
 1. User enters a chess.com username — the public API needs no auth:
    GET https://api.chess.com/pub/player/{user}/games/archives
-2. Fetch monthly PGN archives, parse with python-chess, store in SQLite.
+2. Fetch monthly PGN archives, parse with python-chess, store in
+   SQLite; classify each game's opening as it is ingested.
 3. Queue games for analysis: eval every position, flag inaccuracies,
    mistakes, and blunders via centipawn-loss thresholds; ACPL per phase.
-4. Classify each game's opening; aggregate repertoire win/loss stats.
-5. Generate the coach prompt: profile summary, recurring weakness
-   themes, worst openings, critical positions as FEN — then send it
-   to the coaching LLM; keep a copy button for manual use.
+4. Aggregate repertoire win/loss stats and weakness themes per player.
+5. Build the coach prompt (profile, weaknesses, worst openings,
+   critical FENs) and send it to the LLM; copy button for manual use.
 
 ## Milestones
 1. Repo scaffold; submodules added; Stockfish builds and answers UCI.
 2. Fetch and store games for a username; games list in the UI.
-3. Analysis pipeline with progress UI; per-game report view.
-4. Opening classification and aggregate stats dashboard.
+3. Opening classification; repertoire win/loss dashboard.
+4. Analysis pipeline with progress UI; per-game view; full dashboard.
 5. Coach prompt generator and export.
 
 ## Coaching LLM
-- v1 calls the Claude API (Anthropic SDK, model claude-opus-4-8).
-- A thin provider interface (`coach(prompt) -> text`) keeps other APIs
-  swappable via config — e.g. Azure AI Foundry for a future demo.
+- v1: Claude API (Anthropic SDK, claude-opus-4-8) behind a provider
+  interface (`complete(prompt) -> text`); other APIs — e.g. an
+  Azure AI Foundry demo — swap in via config.
 
 ## Config
 - `coach.config.yaml`: engine depth (default 16), worker count,

@@ -1,7 +1,7 @@
 # Component 8 — Frontend (Vite + React)
 
 The browser UI — the only TypeScript in the project. Talks
-exclusively to the HTTP/SSE API defined in [07-server.md](07-server.md);
+exclusively to the HTTP/SSE API defined in [07-api.md](07-api.md);
 it shares no code with the backend. API request/response types are
 generated from the backend's OpenAPI schema (`pnpm gen:api`), never
 hand-written.
@@ -37,7 +37,7 @@ hand-written.
 
 ## Dependencies
 
-- The backend HTTP API only ([07-server.md](07-server.md)).
+- The backend HTTP API only ([07-api.md](07-api.md)).
 - Libraries: `react-chessboard`, `chess.js`, TanStack Query.
 
 ## Build plan

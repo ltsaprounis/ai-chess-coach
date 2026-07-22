@@ -33,7 +33,8 @@ def open_db(db_path: Path) -> Db   # connection + migrations applied
 
 # Game repo
 def upsert_games(db: Db, games: list[Game]) -> None
-def list_games(db: Db, username: str, filters: GameFilters) -> ...
+def list_games(db: Db, username: str,
+               filters: GameFilters) -> list[GameSummary]
 def get_game(db: Db, game_id: str) -> GameDetail | None
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int) -> list[Game]
@@ -47,10 +48,15 @@ def list_analyses(db: Db, username: str) -> list[GameAnalysis]
 Pydantic handles the JSON columns (`model_dump_json` /
 `model_validate_json`).
 
+`GameSummary` (Game + opening + analyzed flag) and `GameDetail`
+(Game + optional analysis + opening) are domain composites;
+`GameFilters` (opening/result/time_class/analyzed/paging) is
+storage's own public parameter type.
+
 ## Dependencies
 
 - `chess_coach.domain` and the stdlib. Nothing else.
-- Consumed only by the [API layer](07-server.md). It stores what
+- Consumed only by the [API layer](07-api.md). It stores what
   [ingestion](02-ingestion.md), [engine](04-engine.md), and
   [openings](05-openings.md) produce but never imports them.
 

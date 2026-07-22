@@ -36,7 +36,7 @@ class OpeningBook:
 
 - `chess_coach.domain` (`Opening`) and python-chess. Nothing else.
 - The submodule directory path is injected by the
-  [API layer](07-server.md), which calls `classify` after
+  [API layer](07-api.md), which calls `classify` after
   [ingestion](02-ingestion.md) and persists the result via
   [storage](03-storage.md).
 

@@ -17,8 +17,8 @@ cd engines/stockfish/src && make -j build
 `make build` auto-detects the architecture on current Stockfish. The
 resulting binary path is passed in by the API layer; `brew install
 stockfish` (and passing that path) is the documented fallback if the
-local build fails. The build step ships as a `just`/make task at the
-repo root.
+local build fails. The build step ships as `make engine` in the root
+Makefile.
 
 ## Interface
 
@@ -28,7 +28,7 @@ hand-roll the protocol. The pool owns N engine processes and a queue.
 ```python
 class EngineOptions(BaseModel):
     depth: int
-    thresholds: Thresholds
+    thresholds: Thresholds    # domain type; values come from config
 
 async def create_pool(bin_path: Path, workers: int) -> AnalysisPool
 
@@ -65,7 +65,7 @@ Internally each worker holds one engine from
 ## Dependencies
 
 - `chess_coach.domain` and python-chess. Depth, thresholds, workers,
-  and the binary path are injected by the [API layer](07-server.md)
+  and the binary path are injected by the [API layer](07-api.md)
   from [config](01-config.md) — no imports.
 - Results are persisted by the API layer via [storage](03-storage.md).
 

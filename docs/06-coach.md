@@ -9,7 +9,7 @@ interface. This is the only component that talks to an LLM API.
 ```python
 # Pure aggregation — input assembled by the API layer from storage.
 def build_report(games: list[AnalyzedGame]) -> PlayerReport
-# AnalyzedGame = Game + GameAnalysis + Opening | None
+# AnalyzedGame: domain composite = Game + GameAnalysis + Opening|None
 
 # Deterministic markdown template, also shown/copyable in the UI.
 def render_prompt(report: PlayerReport) -> str
@@ -18,7 +18,10 @@ def render_prompt(report: PlayerReport) -> str
 class CoachProvider(Protocol):
     async def complete(self, prompt: str) -> str
 
-def create_provider(cfg: LlmConfig, api_key: str) -> CoachProvider
+# LlmConfig is a domain type, populated by config. The factory
+# raises if the selected provider needs a key that is None.
+def create_provider(cfg: LlmConfig,
+                    api_key: str | None) -> CoachProvider
 ```
 
 ## Report and prompt
@@ -47,7 +50,7 @@ training advice.
 ## Dependencies
 
 - `chess_coach.domain`; the `anthropic` SDK for the v1 provider.
-- Consumed by the [API layer](07-server.md), which assembles the
+- Consumed by the [API layer](07-api.md), which assembles the
   input from [storage](03-storage.md) and injects `cfg.llm` + the
   API key. No imports of storage, engine, or openings.
 

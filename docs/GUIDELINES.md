@@ -48,7 +48,7 @@ mechanically rather than by convention:
    public surface through its `__init__.py` only. Importing another
    component's internals (`chess_coach.storage.db`) is forbidden.
 2. Only the composition root (`chess_coach.api`,
-   [07-server.md](07-server.md)) may import other components.
+   [07-api.md](07-api.md)) may import other components.
    Components import `chess_coach.domain` and stdlib/their own deps —
    never each other.
 3. `web/` never imports or shares code with the backend; it compiles
@@ -59,9 +59,10 @@ mechanically rather than by convention:
 
 Boundary discipline:
 
-- Dependencies are injected as plain arguments. `os.environ`, file
-  reads, and globals appear only in [config](01-config.md) and the
-  composition root.
+- Dependencies are injected as plain arguments. Configuration and
+  secrets (`os.environ`, the config file) are read only by
+  [config](01-config.md); other components may read data files
+  (TSVs, the DB, the engine binary) but only at injected paths.
 - Importing a module has no side effects; work starts when a factory
   function is called. No module-level state or singletons — factories
   return instances so tests can create as many as they need.
@@ -103,7 +104,7 @@ Boundary discipline:
   instead. One opt-in local integration test builds and exercises
   the real engine binary.
 - API-level integration tests use a temp DB plus stub engine and
-  provider ([07-server.md](07-server.md)).
+  provider ([07-api.md](07-api.md)).
 - Tests target each component's public `__init__` surface, not
   internals.
 

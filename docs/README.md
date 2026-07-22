@@ -12,16 +12,16 @@ The backend is Python end to end; TypeScript appears only in the
 
 ## Component docs
 
-| # | Component | Doc                              | Depends on            |
-|---|-----------|----------------------------------|-----------------------|
-| 1 | Config    | [01-config.md](01-config.md)     | nothing               |
-| 2 | Ingestion | [02-ingestion.md](02-ingestion.md) | domain types        |
-| 3 | Storage   | [03-storage.md](03-storage.md)   | domain types          |
-| 4 | Engine    | [04-engine.md](04-engine.md)     | domain types          |
-| 5 | Openings  | [05-openings.md](05-openings.md) | domain types          |
-| 6 | Coach     | [06-coach.md](06-coach.md)       | domain types, LLM SDK |
-| 7 | API       | [07-server.md](07-server.md)     | components 1-6        |
-| 8 | Frontend  | [08-frontend.md](08-frontend.md) | backend HTTP API only |
+| # | Component | Doc                                | Depends on              |
+|---|-----------|------------------------------------|-------------------------|
+| 1 | Config    | [01-config.md](01-config.md)       | domain; pydantic, PyYAML|
+| 2 | Ingestion | [02-ingestion.md](02-ingestion.md) | domain; httpx, python-chess |
+| 3 | Storage   | [03-storage.md](03-storage.md)     | domain; stdlib sqlite3  |
+| 4 | Engine    | [04-engine.md](04-engine.md)       | domain; python-chess    |
+| 5 | Openings  | [05-openings.md](05-openings.md)   | domain; python-chess    |
+| 6 | Coach     | [06-coach.md](06-coach.md)         | domain; anthropic SDK   |
+| 7 | API       | [07-api.md](07-api.md)             | components 1-6; FastAPI |
+| 8 | Frontend  | [08-frontend.md](08-frontend.md)   | backend HTTP API only   |
 
 ## Architecture
 
@@ -39,11 +39,15 @@ web (TS) ──HTTP/SSE──▶ api ──▶ ingestion  (chess.com public API)
 1. Only the API layer (`chess_coach.api`) imports other components.
    Components 1-6 never import each other.
 2. Components share one contract module: `chess_coach.domain` (the
-   types below). Nothing else is shared.
-3. Config values are injected as plain arguments. No component other
-   than config reads files or environment variables.
+   types below). A component may also define parameter/result types
+   on its own public surface (e.g. the engine's `Progress`, storage's
+   `GameFilters`); `domain` holds types used by more than one
+   component.
+3. Config values are injected as plain arguments. Only config reads
+   configuration and environment variables; components read data
+   files (TSVs, the DB, the engine binary) only at injected paths.
 4. The frontend knows only the HTTP API defined in
-   [07-server.md](07-server.md). Its request/response types are
+   [07-api.md](07-api.md). Its request/response types are
    generated from the FastAPI OpenAPI schema — never hand-written.
 
 Rules 1-3 are enforced with import-linter (see
@@ -73,6 +77,10 @@ Color = Literal["white", "black"]
 Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
 Judgment = Literal["best", "good", "inaccuracy", "mistake", "blunder"]
+Phase = Literal["opening", "middlegame", "endgame"]
+
+class Thresholds(BaseModel):    # centipawn-loss judgment cutoffs
+    inaccuracy: int; mistake: int; blunder: int
 
 class Game(BaseModel):
     id: str; username: str; color: Color
@@ -102,5 +110,9 @@ class PlayerReport(BaseModel):
     critical_positions: list[CriticalPosition]  # fen/played/best/...
 ```
 
-Types may grow, but changes to them are contract changes — update the
-affected component docs in the same commit.
+Composites elided above for brevity (`OpeningStats`,
+`CriticalPosition`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
+`LlmConfig`) also live in `domain.py` — the component docs state
+their shapes where they are used. Types may grow, but changes to
+them are contract changes — update the affected component docs in
+the same commit.
