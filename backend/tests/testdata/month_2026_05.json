@@ -1,0 +1,15 @@
+{
+  "games": [
+    {
+      "uuid": "g-may-1",
+      "url": "https://www.chess.com/game/live/1",
+      "pgn": "1. e4 c5 2. Nf3 d6 0-1",
+      "time_control": "600",
+      "time_class": "rapid",
+      "rules": "chess",
+      "end_time": 1778000000,
+      "white": {"username": "TestUser", "rating": 1500, "result": "checkmated"},
+      "black": {"username": "Magnus", "rating": 1550, "result": "win"}
+    }
+  ]
+}

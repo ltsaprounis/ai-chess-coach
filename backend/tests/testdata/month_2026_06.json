@@ -1,0 +1,56 @@
+{
+  "games": [
+    {
+      "uuid": "g-june-1",
+      "url": "https://www.chess.com/game/live/2",
+      "pgn": "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0",
+      "time_control": "180",
+      "time_class": "blitz",
+      "rules": "chess",
+      "end_time": 1780300000,
+      "white": {"username": "TestUser", "rating": 1510, "result": "win"},
+      "black": {"username": "Hikaru", "rating": 1490, "result": "resigned"},
+      "accuracies": {"white": 92.5, "black": 88.1}
+    },
+    {
+      "uuid": "g-june-2",
+      "pgn": "1. e4 e5 *",
+      "time_control": "180",
+      "time_class": "blitz",
+      "rules": "bughouse",
+      "end_time": 1780310000,
+      "white": {"username": "TestUser", "rating": 1510, "result": "win"},
+      "black": {"username": "Someone", "rating": 1500, "result": "bughousepartnerlose"}
+    },
+    {
+      "uuid": "g-june-3",
+      "pgn": "1. d4 *",
+      "time_control": "180",
+      "time_class": "blitz",
+      "rules": "chess",
+      "end_time": 1780320000,
+      "white": {"username": "TestUser", "rating": 1510, "result": "weirdnewcode"},
+      "black": {"username": "Someone", "rating": 1500, "result": "weirdnewcode"}
+    },
+    {
+      "pgn": "1. c4 *",
+      "time_control": "180",
+      "time_class": "blitz",
+      "rules": "chess",
+      "end_time": 1780330000,
+      "white": {"username": "TestUser", "rating": 1510, "result": "win"},
+      "black": {"username": "Someone", "rating": 1500, "result": "resigned"}
+    },
+    {
+      "uuid": "g-june-5",
+      "url": "https://www.chess.com/game/live/3",
+      "pgn": "1. d4 d5 2. c4 e6 1/2-1/2",
+      "time_control": "600",
+      "time_class": "rapid",
+      "rules": "chess",
+      "end_time": 1780400000,
+      "white": {"username": "Magnus", "rating": 1560, "result": "repetition"},
+      "black": {"username": "TestUser", "rating": 1505, "result": "repetition"}
+    }
+  ]
+}
