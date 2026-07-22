@@ -1,8 +1,9 @@
 # Component 3 — Storage (SQLite)
 
 Persists games, analyses, and opening classifications so nothing is
-fetched or analyzed twice. Plain repository functions over
-`better-sqlite3` (synchronous, in-process, WAL mode) — no ORM.
+fetched or analyzed twice. Plain repository functions over the
+stdlib `sqlite3` module (WAL mode, synchronous) — no ORM. Storage is
+deliberately sync; FastAPI runs sync code in its threadpool.
 
 ## Schema
 
@@ -17,7 +18,7 @@ games (
 );
 analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),
-  depth INTEGER, evals TEXT,         -- JSON MoveEval[]
+  depth INTEGER, evals TEXT,         -- JSON list[MoveEval]
   acpl_by_phase TEXT, judgment_counts TEXT
 );
 ```
@@ -27,33 +28,35 @@ files applied at open; the current version lives in `user_version`.
 
 ## Interface
 
-```ts
-function openDb(dbPath: string): Db;
+```python
+def open_db(db_path: Path) -> Db   # connection + migrations applied
 
-// Game repo
-upsertGames(games: Game[]): void;
-listGames(username: string, filter?): GameRow[];
-getGame(id: string): (Game & { analysis?: GameAnalysis;
-                               opening?: Opening }) | null;
-latestGameTime(username: string): number | null;   // for sync `since`
-gamesNeedingAnalysis(username: string, depth: number): Game[];
-setOpening(gameId: string, opening: Opening): void;
+# Game repo
+def upsert_games(db: Db, games: list[Game]) -> None
+def list_games(db: Db, username: str, filters: GameFilters) -> ...
+def get_game(db: Db, game_id: str) -> GameDetail | None
+def latest_game_time(db: Db, username: str) -> int | None  # sync cut
+def games_needing_analysis(db, username: str, depth: int) -> list[Game]
+def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
-// Analysis repo
-saveAnalysis(a: GameAnalysis): void;
-listAnalyses(username: string): GameAnalysis[];
+# Analysis repo
+def save_analysis(db: Db, analysis: GameAnalysis) -> None
+def list_analyses(db: Db, username: str) -> list[GameAnalysis]
 ```
+
+Pydantic handles the JSON columns (`model_dump_json` /
+`model_validate_json`).
 
 ## Dependencies
 
-- `shared/types.ts` and `better-sqlite3`. Nothing else.
-- Consumed only by the [server](07-server.md). It stores what
+- `chess_coach.domain` and the stdlib. Nothing else.
+- Consumed only by the [API layer](07-server.md). It stores what
   [ingestion](02-ingestion.md), [engine](04-engine.md), and
   [openings](05-openings.md) produce but never imports them.
 
 ## Build plan
 
-1. `openDb` + migration runner + migration 001 (schema above).
+1. `open_db` + migration runner + migration 001 (schema above).
 2. Game repo functions with JSON (de)serialization helpers.
 3. Analysis repo functions.
 4. Tests on a temp-file database covering each function and re-open.

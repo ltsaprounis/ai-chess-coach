@@ -7,8 +7,8 @@ Stockfish, classifies the opening of each game, and emits a structured
 
 ## Stack
 - Frontend: Vite + React + TypeScript — board UI, eval graphs, reports.
-- Backend: Node + TypeScript (Fastify) driving native Stockfish via UCI.
-- Storage: SQLite (better-sqlite3) caching games and analysis results.
+- Backend: Python (FastAPI); python-chess drives native Stockfish (UCI).
+- Storage: SQLite (stdlib sqlite3) caching games and analysis results.
 
 ## Engine
 - Stockfish as a git submodule (official repo), built from source once
@@ -24,7 +24,7 @@ Stockfish, classifies the opening of each game, and emits a structured
 ## Data flow
 1. User enters a chess.com username — the public API needs no auth:
    GET https://api.chess.com/pub/player/{user}/games/archives
-2. Fetch monthly PGN archives, parse with chess.js, store in SQLite.
+2. Fetch monthly PGN archives, parse with python-chess, store in SQLite.
 3. Queue games for analysis: eval every position, flag inaccuracies,
    mistakes, and blunders via centipawn-loss thresholds; ACPL per phase.
 4. Classify each game's opening; aggregate repertoire win/loss stats.
@@ -45,5 +45,5 @@ Stockfish, classifies the opening of each game, and emits a structured
   swappable via config — e.g. Azure AI Foundry for a future demo.
 
 ## Config
-- `coach.config.json`: engine depth (default 16), worker count,
+- `coach.config.yaml`: engine depth (default 16), worker count,
   mistake thresholds, LLM provider and model. Nothing hardcoded.

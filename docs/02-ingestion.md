@@ -21,7 +21,7 @@ No authentication required. Two endpoints:
 Politeness: requests are serial (the API dislikes parallel bursts),
 with retry + backoff on 429 and a `User-Agent` header (requests
 without one get throttled). A 404 on archives means unknown username
-and surfaces as a typed `UnknownUserError`.
+and raises a typed `UnknownUserError`.
 
 Prior art: `~/repos/chess-guess` (`src/etl/ingest.py`, `process.py`)
 uses the same API and informed the normalization rules below.
@@ -43,30 +43,31 @@ uses the same API and informed the normalization rules below.
 
 ## Interface
 
-```ts
-function getArchives(username: string): Promise<string[]>;
+```python
+async def get_archives(username: str) -> list[str]
 
-// Yields one batch per monthly archive, newest month last.
-// `since` (epoch seconds) skips months older than the last sync.
-function syncGames(username: string, since?: number):
-  AsyncGenerator<Game[]>;
+# Yields one batch per monthly archive, newest month last.
+# `since` (epoch seconds) skips months older than the last sync.
+async def sync_games(
+    username: str, since: int | None = None
+) -> AsyncIterator[list[Game]]
 ```
 
-PGN parsing uses `chess.js`: extract SAN move list, result, and
-headers. Games that fail to parse (variants, aborted games) are
-skipped with a warning, never thrown.
+PGN parsing uses python-chess (`chess.pgn.read_game`) to extract the
+SAN move list and headers. Games that fail to parse (malformed or
+aborted) are skipped with a warning, never raised.
 
 ## Dependencies
 
-- `shared/types.ts` (`Game`) and `chess.js`. Nothing else.
-- Consumed by the [server](07-server.md), which pipes yielded batches
-  into [storage](03-storage.md). The `since` value comes from storage
-  via the server — ingestion itself is stateless.
+- `chess_coach.domain` (`Game`), httpx, python-chess. Nothing else.
+- Consumed by the [API layer](07-server.md), which pipes yielded
+  batches into [storage](03-storage.md). The `since` value comes from
+  storage via the API layer — ingestion itself is stateless.
 
 ## Build plan
 
-1. Thin fetch wrapper with retry/backoff and a User-Agent header.
-2. `getArchives` + archive fetcher with response typing.
-3. PGN → `Game` normalizer (id = chess.com UUID from the game URL).
-4. `syncGames` generator combining the above.
+1. Thin httpx wrapper with retry/backoff and a User-Agent header.
+2. `get_archives` + archive fetcher with pydantic response models.
+3. Raw game → `Game` normalizer implementing the rules above.
+4. `sync_games` async generator combining the above.
 5. Tests against recorded JSON fixtures (no live network in CI).

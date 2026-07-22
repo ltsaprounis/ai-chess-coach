@@ -6,35 +6,36 @@ no other component reads files or environment variables.
 
 ## Interface
 
-```ts
-function loadConfig(path?: string): AppConfig; // default: coach.config.json
+```python
+def load_config(path: Path = Path("coach.config.yaml")) -> AppConfig
 
-type AppConfig = {
-  engine: { depth: number; workers: number };        // depth default 16
-  thresholds: { inaccuracy: number; mistake: number; // centipawn loss
-                blunder: number };                   // 50 / 100 / 200
-  llm: { provider: 'anthropic' | 'azure-foundry';
-         model: string; maxTokens: number };
-  server: { port: number };
-  storage: { dbPath: string };
-};
+class AppConfig(BaseModel):
+    engine: EngineConfig        # depth=16, workers=2
+    thresholds: Thresholds      # centipawn loss: inaccuracy=50,
+                                # mistake=100, blunder=200
+    llm: LlmConfig              # provider: "anthropic" |
+                                # "azure-foundry"; model; max_tokens
+    server: ServerConfig        # port
+    storage: StorageConfig      # db_path
+    anthropic_api_key: str | None   # from env, never from the file
 ```
 
-Secrets are read from the environment, not the file: `ANTHROPIC_API_KEY`
-is required when `llm.provider` is `anthropic`. `loadConfig` fails fast
-with a readable error when the file is invalid or a required secret is
-missing for the selected provider.
+Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
+is required when `llm.provider` is `anthropic`. `load_config` fails
+fast with a readable error when the file is invalid or a required
+secret is missing for the selected provider.
 
 ## Dependencies
 
-- None on other components. Uses `zod` for schema validation.
-- Consumed by the [server](07-server.md), which injects individual
+- None on other components. Uses pydantic v2 (+ its YAML loading via
+  `yaml.safe_load` → model validation).
+- Consumed by the [API layer](07-server.md), which injects individual
   values into [engine](04-engine.md) and [coach](06-coach.md). Those
   components receive plain arguments and never import this module.
 
 ## Build plan
 
-1. Define the zod schema with defaults so an empty `{}` file works.
-2. Implement `loadConfig` (read file, parse, validate, merge env).
-3. Ship a commented `coach.config.example.json` in the repo root.
+1. Pydantic models with defaults so an empty `{}` file works.
+2. `load_config` (read YAML, validate, merge env secrets).
+3. Ship a commented `coach.config.example.yaml` in the repo root.
 4. Unit tests: defaults, invalid values, missing API key error.
