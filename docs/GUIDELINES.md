@@ -108,8 +108,10 @@ Boundary discipline:
 - Tests target each component's public `__init__` surface, not
   internals.
 
-## CI gates (all required)
+## CI gates (GitHub Actions, all required)
 
+CI runs on GitHub Actions (`.github/workflows/ci.yml`), one job per
+surface:
 Backend: `uv sync` → `ruff check` + `ruff format --check` →
 `pyright` → `lint-imports` → `pytest`.
 Frontend: `pnpm install` → Biome check → `tsc --noEmit` → Vitest →

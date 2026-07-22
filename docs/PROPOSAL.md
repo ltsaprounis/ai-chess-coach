@@ -30,7 +30,8 @@ Build plans: [README.md](README.md) and the per-component docs.
    mistakes, and blunders via centipawn-loss thresholds; ACPL per phase.
 4. Aggregate repertoire win/loss stats and weakness themes per player.
 5. Build the coach prompt (profile, weaknesses, worst openings,
-   critical FENs) and send it to the LLM; copy button for manual use.
+   critical FENs); the LLM provider interface (Claude API/SDK first,
+   any LLM swappable) fetches the advice; copy button for manual use.
 
 ## Milestones
 1. Repo scaffold; submodules added; Stockfish builds and answers UCI.
@@ -40,9 +41,8 @@ Build plans: [README.md](README.md) and the per-component docs.
 5. Coach prompt generator and export.
 
 ## Coaching LLM
-- v1: Claude API (Anthropic SDK, claude-opus-4-8) behind a provider
-  interface (`complete(prompt) -> text`); other APIs — e.g. an
-  Azure AI Foundry demo — swap in via config.
+- Anthropic SDK v1 (claude-opus-4-8) behind `complete(prompt) -> text`;
+  other providers (e.g. an Azure AI Foundry demo) swap in via config.
 
 ## Config
 - `coach.config.yaml`: engine depth (default 16), worker count,
