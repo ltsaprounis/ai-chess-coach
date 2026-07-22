@@ -1,0 +1,23 @@
+# AI Chess Coach configuration. Copy to coach.config.yaml and edit.
+# Every key is optional — omitted keys use the defaults shown here.
+# Secrets never go in this file: export ANTHROPIC_API_KEY instead.
+
+engine:
+  depth: 16        # Stockfish search depth per position
+  workers: 2       # parallel engine processes
+
+thresholds:        # centipawn loss per judgment
+  inaccuracy: 50
+  mistake: 100
+  blunder: 200
+
+llm:
+  provider: anthropic   # or azure-foundry (future)
+  model: claude-opus-4-8
+  max_tokens: 4096
+
+server:
+  port: 8000
+
+storage:
+  db_path: coach.sqlite3
