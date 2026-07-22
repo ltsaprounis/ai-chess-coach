@@ -8,9 +8,16 @@ Db = sqlite3.Connection
 
 
 def open_db(db_path: Path) -> Db:
-    """Open (creating if needed) the database with migrations applied."""
+    """Open (creating if needed) the database with migrations applied.
+
+    The one connection is shared across FastAPI's worker threads:
+    safe only because CPython's sqlite3 is built serialized
+    (threadsafety 3) — SQLite then locks around every call.
+    """
+    if sqlite3.threadsafety != 3:
+        raise RuntimeError("sqlite3 must be built with serialized threading")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(db_path)
+    db = sqlite3.connect(db_path, check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")

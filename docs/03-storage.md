@@ -3,7 +3,10 @@
 Persists games, analyses, and opening classifications so nothing is
 fetched or analyzed twice. Plain repository functions over the
 stdlib `sqlite3` module (WAL mode, synchronous) — no ORM. Storage is
-deliberately sync; FastAPI runs sync code in its threadpool.
+deliberately sync; FastAPI runs sync code in its threadpool, so the
+shared connection is opened with `check_same_thread=False` — safe
+only because CPython's sqlite3 is serialized (`threadsafety == 3`,
+asserted at open).
 
 ## Schema
 

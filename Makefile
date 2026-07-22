@@ -11,3 +11,8 @@ engine:
 check:
 	cd backend && uv run ruff check . && uv run ruff format --check . \
 		&& uv run pyright && uv run lint-imports && uv run pytest
+
+.PHONY: dev-api
+dev-api:
+	cd backend && uv run uvicorn --factory chess_coach.api:create_app \
+		--reload --port 8000
