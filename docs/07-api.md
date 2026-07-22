@@ -47,7 +47,9 @@ unexpected to 500.
 - Sync pipeline per batch: `upsert_games` → `classify` each →
   `set_opening`. Openings classification is cheap; do it at ingest.
 - Analysis flow: pool task resolves → `save_analysis`. Progress
-  events fan out to open SSE connections (sse-starlette).
+  events fan out to open SSE connections (sse-starlette). A missing
+  engine binary is not fatal at startup — analyze returns 503 with a
+  `make engine` hint; one run per player at a time (409 otherwise).
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report.
 

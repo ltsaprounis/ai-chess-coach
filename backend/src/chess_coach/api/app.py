@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chess_coach.api.routes import router
+from chess_coach.api.runs import AnalysisRun
 from chess_coach.config import AppConfig, load_config
+from chess_coach.engine import create_pool
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.openings import load_opening_book
 from chess_coach.storage import open_db
@@ -17,6 +19,7 @@ from chess_coach.storage import open_db
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _WEB_DIST = _REPO_ROOT / "web" / "dist"
 _DEFAULT_BOOK_DIR = _REPO_ROOT / "vendor" / "chess-openings"
+_DEFAULT_ENGINE_BIN = _REPO_ROOT / "engines" / "stockfish" / "src" / "stockfish"
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -28,7 +31,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.cfg = cfg
         app.state.db = open_db(cfg.storage.db_path)
         app.state.book = load_opening_book(cfg.openings.book_dir or _DEFAULT_BOOK_DIR)
+        engine_bin = cfg.engine.bin_path or _DEFAULT_ENGINE_BIN
+        # No binary is not fatal: everything but analysis still works.
+        app.state.pool = (
+            await create_pool(engine_bin, cfg.engine.workers)
+            if engine_bin.exists()
+            else None
+        )
+        runs: dict[str, AnalysisRun] = {}
+        app.state.runs = runs
         yield
+        for run in runs.values():
+            if run.task is not None:
+                run.task.cancel()
+        if app.state.pool is not None:
+            await app.state.pool.close()
         app.state.db.close()
 
     app = FastAPI(title="AI Chess Coach", version="0.1.0", lifespan=lifespan)

@@ -20,6 +20,7 @@ class ConfigError(Exception):
 class EngineConfig(BaseModel):
     depth: int = 16
     workers: int = 2
+    bin_path: Path | None = None  # None -> engines/stockfish/src/stockfish
 
 
 class ServerConfig(BaseModel):

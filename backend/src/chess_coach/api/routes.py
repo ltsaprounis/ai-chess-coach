@@ -1,24 +1,42 @@
 """HTTP routes (docs/07-api.md)."""
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
-from chess_coach.domain import GameDetail, GameSummary, OpeningStats, Result, TimeClass
+from chess_coach.api.runs import AnalysisRun
+from chess_coach.config import AppConfig
+from chess_coach.domain import (
+    Game,
+    GameDetail,
+    GameSummary,
+    OpeningStats,
+    Result,
+    TimeClass,
+)
+from chess_coach.engine import AnalysisPool, EngineOptions, Progress
 from chess_coach.ingestion import sync_games
 from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
     Db,
     GameFilters,
     games_missing_opening,
+    games_needing_analysis,
     get_game,
     latest_game_time,
     list_games,
     opening_stats,
+    save_analysis,
     set_opening,
     upsert_games,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -31,8 +49,23 @@ def _book(request: Request) -> OpeningBook:
     return cast(OpeningBook, request.app.state.book)
 
 
+def _cfg(request: Request) -> AppConfig:
+    return cast(AppConfig, request.app.state.cfg)
+
+
+def _pool(request: Request) -> AnalysisPool | None:
+    return cast(AnalysisPool | None, request.app.state.pool)
+
+
+def _runs(request: Request) -> dict[str, AnalysisRun]:
+    return cast(dict[str, AnalysisRun], request.app.state.runs)
+
+
 DbDep = Annotated[Db, Depends(_db)]
 BookDep = Annotated[OpeningBook, Depends(_book)]
+CfgDep = Annotated[AppConfig, Depends(_cfg)]
+PoolDep = Annotated[AnalysisPool | None, Depends(_pool)]
+RunsDep = Annotated[dict[str, AnalysisRun], Depends(_runs)]
 
 
 class SyncResult(BaseModel):
@@ -91,3 +124,107 @@ def game_detail(game_id: str, db: DbDep) -> GameDetail:
     if game is None:
         raise HTTPException(status_code=404, detail=f"unknown game: {game_id}")
     return game
+
+
+class AnalyzeRequest(BaseModel):
+    game_ids: list[str] | None = None
+
+
+class AnalyzeResult(BaseModel):
+    queued: int
+
+
+@router.post("/players/{username}/analyze", status_code=202)
+async def analyze_player(
+    username: str,
+    db: DbDep,
+    pool: PoolDep,
+    cfg: CfgDep,
+    runs: RunsDep,
+    body: AnalyzeRequest | None = None,
+) -> AnalyzeResult:
+    """Queue engine analysis; follow progress via the SSE endpoint."""
+    if pool is None:
+        raise HTTPException(
+            status_code=503,
+            detail="engine binary not found — build it with `make engine`",
+        )
+    user = username.lower()
+    active = runs.get(user)
+    if active is not None and not active.finished:
+        raise HTTPException(
+            status_code=409, detail="analysis already running for this player"
+        )
+
+    if body is not None and body.game_ids:
+        games: list[Game] = [
+            game
+            for game_id in body.game_ids
+            if (game := get_game(db, game_id)) is not None
+        ]
+    else:
+        games = games_needing_analysis(db, user, cfg.engine.depth)
+
+    run = AnalysisRun(len(games))
+    runs[user] = run
+    opts = EngineOptions(depth=cfg.engine.depth, thresholds=cfg.thresholds)
+    run.task = asyncio.create_task(_run_analysis(db, pool, run, games, opts))
+    return AnalyzeResult(queued=len(games))
+
+
+async def _run_analysis(
+    db: Db,
+    pool: AnalysisPool,
+    run: AnalysisRun,
+    games: list[Game],
+    opts: EngineOptions,
+) -> None:
+    async def analyze_one(game: Game) -> None:
+        def on_progress(progress: Progress) -> None:
+            run.publish(run.event("progress", progress))
+
+        analysis = await pool.analyze_game(game, opts, on_progress)
+        save_analysis(db, analysis)
+        run.games_done += 1
+        run.publish(run.event("game_done"))
+
+    results = await asyncio.gather(
+        *(analyze_one(game) for game in games), return_exceptions=True
+    )
+    failures = [r for r in results if isinstance(r, BaseException)]
+    run.finished = True
+    if failures:
+        logger.error(
+            "analysis run: %d of %d game(s) failed: %r",
+            len(failures),
+            len(games),
+            failures[0],
+        )
+        run.publish(run.event("run_failed"))
+    else:
+        run.publish(run.event("run_done"))
+
+
+@router.get("/players/{username}/analyze/progress")
+async def analyze_progress(username: str, runs: RunsDep) -> EventSourceResponse:
+    """SSE stream for the player's current analysis run."""
+    run = runs.get(username.lower())
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"no analysis run for {username}")
+    queue = run.subscribe()
+
+    async def stream() -> AsyncIterator[dict[str, str]]:
+        try:
+            snapshot = run.event("snapshot")
+            yield {"event": snapshot.type, "data": snapshot.model_dump_json()}
+            if run.finished:
+                return
+            while True:
+                event = await queue.get()
+                yield {"event": event.type, "data": event.model_dump_json()}
+                if event.finished:
+                    return
+        finally:
+            run.unsubscribe(queue)
+
+    return EventSourceResponse(stream())
