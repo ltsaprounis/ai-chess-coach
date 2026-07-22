@@ -113,6 +113,7 @@ def get_game(db: Db, game_id: str) -> GameDetail | None:
     row = db.execute(
         """
         SELECT g.*, a.depth AS a_depth, a.evals AS a_evals,
+               a.overall_acpl AS a_overall,
                a.acpl_by_phase AS a_acpl, a.judgment_counts AS a_counts
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE g.id = ?
@@ -170,14 +171,15 @@ def opening_stats(db: Db, username: str) -> list[OpeningStats]:
     """
     rows = db.execute(
         """
-        SELECT opening_eco AS eco, opening_name AS name,
+        SELECT g.opening_eco AS eco, g.opening_name AS name,
                COUNT(*) AS games,
-               SUM(result = 'win') AS wins,
-               SUM(result = 'loss') AS losses,
-               SUM(result = 'draw') AS draws
-        FROM games
-        WHERE username = ? AND opening_eco IS NOT NULL
-        GROUP BY opening_eco, opening_name
+               SUM(g.result = 'win') AS wins,
+               SUM(g.result = 'loss') AS losses,
+               SUM(g.result = 'draw') AS draws,
+               AVG(a.overall_acpl) AS avg_cp_loss
+        FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
+        WHERE g.username = ? AND g.opening_eco IS NOT NULL
+        GROUP BY g.opening_eco, g.opening_name
         ORDER BY games DESC, eco
         """,
         (username,),
@@ -190,6 +192,9 @@ def opening_stats(db: Db, username: str) -> list[OpeningStats]:
             wins=row["wins"],
             losses=row["losses"],
             draws=row["draws"],
+            avg_cp_loss=(
+                None if row["avg_cp_loss"] is None else round(row["avg_cp_loss"], 1)
+            ),
         )
         for row in rows
     ]
@@ -237,6 +242,7 @@ def _analysis_from_row(row: sqlite3.Row) -> GameAnalysis | None:
         game_id=row["id"],
         depth=row["a_depth"],
         evals_json=row["a_evals"],
+        overall_acpl=row["a_overall"],
         acpl_json=row["a_acpl"],
         counts_json=row["a_counts"],
     )

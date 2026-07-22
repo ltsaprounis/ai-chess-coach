@@ -34,9 +34,9 @@ async def create_pool(bin_path: Path, workers: int) -> AnalysisPool
 
 class AnalysisPool:
     async def analyze_game(
-        self, game: Game, opts: EngineOptions
+        self, game: Game, opts: EngineOptions,
+        on_progress: Callable[[Progress], None] | None = None,
     ) -> GameAnalysis
-    def subscribe(self, cb: Callable[[Progress], None]) -> None
     async def close(self) -> None    # quits engines cleanly
 
 class Progress(BaseModel):
@@ -57,6 +57,9 @@ Internally each worker holds one engine from
   (`score.score(mate_score=10000)`).
 - Judgment from injected thresholds (see [config](01-config.md)):
   loss < inaccuracy → best/good, then inaccuracy/mistake/blunder.
+- `evals` covers both sides (the eval graph needs them); ACPL
+  (overall + per phase) and judgment counts cover the player's moves
+  only.
 - Phases: opening = first 10 full moves (refined later by the actual
   book-exit ply), endgame = both sides ≤ 13 points of material,
   middlegame = the rest. ACPL = mean cp_loss of the player's moves in

@@ -60,6 +60,7 @@ class GameAnalysis(BaseModel):
     game_id: str
     depth: int
     evals: list[MoveEval]
+    overall_acpl: float  # mean cp loss of the player's moves
     acpl_by_phase: dict[Phase, float]
     judgment_counts: dict[Judgment, int]
 

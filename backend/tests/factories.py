@@ -45,6 +45,7 @@ def make_analysis(game_id: str = "game-1", depth: int = 16) -> GameAnalysis:
                 judgment="good",
             ),
         ],
+        overall_acpl=2.5,
         acpl_by_phase={"opening": 2.5, "middlegame": 0.0, "endgame": 0.0},
         judgment_counts={
             "best": 1,

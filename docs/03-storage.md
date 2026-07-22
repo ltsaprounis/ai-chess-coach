@@ -22,6 +22,7 @@ games (
 analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),
   depth INTEGER, evals TEXT,         -- JSON list[MoveEval]
+  overall_acpl REAL,                 -- feeds opening_stats averages
   acpl_by_phase TEXT, judgment_counts TEXT
 );
 ```

@@ -11,11 +11,13 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
         db.execute(
             """
             INSERT INTO analyses
-                (game_id, depth, evals, acpl_by_phase, judgment_counts)
-            VALUES (?, ?, ?, ?, ?)
+                (game_id, depth, evals, overall_acpl,
+                 acpl_by_phase, judgment_counts)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (game_id) DO UPDATE SET
                 depth = excluded.depth,
                 evals = excluded.evals,
+                overall_acpl = excluded.overall_acpl,
                 acpl_by_phase = excluded.acpl_by_phase,
                 judgment_counts = excluded.judgment_counts
             """,
@@ -23,6 +25,7 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
                 analysis.game_id,
                 analysis.depth,
                 json.dumps([e.model_dump() for e in analysis.evals]),
+                analysis.overall_acpl,
                 json.dumps(analysis.acpl_by_phase),
                 json.dumps(analysis.judgment_counts),
             ),
@@ -32,7 +35,8 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
 def list_analyses(db: Db, username: str) -> list[GameAnalysis]:
     rows = db.execute(
         """
-        SELECT a.game_id, a.depth, a.evals, a.acpl_by_phase, a.judgment_counts
+        SELECT a.game_id, a.depth, a.evals, a.overall_acpl,
+               a.acpl_by_phase, a.judgment_counts
         FROM analyses AS a JOIN games AS g ON g.id = a.game_id
         WHERE g.username = ?
         """,
@@ -43,6 +47,7 @@ def list_analyses(db: Db, username: str) -> list[GameAnalysis]:
             game_id=row["game_id"],
             depth=row["depth"],
             evals_json=row["evals"],
+            overall_acpl=row["overall_acpl"],
             acpl_json=row["acpl_by_phase"],
             counts_json=row["judgment_counts"],
         )
@@ -51,13 +56,19 @@ def list_analyses(db: Db, username: str) -> list[GameAnalysis]:
 
 
 def analysis_from_json(
-    game_id: str, depth: int, evals_json: str, acpl_json: str, counts_json: str
+    game_id: str,
+    depth: int,
+    evals_json: str,
+    overall_acpl: float,
+    acpl_json: str,
+    counts_json: str,
 ) -> GameAnalysis:
     return GameAnalysis.model_validate(
         {
             "game_id": game_id,
             "depth": depth,
             "evals": json.loads(evals_json),
+            "overall_acpl": overall_acpl,
             "acpl_by_phase": json.loads(acpl_json),
             "judgment_counts": json.loads(counts_json),
         }

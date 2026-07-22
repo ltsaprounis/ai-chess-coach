@@ -96,6 +96,7 @@ class MoveEval(BaseModel):
 
 class GameAnalysis(BaseModel):
     game_id: str; depth: int; evals: list[MoveEval]
+    overall_acpl: float                   # player's moves only
     acpl_by_phase: dict[Phase, float]     # opening/middlegame/endgame
     judgment_counts: dict[Judgment, int]
 

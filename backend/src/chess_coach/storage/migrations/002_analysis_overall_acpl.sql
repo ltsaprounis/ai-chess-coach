@@ -1,0 +1,1 @@
+ALTER TABLE analyses ADD COLUMN overall_acpl REAL NOT NULL DEFAULT 0;
