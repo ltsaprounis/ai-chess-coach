@@ -1,0 +1,6 @@
+[submodule "engines/stockfish"]
+	path = engines/stockfish
+	url = https://github.com/official-stockfish/Stockfish.git
+[submodule "vendor/chess-openings"]
+	path = vendor/chess-openings
+	url = https://github.com/lichess-org/chess-openings.git
