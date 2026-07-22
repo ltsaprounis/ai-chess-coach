@@ -8,7 +8,7 @@ interface. This is the only component that talks to an LLM API.
 
 ```python
 # Pure aggregation — input assembled by the API layer from storage.
-def build_report(games: list[AnalyzedGame]) -> PlayerReport
+def build_report(username: str, games: list[AnalyzedGame]) -> PlayerReport
 # AnalyzedGame: domain composite = Game + GameAnalysis + Opening|None
 
 # Deterministic markdown template, also shown/copyable in the UI.
@@ -36,23 +36,26 @@ training advice.
 
 ## Providers
 
-- **v1 — `AnthropicProvider`**: the `anthropic` package
-  (`AsyncAnthropic`), model from config (default `claude-opus-4-8`),
-  streaming via `client.messages.stream(...)` +
-  `get_final_message()`; API key injected, never read from
-  `os.environ` here (see [config](01-config.md)).
-- **Later — `azure-foundry`**: the planned Azure AI Foundry demo.
-  The Anthropic SDK's `AnthropicFoundry` client covers Claude-on-
-  Foundry; other Foundry-hosted models would be one new class
-  implementing `CoachProvider`. Nothing outside `create_provider`
-  changes either way.
+- **v1 — `ClaudeAgentSdkProvider`** (default): a one-shot
+  `claude_agent_sdk.query(...)` with `max_turns=1`. Authentication
+  and billing ride the local Claude Code login — **no API key
+  anywhere**; requires the `claude` CLI installed and logged in.
+  Errors (CLI missing, run failure, empty output) surface as
+  `CoachProviderError`.
+- **Planned — `anthropic`** (the API SDK; needs `ANTHROPIC_API_KEY`)
+  and **`azure-foundry`** (the Azure AI Foundry demo, via the
+  Anthropic SDK's `AnthropicFoundry` client). Each is one new class
+  behind `create_provider`; selecting one before it ships raises a
+  clear `CoachProviderError`.
 
 ## Dependencies
 
-- `chess_coach.domain`; the `anthropic` SDK for the v1 provider.
+- `chess_coach.domain`; `claude-agent-sdk` for the v1 provider;
+  python-chess (replaying moves to FEN for critical positions).
 - Consumed by the [API layer](07-api.md), which assembles the
-  input from [storage](03-storage.md) and injects `cfg.llm` + the
-  API key. No imports of storage, engine, or openings.
+  input from [storage](03-storage.md) and injects `cfg.llm` (+ the
+  API key once the anthropic provider lands). No imports of
+  storage, engine, or openings.
 
 ## Build plan
 

@@ -52,9 +52,16 @@ def test_secret_in_file_is_rejected(tmp_path: Path) -> None:
         load_config(path, env=KEY_ENV)
 
 
-def test_missing_api_key_for_anthropic_provider(tmp_path: Path) -> None:
+def test_default_provider_needs_no_api_key(tmp_path: Path) -> None:
+    config = load_config(tmp_path / "nope.yaml", env={})
+    assert config.llm.provider == "claude-agent-sdk"
+    assert config.anthropic_api_key is None
+
+
+def test_anthropic_provider_requires_api_key(tmp_path: Path) -> None:
+    path = write(tmp_path, "llm:\n  provider: anthropic\n")
     with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
-        load_config(tmp_path / "nope.yaml", env={})
+        load_config(path, env={})
 
 
 def test_example_config_in_repo_root_is_valid() -> None:

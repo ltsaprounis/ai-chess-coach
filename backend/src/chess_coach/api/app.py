@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chess_coach.api.routes import router
 from chess_coach.api.runs import AnalysisRun
+from chess_coach.coach import create_provider
 from chess_coach.config import AppConfig, load_config
 from chess_coach.engine import create_pool
 from chess_coach.ingestion import UnknownUserError
@@ -38,6 +39,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if engine_bin.exists()
             else None
         )
+        app.state.provider = create_provider(cfg.llm, cfg.anthropic_api_key)
         runs: dict[str, AnalysisRun] = {}
         app.state.runs = runs
         yield

@@ -29,9 +29,11 @@ and [coach](06-coach.md) consume them too. The other sub-models
 (`EngineConfig`, `ServerConfig`, `StorageConfig`) are config-local.
 
 Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
-is required when `llm.provider` is `anthropic`. `load_config` fails
-fast with a readable error when the file is invalid or a required
-secret is missing for the selected provider.
+is required only when `llm.provider` is `anthropic`. The default
+provider (`claude-agent-sdk`) authenticates via the local Claude
+Code login, so the default setup needs no environment at all.
+`load_config` fails fast with a readable error when the file is
+invalid or a required secret is missing for the selected provider.
 
 ## Dependencies
 

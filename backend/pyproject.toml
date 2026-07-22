@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "chess.com game analysis with Stockfish and LLM coaching"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.40",
+    "claude-agent-sdk>=0.1",
     "chess>=1.11",
     "fastapi>=0.115",
     "httpx>=0.28",

@@ -41,8 +41,8 @@ Build plans: [README.md](README.md) and the per-component docs.
 5. Coach prompt generator and export.
 
 ## Coaching LLM
-- Anthropic SDK v1 (claude-opus-4-8) behind `complete(prompt) -> text`;
-  other providers (e.g. an Azure AI Foundry demo) swap in via config.
+- Claude Agent SDK v1 behind `complete(prompt) -> text`: Claude Code
+  login, no API keys; Anthropic API / Azure Foundry swap in via config.
 
 ## Config
 - `coach.config.yaml`: engine depth (default 16), worker count,

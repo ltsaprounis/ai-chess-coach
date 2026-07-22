@@ -10,12 +10,19 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from chess_coach.api.runs import AnalysisRun
+from chess_coach.coach import (
+    CoachProvider,
+    CoachProviderError,
+    build_report,
+    render_prompt,
+)
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
     Game,
     GameDetail,
     GameSummary,
     OpeningStats,
+    PlayerReport,
     Result,
     TimeClass,
 )
@@ -29,6 +36,7 @@ from chess_coach.storage import (
     games_needing_analysis,
     get_game,
     latest_game_time,
+    list_analyzed_games,
     list_games,
     opening_stats,
     save_analysis,
@@ -61,11 +69,16 @@ def _runs(request: Request) -> dict[str, AnalysisRun]:
     return cast(dict[str, AnalysisRun], request.app.state.runs)
 
 
+def _provider(request: Request) -> CoachProvider:
+    return cast(CoachProvider, request.app.state.provider)
+
+
 DbDep = Annotated[Db, Depends(_db)]
 BookDep = Annotated[OpeningBook, Depends(_book)]
 CfgDep = Annotated[AppConfig, Depends(_cfg)]
 PoolDep = Annotated[AnalysisPool | None, Depends(_pool)]
 RunsDep = Annotated[dict[str, AnalysisRun], Depends(_runs)]
+ProviderDep = Annotated[CoachProvider, Depends(_provider)]
 
 
 class SyncResult(BaseModel):
@@ -228,3 +241,35 @@ async def analyze_progress(username: str, runs: RunsDep) -> EventSourceResponse:
             run.unsubscribe(queue)
 
     return EventSourceResponse(stream())
+
+
+class CoachResponse(BaseModel):
+    prompt: str
+    advice: str
+
+
+@router.get("/players/{username}/report")
+def player_report(username: str, db: DbDep) -> PlayerReport:
+    """Aggregated stats over the player's analyzed games."""
+    user = username.lower()
+    return build_report(user, list_analyzed_games(db, user))
+
+
+@router.post("/players/{username}/coach")
+async def coach_player(
+    username: str, db: DbDep, provider: ProviderDep
+) -> CoachResponse:
+    """Build the report, render the prompt, and ask the coach LLM."""
+    user = username.lower()
+    report = build_report(user, list_analyzed_games(db, user))
+    if report.games_analyzed == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="no analyzed games yet — sync and analyze first",
+        )
+    prompt = render_prompt(report)
+    try:
+        advice = await provider.complete(prompt)
+    except CoachProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return CoachResponse(prompt=prompt, advice=advice)

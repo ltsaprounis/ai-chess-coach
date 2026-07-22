@@ -13,7 +13,7 @@ Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
 Judgment = Literal["best", "good", "inaccuracy", "mistake", "blunder"]
 Phase = Literal["opening", "middlegame", "endgame"]
-LlmProvider = Literal["anthropic", "azure-foundry"]
+LlmProvider = Literal["claude-agent-sdk", "anthropic", "azure-foundry"]
 
 
 class Thresholds(BaseModel):
@@ -25,7 +25,8 @@ class Thresholds(BaseModel):
 
 
 class LlmConfig(BaseModel):
-    provider: LlmProvider = "anthropic"
+    # claude-agent-sdk rides the local Claude Code login: no API key.
+    provider: LlmProvider = "claude-agent-sdk"
     model: str = "claude-opus-4-8"
     max_tokens: int = 4096
 

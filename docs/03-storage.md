@@ -43,6 +43,7 @@ def get_game(db: Db, game_id: str) -> GameDetail | None
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int) -> list[Game]
 def games_missing_opening(db: Db, username: str) -> list[Game]
+def list_analyzed_games(db: Db, username: str) -> list[AnalyzedGame]
 def opening_stats(db: Db, username: str) -> list[OpeningStats]
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 

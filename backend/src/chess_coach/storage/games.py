@@ -6,6 +6,7 @@ import sqlite3
 from pydantic import BaseModel
 
 from chess_coach.domain import (
+    AnalyzedGame,
     Game,
     GameAnalysis,
     GameDetail,
@@ -153,6 +154,31 @@ def games_needing_analysis(db: Db, username: str, depth: int) -> list[Game]:
         (username, depth),
     ).fetchall()
     return [Game.model_validate(_game_fields(row)) for row in rows]
+
+
+def list_analyzed_games(db: Db, username: str) -> list[AnalyzedGame]:
+    """Games with analyses (plus openings) — the coach report input."""
+    rows = db.execute(
+        """
+        SELECT g.*, a.depth AS a_depth, a.evals AS a_evals,
+               a.overall_acpl AS a_overall,
+               a.acpl_by_phase AS a_acpl, a.judgment_counts AS a_counts
+        FROM games AS g JOIN analyses AS a ON a.game_id = g.id
+        WHERE g.username = ?
+        ORDER BY g.end_time DESC
+        """,
+        (username,),
+    ).fetchall()
+    return [
+        AnalyzedGame.model_validate(
+            {
+                **_game_fields(row),
+                "opening": _opening_from_row(row),
+                "analysis": _analysis_from_row(row),
+            }
+        )
+        for row in rows
+    ]
 
 
 def games_missing_opening(db: Db, username: str) -> list[Game]:

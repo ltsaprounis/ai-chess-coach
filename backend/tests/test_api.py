@@ -26,6 +26,17 @@ from tests.http import get, post
 TESTDATA = Path(__file__).parent / "testdata"
 
 
+class StubProvider:
+    """Canned coach advice; records the prompt it was given."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return "Practice rook endgames."
+
+
 class StubPool:
     """Instant analyses with one progress event per game."""
 
@@ -56,7 +67,11 @@ def client(
     async def fake_create_pool(bin_path: Path, workers: int) -> StubPool:
         return StubPool()
 
+    def fake_create_provider(cfg: object, api_key: object = None) -> StubProvider:
+        return StubProvider()
+
     monkeypatch.setattr(app_module, "create_pool", fake_create_pool)
+    monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
     fake_bin = tmp_path / "stockfish"
     fake_bin.touch()
 
@@ -262,6 +277,35 @@ def test_analyze_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> 
 def test_progress_stream_404s_without_a_run(client: TestClient) -> None:
     response = get(client, "/api/players/testuser/analyze/progress")
     assert response.status_code == 404
+
+
+def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> None:
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1), make_game(id="g-2", end_time=2)],
+        analyzed={"g-1", "g-2"},
+    )
+
+    report: Any = get(client, "/api/players/TestUser/report").json()
+    assert report["username"] == "testuser"
+    assert report["games_analyzed"] == 2
+    assert report["overall_acpl"] == 2.5
+
+
+def test_coach_returns_prompt_and_advice(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    body: Any = post(client, "/api/players/testuser/coach").json()
+    assert body["advice"] == "Practice rook endgames."
+    assert "## Player profile: testuser" in body["prompt"]
+
+
+def test_coach_409s_without_analyzed_games(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")])  # stored but unanalyzed
+
+    response = post(client, "/api/players/testuser/coach")
+    assert response.status_code == 409
+    assert "analyze first" in response.json()["error"]["message"]
 
 
 def test_unknown_user_maps_to_404_envelope(
