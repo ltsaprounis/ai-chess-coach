@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Local data and secrets
+coach.config.yaml
+*.sqlite3
+*.db
+.env
+
+# OS
+.DS_Store
