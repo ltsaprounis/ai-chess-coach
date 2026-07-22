@@ -118,6 +118,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Report
+         * @description Aggregated stats over the player's analyzed games.
+         */
+        get: operations["player_report_api_players__username__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{username}/coach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Coach Player
+         * @description Build the report, render the prompt, and ask the coach LLM.
+         */
+        post: operations["coach_player_api_players__username__coach_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -131,6 +171,26 @@ export interface components {
         AnalyzeResult: {
             /** Queued */
             queued: number;
+        };
+        /** CoachResponse */
+        CoachResponse: {
+            /** Prompt */
+            prompt: string;
+            /** Advice */
+            advice: string;
+        };
+        /** CriticalPosition */
+        CriticalPosition: {
+            /** Fen */
+            fen: string;
+            /** Played */
+            played: string;
+            /** Best */
+            best: string;
+            /** Cp Loss */
+            cp_loss: number;
+            /** Game Id */
+            game_id: string;
         };
         /** GameAnalysis */
         GameAnalysis: {
@@ -285,6 +345,27 @@ export interface components {
             draws: number;
             /** Avg Cp Loss */
             avg_cp_loss?: number | null;
+        };
+        /** PlayerReport */
+        PlayerReport: {
+            /** Username */
+            username: string;
+            /** Games Analyzed */
+            games_analyzed: number;
+            /** Overall Acpl */
+            overall_acpl: number;
+            /** Acpl By Phase */
+            acpl_by_phase: {
+                [key: string]: number;
+            };
+            /** Judgment Counts */
+            judgment_counts: {
+                [key: string]: number;
+            };
+            /** Openings */
+            openings: components["schemas"]["OpeningStats"][];
+            /** Critical Positions */
+            critical_positions: components["schemas"]["CriticalPosition"][];
         };
         /** SyncResult */
         SyncResult: {
@@ -497,6 +578,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_report_api_players__username__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coach_player_api_players__username__coach_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachResponse"];
                 };
             };
             /** @description Validation Error */

@@ -36,6 +36,8 @@ export default function Games() {
         <Link to="/">← change player</Link>
         {" · "}
         <Link to={`/players/${username}/dashboard`}>dashboard</Link>
+        {" · "}
+        <Link to={`/players/${username}/coach`}>coach</Link>
       </p>
       <h1>{username}'s games</h1>
 

@@ -159,3 +159,20 @@ td {
   width: 16rem;
   margin-right: 0.5rem;
 }
+
+.advice {
+  max-width: 48rem;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.5rem;
+}
+
+.prompt {
+  max-width: 48rem;
+  overflow-x: auto;
+  padding: 1rem;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: 0.5rem;
+  white-space: pre-wrap;
+}

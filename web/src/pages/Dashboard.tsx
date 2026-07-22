@@ -9,6 +9,10 @@ export default function Dashboard() {
     queryKey: ["openings", username],
     queryFn: () => api.openings(username),
   });
+  const report = useQuery({
+    queryKey: ["report", username],
+    queryFn: () => api.report(username),
+  });
 
   return (
     <main className="page">
@@ -16,8 +20,24 @@ export default function Dashboard() {
         <Link to="/">← change player</Link>
         {" · "}
         <Link to={`/players/${username}/games`}>games</Link>
+        {" · "}
+        <Link to={`/players/${username}/coach`}>coach</Link>
       </p>
       <h1>{username}'s repertoire</h1>
+
+      {report.isSuccess && report.data.games_analyzed > 0 && (
+        <p>
+          {report.data.games_analyzed} games analyzed · ACPL{" "}
+          {report.data.overall_acpl} (opening{" "}
+          {report.data.acpl_by_phase.opening ?? "—"}, middlegame{" "}
+          {report.data.acpl_by_phase.middlegame ?? "—"}, endgame{" "}
+          {report.data.acpl_by_phase.endgame ?? "—"}) · blunders{" "}
+          {report.data.judgment_counts.blunder ?? 0} · mistakes{" "}
+          {report.data.judgment_counts.mistake ?? 0} · inaccuracies{" "}
+          {report.data.judgment_counts.inaccuracy ?? 0}
+        </p>
+      )}
+
       <p>Sorted worst-scoring first — the openings to work on.</p>
 
       {openings.isPending && <p>Loading…</p>}

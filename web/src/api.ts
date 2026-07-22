@@ -16,6 +16,10 @@ export type AnalyzeResult =
   paths["/api/players/{username}/analyze"]["post"]["responses"]["202"]["content"]["application/json"];
 export type GameAnalysis = NonNullable<GameDetail["analysis"]>;
 export type MoveEval = GameAnalysis["evals"][number];
+export type PlayerReport =
+  paths["/api/players/{username}/report"]["get"]["responses"]["200"]["content"]["application/json"];
+export type CoachResponse =
+  paths["/api/players/{username}/coach"]["post"]["responses"]["200"]["content"]["application/json"];
 
 export type GameFilters = {
   result?: string;
@@ -77,6 +81,14 @@ export const api = {
     json(await fetch(`/api/players/${encodeURIComponent(username)}/openings`)),
   game: async (gameId: string): Promise<GameDetail> =>
     json(await fetch(`/api/games/${encodeURIComponent(gameId)}`)),
+  report: async (username: string): Promise<PlayerReport> =>
+    json(await fetch(`/api/players/${encodeURIComponent(username)}/report`)),
+  coach: async (username: string): Promise<CoachResponse> =>
+    json(
+      await fetch(`/api/players/${encodeURIComponent(username)}/coach`, {
+        method: "POST",
+      }),
+    ),
   analyze: async (
     username: string,
     gameIds?: string[],
