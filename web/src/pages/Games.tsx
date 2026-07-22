@@ -16,6 +16,8 @@ export default function Games() {
     <main className="page">
       <p>
         <Link to="/">← change player</Link>
+        {" · "}
+        <Link to={`/players/${username}/dashboard`}>dashboard</Link>
       </p>
       <h1>{username}'s games</h1>
 

@@ -15,9 +15,29 @@ export interface paths {
         put?: never;
         /**
          * Sync Player
-         * @description Fetch new games from chess.com and store them.
+         * @description Fetch new games from chess.com, store and classify them.
          */
         post: operations["sync_player_api_players__username__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{username}/openings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Openings
+         * @description Per-opening record over classified games, most-played first.
+         */
+        get: operations["player_openings_api_players__username__openings_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -197,6 +217,23 @@ export interface components {
             /** Ply */
             ply: number;
         };
+        /** OpeningStats */
+        OpeningStats: {
+            /** Eco */
+            eco: string;
+            /** Name */
+            name: string;
+            /** Games */
+            games: number;
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            /** Draws */
+            draws: number;
+            /** Avg Cp Loss */
+            avg_cp_loss?: number | null;
+        };
         /** SyncResult */
         SyncResult: {
             /** Games Synced */
@@ -242,6 +279,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_openings_api_players__username__openings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpeningStats"][];
                 };
             };
             /** @description Validation Error */

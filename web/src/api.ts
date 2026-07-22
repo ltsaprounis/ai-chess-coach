@@ -10,6 +10,8 @@ export type GameDetail =
   paths["/api/games/{game_id}"]["get"]["responses"]["200"]["content"]["application/json"];
 export type SyncResult =
   paths["/api/players/{username}/sync"]["post"]["responses"]["200"]["content"]["application/json"];
+export type OpeningStats =
+  paths["/api/players/{username}/openings"]["get"]["responses"]["200"]["content"]["application/json"][number];
 
 export type GameFilters = {
   result?: string;
@@ -36,6 +38,21 @@ async function json<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Win rate counting draws as half a point, 0..1. */
+export function score(stats: {
+  wins: number;
+  losses: number;
+  draws: number;
+  games: number;
+}): number {
+  return stats.games === 0 ? 0 : (stats.wins + stats.draws / 2) / stats.games;
+}
+
+/** Worst score first; more games breaks ties (more signal first). */
+export function sortWorstFirst(openings: OpeningStats[]): OpeningStats[] {
+  return [...openings].sort((a, b) => score(a) - score(b) || b.games - a.games);
+}
+
 export const api = {
   sync: async (username: string): Promise<SyncResult> =>
     json(
@@ -52,4 +69,6 @@ export const api = {
         `/api/players/${encodeURIComponent(username)}/games${queryString(filters)}`,
       ),
     ),
+  openings: async (username: string): Promise<OpeningStats[]> =>
+    json(await fetch(`/api/players/${encodeURIComponent(username)}/openings`)),
 };
