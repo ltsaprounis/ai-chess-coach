@@ -14,7 +14,9 @@ wires them together behind an HTTP API and owns all orchestration
    [engine](04-engine.md)
 5. `create_provider(cfg.llm, cfg.anthropic_api_key)` —
    [coach](06-coach.md)
-6. Register routers; serve the built frontend statically in prod.
+6. Register routers; serve the built frontend statically in prod
+   (SPA fallback: unknown non-API paths serve index.html so
+   client-side routes survive refreshes and deep links).
 
 Shutdown closes the pool and the DB. Instances live on `app.state`,
 injected into routes via FastAPI dependencies.

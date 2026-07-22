@@ -2,9 +2,8 @@
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,18 +14,9 @@ from chess_coach.domain import Game
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import open_db, save_analysis, upsert_games
 from tests.factories import make_analysis, make_game
+from tests.http import get, post
 
 TESTDATA = Path(__file__).parent / "testdata"
-
-
-def get(
-    client: TestClient, url: str, params: dict[str, str] | None = None
-) -> httpx.Response:
-    return cast(httpx.Response, client.get(url, params=params))  # pyright: ignore[reportUnknownMemberType]
-
-
-def post(client: TestClient, url: str) -> httpx.Response:
-    return cast(httpx.Response, client.post(url))  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.fixture

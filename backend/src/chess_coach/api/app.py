@@ -4,9 +4,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chess_coach.api.routes import router
@@ -37,8 +36,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.add_exception_handler(UnknownUserError, _unknown_user)
     app.add_exception_handler(StarletteHTTPException, _http_error)
     if _WEB_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=_WEB_DIST, html=True))
+        # SPA fallback: real files are served as-is, every other
+        # non-API path gets index.html so client-side routes survive
+        # refreshes and deep links.
+        app.add_api_route("/{path:path}", _spa, include_in_schema=False)
     return app
+
+
+async def _spa(path: str) -> FileResponse:
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    candidate = (_WEB_DIST / path).resolve()
+    if path and candidate.is_relative_to(_WEB_DIST) and candidate.is_file():
+        return FileResponse(candidate)
+    return FileResponse(_WEB_DIST / "index.html")
 
 
 async def _unknown_user(_: Request, exc: Exception) -> JSONResponse:
