@@ -16,3 +16,10 @@ check:
 dev-api:
 	cd backend && uv run uvicorn --factory chess_coach.api:create_app \
 		--reload --port 8000
+
+.PHONY: gen-api
+gen-api:
+	cd backend && uv run python -c "import json; \
+		from chess_coach.api import create_app; \
+		print(json.dumps(create_app().openapi()))" > ../web/openapi.json
+	cd web && pnpm gen:api
