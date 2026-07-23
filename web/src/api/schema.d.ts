@@ -166,11 +166,15 @@ export interface components {
         AnalyzeRequest: {
             /** Game Ids */
             game_ids?: string[] | null;
+            /** Limit */
+            limit?: number | null;
         };
         /** AnalyzeResult */
         AnalyzeResult: {
             /** Queued */
             queued: number;
+            /** Remaining */
+            remaining: number;
         };
         /** CoachResponse */
         CoachResponse: {

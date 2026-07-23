@@ -160,6 +160,10 @@ td {
   margin-right: 0.5rem;
 }
 
+.limit-input {
+  width: 5rem;
+}
+
 .advice {
   max-width: 48rem;
   padding: 1rem 1.25rem;

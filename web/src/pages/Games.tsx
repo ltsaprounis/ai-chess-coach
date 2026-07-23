@@ -8,6 +8,8 @@ export default function Games() {
   const { username = "" } = useParams();
   const [filters, setFilters] = useState<GameFilters>({});
   const [analyzing, setAnalyzing] = useState(false);
+  const [limit, setLimit] = useState(100);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const queryClient = useQueryClient();
 
   const games = useQuery({
@@ -16,13 +18,33 @@ export default function Games() {
   });
 
   const analyze = useMutation({
-    mutationFn: () => api.analyze(username),
+    mutationFn: () =>
+      api.analyze(
+        username,
+        selected.size > 0 ? { gameIds: [...selected] } : { limit },
+      ),
     onSuccess: (result) => {
       if (result.queued > 0) {
         setAnalyzing(true);
       }
+      setSelected(new Set());
     },
   });
+
+  const toggle = (id: string) =>
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+
+  const visibleIds = games.data?.map((game) => game.id) ?? [];
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
 
   const progress = useAnalysisProgress(username, analyzing, () => {
     setAnalyzing(false);
@@ -65,16 +87,40 @@ export default function Games() {
           <option value="rapid">rapid</option>
           <option value="daily">daily</option>
         </select>
+        <input
+          type="number"
+          min={1}
+          aria-label="games to analyze"
+          className="limit-input"
+          value={limit}
+          disabled={selected.size > 0}
+          onChange={(event) =>
+            setLimit(Math.max(1, Number(event.target.value) || 1))
+          }
+        />
         <button
           type="button"
           disabled={analyzing || analyze.isPending}
           onClick={() => analyze.mutate()}
         >
-          {analyzing ? "Analyzing…" : "Analyze all"}
+          {analyzing
+            ? "Analyzing…"
+            : selected.size > 0
+              ? `Analyze selected (${selected.size})`
+              : `Analyze latest ${limit}`}
         </button>
       </div>
 
       {analyze.isError && <p role="alert">{analyze.error.message}</p>}
+      {analyze.data && (
+        <p>
+          Queued {analyze.data.queued} game
+          {analyze.data.queued === 1 ? "" : "s"}
+          {analyze.data.remaining > 0
+            ? ` — ${analyze.data.remaining} more still unanalyzed`
+            : ""}
+        </p>
+      )}
       {progress && (
         <p className="progress-row">
           <progress value={progress.gamesDone} max={progress.gamesTotal} />{" "}
@@ -83,6 +129,9 @@ export default function Games() {
             ? ` — current game ply ${progress.currentPly}/${progress.totalPlies}`
             : ""}
           {progress.failed ? " — run failed, see server logs" : ""}
+          {progress.streamLost
+            ? " — progress stream lost; the run may have been interrupted. Re-analyze to continue."
+            : ""}
         </p>
       )}
 
@@ -95,6 +144,18 @@ export default function Games() {
         <table>
           <thead>
             <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  aria-label="select all listed games"
+                  checked={allVisibleSelected}
+                  onChange={(event) =>
+                    setSelected(
+                      event.target.checked ? new Set(visibleIds) : new Set(),
+                    )
+                  }
+                />
+              </th>
               <th>Date</th>
               <th>Color</th>
               <th>Opponent</th>
@@ -108,6 +169,14 @@ export default function Games() {
           <tbody>
             {games.data.map((game: GameSummary) => (
               <tr key={game.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`select game against ${game.opponent}`}
+                    checked={selected.has(game.id)}
+                    onChange={() => toggle(game.id)}
+                  />
+                </td>
                 <td>
                   <Link to={`/games/${game.id}`}>
                     {new Date(game.end_time * 1000).toLocaleDateString()}

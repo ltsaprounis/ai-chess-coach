@@ -7,6 +7,7 @@ export type RunProgress = {
   currentPly?: number;
   totalPlies?: number;
   failed: boolean;
+  streamLost: boolean;
 };
 
 type RunEventData = {
@@ -36,9 +37,9 @@ export function useAnalysisProgress(
 
   useEffect(() => {
     if (!active) {
-      setState(null);
-      return;
+      return; // keep the last state visible (final counts / lost note)
     }
+    setState(null);
     const source = new EventSource(progressUrl(username));
 
     const handle = (event: MessageEvent) => {
@@ -49,6 +50,7 @@ export function useAnalysisProgress(
         currentPly: data.progress?.ply,
         totalPlies: data.progress?.total_plies,
         failed: event.type === "run_failed",
+        streamLost: false,
       });
       if (data.finished) {
         source.close();
@@ -59,7 +61,22 @@ export function useAnalysisProgress(
     for (const type of EVENT_TYPES) {
       source.addEventListener(type, handle);
     }
-    source.onerror = () => source.close();
+    source.onerror = () => {
+      // Server restarted or connection died: the run may be gone.
+      // Un-stick the UI instead of spinning forever.
+      source.close();
+      setState((previous) =>
+        previous
+          ? { ...previous, streamLost: true }
+          : {
+              gamesTotal: 0,
+              gamesDone: 0,
+              failed: false,
+              streamLost: true,
+            },
+      );
+      onFinishedRef.current();
+    };
     return () => source.close();
   }, [username, active]);
 

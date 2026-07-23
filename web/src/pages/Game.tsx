@@ -103,7 +103,7 @@ export default function Game() {
               disabled={analyzing}
               onClick={() => {
                 setAnalyzing(true);
-                void api.analyze(data.username, [data.id]);
+                void api.analyze(data.username, { gameIds: [data.id] });
               }}
             >
               {analyzing ? "Analyzing…" : "Analyze this game"}

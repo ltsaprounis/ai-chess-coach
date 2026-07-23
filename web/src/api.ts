@@ -91,13 +91,16 @@ export const api = {
     ),
   analyze: async (
     username: string,
-    gameIds?: string[],
+    options: { gameIds?: string[]; limit?: number } = {},
   ): Promise<AnalyzeResult> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(gameIds ? { game_ids: gameIds } : {}),
+        body: JSON.stringify({
+          game_ids: options.gameIds,
+          limit: options.limit,
+        }),
       }),
     ),
 };
