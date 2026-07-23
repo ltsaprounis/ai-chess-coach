@@ -20,12 +20,22 @@ export type PlayerReport =
   paths["/api/players/{username}/report"]["get"]["responses"]["200"]["content"]["application/json"];
 export type CoachResponse =
   paths["/api/players/{username}/coach"]["post"]["responses"]["200"]["content"]["application/json"];
+export type CoachAgentsResponse =
+  paths["/api/coach/agents"]["get"]["responses"]["200"]["content"]["application/json"];
+export type CoachAgent = CoachAgentsResponse["agents"][number];
 
 export type GameFilters = {
   result?: string;
   time_class?: string;
   analyzed?: boolean;
+  limit?: number;
+  offset?: number;
 };
+
+/** Page size for the dashboard's fetch-everything helper. */
+const ALL_GAMES_PAGE = 500;
+/** Hard cap so a huge archive cannot hammer the API from one page load. */
+const ALL_GAMES_CAP = 2000;
 
 export function queryString(
   params: Record<string, string | number | boolean | undefined>,
@@ -77,18 +87,37 @@ export const api = {
         `/api/players/${encodeURIComponent(username)}/games${queryString(filters)}`,
       ),
     ),
+  /** Every stored game, paged; stops on a short page or at the cap. */
+  allGames: async (username: string): Promise<GameSummary[]> => {
+    const all: GameSummary[] = [];
+    for (let offset = 0; offset < ALL_GAMES_CAP; offset += ALL_GAMES_PAGE) {
+      const page = await api.games(username, {
+        limit: ALL_GAMES_PAGE,
+        offset,
+      });
+      all.push(...page);
+      if (page.length < ALL_GAMES_PAGE) {
+        break;
+      }
+    }
+    return all;
+  },
   openings: async (username: string): Promise<OpeningStats[]> =>
     json(await fetch(`/api/players/${encodeURIComponent(username)}/openings`)),
   game: async (gameId: string): Promise<GameDetail> =>
     json(await fetch(`/api/games/${encodeURIComponent(gameId)}`)),
   report: async (username: string): Promise<PlayerReport> =>
     json(await fetch(`/api/players/${encodeURIComponent(username)}/report`)),
-  coach: async (username: string): Promise<CoachResponse> =>
+  coach: async (username: string, agentId?: string): Promise<CoachResponse> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/coach`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: agentId ?? null }),
       }),
     ),
+  coachAgents: async (): Promise<CoachAgentsResponse> =>
+    json(await fetch("/api/coach/agents")),
   analyze: async (
     username: string,
     options: { gameIds?: string[]; limit?: number } = {},
@@ -107,4 +136,9 @@ export const api = {
 
 export function progressUrl(username: string): string {
   return `/api/players/${encodeURIComponent(username)}/analyze/progress`;
+}
+
+/** SSE live-eval stream for one position; depth defaults server-side. */
+export function evalUrl(fen: string): string {
+  return `/api/eval${queryString({ fen })}`;
 }

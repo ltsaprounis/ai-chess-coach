@@ -9,7 +9,9 @@ hand-written.
 ## Pages
 
 1. **Home** — username input; triggers `POST /sync`, shows counts,
-   links to the games list.
+   links to the games list. Coach-agent selector fed by
+   `GET /coach/agents`; the choice persists in localStorage and the
+   Coach page sends it as `agent_id`.
 2. **Games** — table from `GET /players/{u}/games` with opening,
    result, time-class, and analyzed-state filters; "Analyze all"
    button posting to `/analyze`, progress bar fed by the SSE
@@ -17,13 +19,21 @@ hand-written.
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
-   move syncs board + graph.
-4. **Dashboard** — repertoire record table from
-   `GET /players/{u}/openings`, sorted worst-first; ACPL by phase
-   and judgment totals join from `GET /players/{u}/report` once
-   analysis ships.
-5. **Coach** — `POST /coach`; renders the advice (markdown) and the
-   generated prompt with a copy button (the manual-use fallback).
+   move syncs board + graph. Live-engine toggle: while on, each
+   shown position streams `GET /eval` (SSE) into an eval bar with
+   score, depth, and principal variation; the stream is dropped and
+   reopened when the ply changes.
+4. **Dashboard** — the player's stats hub: summary tiles (record,
+   win rate by color, current rating per time class, ACPL, blunder
+   rate), rating-over-time and monthly-activity charts from
+   `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
+   judgment charts from `GET /players/{u}/report`, and the
+   worst-first repertoire table from `GET /players/{u}/openings`.
+   Charts are custom SVG components — no chart library.
+5. **Coach** — `POST /coach` with the selected `agent_id`; renders
+   the advice (markdown) and the generated prompt with a copy
+   button (the manual-use fallback); shows/lets you switch the
+   active agent.
 
 ## Stack and structure
 

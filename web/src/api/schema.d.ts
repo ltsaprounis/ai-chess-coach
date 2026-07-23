@@ -118,6 +118,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eval Position
+         * @description SSE live eval of one position: `eval` per depth, then `done`.
+         */
+        get: operations["eval_position_api_eval_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coach/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Coach Agents
+         * @description The configured coach roster and the default agent id.
+         */
+        get: operations["coach_agents_api_coach_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{username}/report": {
         parameters: {
             query?: never;
@@ -149,7 +189,7 @@ export interface paths {
         put?: never;
         /**
          * Coach Player
-         * @description Build the report, render the prompt, and ask the coach LLM.
+         * @description Build the report, render the prompt, and ask the chosen agent.
          */
         post: operations["coach_player_api_players__username__coach_post"];
         delete?: never;
@@ -176,12 +216,43 @@ export interface components {
             /** Remaining */
             remaining: number;
         };
+        /**
+         * CoachAgentInfo
+         * @description Selectable agent as shown to the UI; no LLM knobs exposed.
+         */
+        CoachAgentInfo: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "claude-agent-sdk" | "anthropic" | "azure-foundry";
+            /** Model */
+            model: string;
+        };
+        /** CoachAgentsResponse */
+        CoachAgentsResponse: {
+            /** Agents */
+            agents: components["schemas"]["CoachAgentInfo"][];
+            /** Default */
+            default: string;
+        };
+        /** CoachRequest */
+        CoachRequest: {
+            /** Agent Id */
+            agent_id?: string | null;
+        };
         /** CoachResponse */
         CoachResponse: {
             /** Prompt */
             prompt: string;
             /** Advice */
             advice: string;
+            /** Agent Id */
+            agent_id: string;
         };
         /** CriticalPosition */
         CriticalPosition: {
@@ -595,6 +666,58 @@ export interface operations {
             };
         };
     };
+    eval_position_api_eval_get: {
+        parameters: {
+            query: {
+                fen: string;
+                depth?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coach_agents_api_coach_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachAgentsResponse"];
+                };
+            };
+        };
+    };
     player_report_api_players__username__report_get: {
         parameters: {
             query?: never;
@@ -635,7 +758,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CoachRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -5,6 +5,26 @@ import { Chessboard } from "react-chessboard";
 import { Link, useParams } from "react-router-dom";
 import { api, type MoveEval } from "../api.ts";
 import EvalGraph from "../components/EvalGraph.tsx";
+import LiveEvalPanel from "../components/LiveEvalPanel.tsx";
+import { useLiveEval } from "../useLiveEval.ts";
+
+const LIVE_EVAL_KEY = "liveEval";
+
+function readLiveToggle(): boolean {
+  try {
+    return localStorage.getItem(LIVE_EVAL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeLiveToggle(on: boolean): void {
+  try {
+    localStorage.setItem(LIVE_EVAL_KEY, on ? "1" : "0");
+  } catch {
+    // Storage blocked (private mode): the toggle just doesn't persist.
+  }
+}
 
 export default function Game() {
   const { id = "" } = useParams();
@@ -27,6 +47,13 @@ export default function Game() {
     }
     return list;
   }, [game.data]);
+
+  const [live, setLive] = useState(readLiveToggle);
+  const liveEval = useLiveEval(live && game.data ? (fens[ply] ?? null) : null);
+  const toggleLive = (on: boolean) => {
+    storeLiveToggle(on);
+    setLive(on);
+  };
 
   useEffect(() => {
     if (analyzing && game.data?.analysis) {
@@ -94,6 +121,15 @@ export default function Game() {
               ply {ply}/{fens.length - 1}
             </span>
           </div>
+          <label className="live-toggle">
+            <input
+              type="checkbox"
+              checked={live}
+              onChange={(event) => toggleLive(event.target.checked)}
+            />
+            Live engine
+          </label>
+          {live && <LiveEvalPanel state={liveEval} />}
           {evals && (
             <EvalGraph evals={evals} selectedPly={ply} onSelect={setPly} />
           )}

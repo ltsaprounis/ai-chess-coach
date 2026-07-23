@@ -1,14 +1,40 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Markdown from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
+import {
+  getStoredAgentId,
+  resolveAgentId,
+  setStoredAgentId,
+} from "../coachAgent.ts";
 
 export default function Coach() {
   const { username = "" } = useParams();
   const [copied, setCopied] = useState(false);
+  const [agentChoice, setAgentChoice] = useState(getStoredAgentId);
 
-  const coach = useMutation({ mutationFn: () => api.coach(username) });
+  // Quiet while loading or failed — coaching works without the
+  // roster: no agent_id sent means the server picks its default.
+  const agents = useQuery({
+    queryKey: ["coachAgents"],
+    queryFn: api.coachAgents,
+  });
+  const activeAgentId = agents.data
+    ? resolveAgentId(agentChoice, agents.data.agents, agents.data.default)
+    : null;
+
+  const coach = useMutation({
+    mutationFn: () => api.coach(username, activeAgentId ?? undefined),
+  });
+
+  const chooseAgent = (id: string) => {
+    setStoredAgentId(id);
+    setAgentChoice(id);
+  };
+
+  const agentLabel = (id: string) =>
+    agents.data?.agents.find((agent) => agent.id === id)?.label ?? id;
 
   const copyPrompt = async () => {
     if (coach.data) {
@@ -27,9 +53,27 @@ export default function Coach() {
       </p>
       <h1>Coach {username}</h1>
       <p>
-        Builds a report from the analyzed games and asks Claude for prioritized
-        training advice (via your local Claude Code login).
+        Builds a report from the analyzed games and asks the selected agent for
+        prioritized training advice.
       </p>
+
+      {agents.isSuccess && (
+        <p className="agent-row">
+          <label>
+            Agent{" "}
+            <select
+              value={activeAgentId ?? agents.data.default}
+              onChange={(event) => chooseAgent(event.target.value)}
+            >
+              {agents.data.agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.label} ({agent.model})
+                </option>
+              ))}
+            </select>
+          </label>
+        </p>
+      )}
 
       <button
         type="button"
@@ -45,6 +89,10 @@ export default function Coach() {
 
       {coach.isSuccess && (
         <>
+          <p className="agent-note">
+            Advice from {agentLabel(coach.data.agent_id)} ({coach.data.agent_id}
+            )
+          </p>
           <article className="advice">
             <Markdown>{coach.data.advice}</Markdown>
           </article>

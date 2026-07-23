@@ -41,6 +41,10 @@ td {
   border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
 }
 
+td {
+  font-variant-numeric: tabular-nums;
+}
+
 .result-win {
   color: #15803d;
 }
@@ -155,6 +159,90 @@ td {
   stroke-width: 1;
 }
 
+/* Dashboard stat tiles: big number + small muted label. */
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.tile {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  min-width: 7rem;
+}
+
+.tile-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.tile-label {
+  font-size: 0.8rem;
+  color: #898781;
+}
+
+/* Custom SVG charts (RatingChart, MonthlyActivityChart, BarChart). */
+
+.chart-wrap {
+  position: relative;
+  max-width: 44rem;
+}
+
+.chart-wrap svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-wrap svg text {
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, -130%);
+  background: #262624;
+  color: #faf9f5;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.legend {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #898781;
+}
+
+.legend .swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
+  margin-right: 0.4rem;
+  vertical-align: -0.05rem;
+}
+
+.chart-row {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.chart-row > div {
+  flex: 1 1 18rem;
+  min-width: 16rem;
+}
+
 .progress-row progress {
   width: 16rem;
   margin-right: 0.5rem;
@@ -162,6 +250,65 @@ td {
 
 .limit-input {
   width: 5rem;
+}
+
+/* Coach-agent selector (Home + Coach pages). */
+
+.agent-row {
+  margin: 1rem 0;
+}
+
+.agent-note {
+  font-size: 0.85rem;
+  color: #898781;
+}
+
+/* Live engine eval on the Game page: toggle, bar, score, PV. */
+
+.live-toggle {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.live-eval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.eval-bar {
+  height: 0.6rem;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: #262624;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.eval-bar-white {
+  height: 100%;
+  background: #faf9f5;
+  transition: width 200ms ease;
+}
+
+.live-eval-line {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-eval-pv {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.85rem;
+  color: #898781;
+}
+
+.live-eval-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #898781;
 }
 
 .advice {
