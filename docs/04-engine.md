@@ -35,7 +35,7 @@ async def create_pool(bin_path: Path, workers: int) -> AnalysisPool
 class AnalysisPool:
     async def analyze_game(
         self, game: Game, opts: EngineOptions,
-        on_progress: Callable[[Progress], None] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> GameAnalysis
     def stream_eval(
         self, fen: str, depth: int,
@@ -50,7 +50,26 @@ class LiveEval(BaseModel):           # one event per depth reached
     eval_cp: int | None              # white's perspective, like MoveEval
     eval_mate: int | None            # signed moves to mate, white's view
     pv_san: list[str]                # principal variation, SAN
+
+async def analyze_game(              # pure logic; the pool drives it
+    game: Game, opts: EngineOptions, evaluate: EvaluateFn
+) -> GameAnalysis
+
+EvaluateFn = Callable[[str], Awaitable[PositionEval]]   # FEN -> eval
+ProgressCallback = Callable[[Progress], None]
+
+class PositionEval(BaseModel):       # white-POV eval of one position
+    cp: int | None; mate: int | None; best_uci: str | None
+    clamped_cp: int                  # property; mate folds to ±MATE_SCORE
+
+class EngineError(Exception): ...    # engine failed to start/misbehaved
+
+MATE_SCORE = 10_000                  # domain constant, re-exported here
 ```
+
+All engine start-up and protocol failures surface as `EngineError`,
+the typed exception callers (the [API layer](07-api.md)) catch and
+map; raw `chess.engine` errors never escape this component.
 
 `stream_eval` powers the live analysis board: it parses the FEN
 eagerly (raising `ValueError` on an invalid one, before any engine
@@ -70,7 +89,7 @@ Internally each worker holds one engine from
   before/after each move; eval each position once (positions are
   shared between consecutive moves).
 - `cp_loss` = eval drop from the mover's perspective, clamped at 0.
-  Mate scores map to ±10000 cp for loss arithmetic
+  Mate scores map to `±MATE_SCORE` (10000 cp) for loss arithmetic
   (`score.score(mate_score=10000)`).
 - Judgment from injected thresholds (see [config](01-config.md)):
   loss < inaccuracy → best/good, then inaccuracy/mistake/blunder.

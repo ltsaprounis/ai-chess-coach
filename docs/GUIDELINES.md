@@ -38,6 +38,9 @@ everything that crosses a component boundary.
 
 Frontend API types are generated from FastAPI's OpenAPI schema
 (`pnpm gen:api`); hand-writing a response type is a review blocker.
+Sole exemption: SSE event payloads never appear in the OpenAPI
+schema, so their types are hand-declared, each with a comment naming
+the backend model it mirrors.
 
 ## Architectural boundaries
 

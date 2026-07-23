@@ -10,6 +10,12 @@ export type RunProgress = {
   streamLost: boolean;
 };
 
+/**
+ * One SSE event from the analysis progress stream. Hand-declared
+ * because SSE payloads are not part of the OpenAPI schema; mirrors
+ * the backend's RunEvent model (its `type` field arrives as the SSE
+ * event name instead — see EVENT_TYPES).
+ */
 type RunEventData = {
   games_total: number;
   games_done: number;

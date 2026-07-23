@@ -4,7 +4,9 @@ The browser UI — the only TypeScript in the project. Talks
 exclusively to the HTTP/SSE API defined in [07-api.md](07-api.md);
 it shares no code with the backend. API request/response types are
 generated from the backend's OpenAPI schema (`pnpm gen:api`), never
-hand-written.
+hand-written — except SSE payload types, which the schema cannot
+express and are hand-declared with a comment naming the backend
+model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 
 ## Pages
 

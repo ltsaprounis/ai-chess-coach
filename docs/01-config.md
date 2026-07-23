@@ -9,7 +9,14 @@ at paths injected from this config.
 ## Interface
 
 ```python
-def load_config(path: Path = Path("coach.config.yaml")) -> AppConfig
+DEFAULT_CONFIG_PATH = Path("coach.config.yaml")
+
+class ConfigError(Exception): ...  # invalid config file or environment
+
+def load_config(
+    path: Path | None = None,              # None -> DEFAULT_CONFIG_PATH
+    env: Mapping[str, str] | None = None,  # None -> os.environ
+) -> AppConfig
 
 class AppConfig(BaseModel):
     engine: EngineConfig        # depth=16, workers=2, analyze_limit
@@ -47,8 +54,9 @@ Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
 is required only when some agent's `provider` is `anthropic`. The
 default provider (`claude-agent-sdk`) authenticates via the local
 Claude Code login, so the default setup needs no environment at all.
-`load_config` fails fast with a readable error when the file is
-invalid or a required secret is missing for a selected provider.
+`load_config` fails fast with `ConfigError` when the file is invalid
+or a required secret is missing for a selected provider; a missing
+file at the default path just means all defaults.
 
 ## Dependencies
 
