@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ExplainState,
   explainReducer,
+  formatMoveLabel,
   initialExplainState,
 } from "./explain";
 
@@ -17,6 +18,7 @@ describe("explainReducer", () => {
     expect(initialExplainState).toEqual({
       status: "idle",
       ply: null,
+      isRefresh: false,
       progress: [],
       text: "",
       error: null,
@@ -28,10 +30,17 @@ describe("explainReducer", () => {
     expect(state).toEqual({
       status: "streaming",
       ply: 12,
+      isRefresh: false,
       progress: [],
       text: "",
       error: null,
     });
+  });
+
+  it("start marks the request as a refresh when asked to regenerate", () => {
+    const state = apply([{ type: "start", ply: 12, refresh: true }]);
+    expect(state.isRefresh).toBe(true);
+    expect(state.status).toBe("streaming");
   });
 
   it("accumulates text chunks in order", () => {
@@ -105,9 +114,43 @@ describe("explainReducer", () => {
     expect(second).toEqual({
       status: "streaming",
       ply: 9,
+      isRefresh: false,
       progress: [],
       text: "",
       error: null,
     });
+  });
+
+  it("a regenerate after a cached done clears isRefresh's prior value", () => {
+    const cached = apply([
+      { type: "start", ply: 3 },
+      { type: "done", payload: { text: "cached markdown" } },
+    ]);
+    expect(cached.isRefresh).toBe(false);
+    const regenerated = explainReducer(cached, {
+      type: "start",
+      ply: 3,
+      refresh: true,
+    });
+    expect(regenerated).toEqual({
+      status: "streaming",
+      ply: 3,
+      isRefresh: true,
+      progress: [],
+      text: "",
+      error: null,
+    });
+  });
+});
+
+describe("formatMoveLabel", () => {
+  it("labels a white ply with a period, no ellipsis", () => {
+    expect(formatMoveLabel(1, "e4")).toBe("1.e4");
+    expect(formatMoveLabel(27, "f3")).toBe("14.f3");
+  });
+
+  it("labels a black ply with an ellipsis", () => {
+    expect(formatMoveLabel(2, "e5")).toBe("1...e5");
+    expect(formatMoveLabel(28, "b6")).toBe("14...b6");
   });
 });

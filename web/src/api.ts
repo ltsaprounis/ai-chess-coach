@@ -143,14 +143,20 @@ export function evalUrl(fen: string): string {
   return `/api/eval${queryString({ fen })}`;
 }
 
-/** SSE move-explanation stream; agent defaults server-side when omitted. */
+/**
+ * SSE move-explanation stream; agent defaults server-side when
+ * omitted. `refresh` skips the server cache and regenerates,
+ * overwriting the cached row — used by the panel's Regenerate action.
+ */
 export function explainUrl(
   gameId: string,
   ply: number,
   agentId?: string,
+  refresh?: boolean,
 ): string {
   return `/api/games/${encodeURIComponent(gameId)}/explain${queryString({
     ply,
     agent_id: agentId,
+    refresh: refresh || undefined,
   })}`;
 }

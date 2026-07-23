@@ -78,8 +78,16 @@ td {
   align-items: center;
 }
 
-.moves {
+.moves-panel {
   flex: 1 1 14rem;
+  min-width: 12rem;
+}
+
+.moves-panel h2 {
+  margin-top: 0;
+}
+
+.moves {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -263,12 +271,51 @@ td {
   color: #898781;
 }
 
+/* Game page layout: ACPL summary strip, engine/coach panel cards. */
+
+.acpl-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 1rem 0;
+  padding: 0.5rem 0.85rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  font-size: 0.9rem;
+}
+
+.panels-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 1rem 0;
+  align-items: flex-start;
+}
+
+.panel {
+  flex: 1 1 22rem;
+  min-width: 18rem;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.panel-empty {
+  font-size: 0.9rem;
+  color: #898781;
+}
+
 /* Live engine eval on the Game page: toggle, bar, score, PV. */
 
 .live-toggle {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  margin-bottom: 0.5rem;
 }
 
 .live-eval {
@@ -291,9 +338,14 @@ td {
   transition: width 200ms ease;
 }
 
-.live-eval-line {
+.live-eval-header {
   margin: 0;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.live-eval-searching {
+  color: #898781;
+  font-weight: 400;
 }
 
 .live-eval-pv {
@@ -308,7 +360,7 @@ td {
 .live-eval-lines {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -318,7 +370,7 @@ td {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -328,15 +380,9 @@ td {
   flex: none;
 }
 
-.live-eval-score {
-  font-weight: 600;
-  width: 4rem;
-  flex: none;
-}
-
-.live-eval-depth {
-  color: #898781;
-  width: 2.5rem;
+.live-eval-move {
+  font-weight: 700;
+  width: 3.5rem;
   flex: none;
 }
 
@@ -351,16 +397,56 @@ td {
   color: #898781;
 }
 
-/* On-demand move explanation on the Game page. */
-
-.explain-section {
-  max-width: 48rem;
-  margin: 1rem 0;
+.live-eval-legend {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #898781;
 }
 
-.explain-note {
-  font-size: 0.85rem;
+/* Sign-colored eval chip: + White ahead, − Black ahead, both cued by
+   text (not color alone) since formatEval() always includes the sign. */
+
+.eval-chip {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  width: 4rem;
+  flex: none;
+  text-align: center;
+}
+
+.eval-chip-white {
+  color: #15803d;
+  background: color-mix(in srgb, #15803d 15%, transparent);
+}
+
+.eval-chip-black {
+  color: #b91c1c;
+  background: color-mix(in srgb, #b91c1c 15%, transparent);
+}
+
+.eval-chip-equal {
   color: #898781;
+  background: color-mix(in srgb, #898781 15%, transparent);
+}
+
+/* On-demand move explanation on the Game page. */
+
+.explain-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.explain-title {
+  margin: 0;
+}
+
+.explain-regenerate {
+  flex: none;
 }
 
 .explain-progress {

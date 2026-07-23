@@ -59,26 +59,39 @@ async function errorMessage(response: Response): Promise<string> {
  *
  * Explicitly user-triggered only (`explain()`); nothing here runs on
  * mount, and changing which ply is selected does not touch this
- * state — the caller decides when a fresh click is warranted.
+ * state — the caller decides when a fresh click is warranted. The
+ * same entry point serves Regenerate: pass `refresh: true` to skip
+ * the server cache and overwrite it with a fresh explanation.
  */
 export function useExplain(): {
   state: ExplainState;
-  explain: (gameId: string, ply: number, agentId?: string) => void;
+  explain: (
+    gameId: string,
+    ply: number,
+    agentId?: string,
+    options?: { refresh?: boolean },
+  ) => void;
 } {
   const [state, dispatch] = useReducer(explainReducer, initialExplainState);
   const abortRef = useRef<AbortController | null>(null);
 
   const explain = useCallback(
-    (gameId: string, ply: number, agentId?: string) => {
+    (
+      gameId: string,
+      ply: number,
+      agentId?: string,
+      options: { refresh?: boolean } = {},
+    ) => {
+      const refresh = options.refresh ?? false;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      dispatch({ type: "start", ply });
+      dispatch({ type: "start", ply, refresh });
 
       void (async () => {
         let response: Response;
         try {
-          response = await fetch(explainUrl(gameId, ply, agentId), {
+          response = await fetch(explainUrl(gameId, ply, agentId, refresh), {
             signal: controller.signal,
             headers: { Accept: "text/event-stream" },
           });

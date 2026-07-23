@@ -23,14 +23,20 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    SVG over `evals`), move list with judgment badges; clicking a
    move syncs board + graph. Live-engine toggle: while on, each
    shown position streams `GET /eval` (SSE) into a candidate-lines
-   panel — one row per line with its eval, depth, and SAN moves
-   (the server decides how many lines; the UI renders whatever the
-   snapshot carries); the stream is dropped and reopened when the
-   ply changes. On an analyzed game, the selected move offers an
-   "Explain" button (explicitly user-triggered — it spends LLM
-   calls) that streams `GET /games/{id}/explain` into a markdown
-   panel, with tool events shown as progress lines; cached
-   explanations render instantly.
+   panel (the server decides how many lines; the UI renders
+   whatever the snapshot carries); the stream is dropped and
+   reopened when the ply changes. The panel is self-explanatory to
+   a non-engine user: a header names the side to move and what the
+   list is, each row leads with the candidate move (bold SAN) and a
+   sign-colored eval chip, the continuation is secondary text, raw
+   engine detail (depth) lives in a tooltip, and a one-line legend
+   states the sign convention (+ White / − Black). On an analyzed
+   game, the selected move offers an "Explain" button (explicitly
+   user-triggered — it spends LLM calls) that streams
+   `GET /games/{id}/explain` into a titled coach panel ("Coach on
+   14...f3"), with tool events shown as progress lines; cached
+   explanations render instantly, with a "Regenerate" action
+   (`refresh=true`, same user-triggered rule) for stale ones.
 4. **Dashboard** — the player's stats hub: summary tiles (record,
    win rate by color, current rating per time class, ACPL, blunder
    rate), rating-over-time and monthly-activity charts from

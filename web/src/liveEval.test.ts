@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EvalLine } from "./liveEval";
-import { formatEval, whiteFraction } from "./liveEval";
+import { evalSign, formatEval, sideToMove, whiteFraction } from "./liveEval";
 
 const cp = (value: number) => ({ eval_cp: value, eval_mate: null });
 const mate = (value: number) => ({ eval_cp: null, eval_mate: value });
@@ -59,5 +59,38 @@ describe("EvalLine snapshot lines", () => {
     const rank2 = line({ multipv: 2, eval_cp: -70, pv_san: ["e4", "e5"] });
     expect(formatEval(rank2)).toBe("−0.70");
     expect(whiteFraction(rank2)).toBeLessThan(0.5);
+  });
+});
+
+describe("evalSign", () => {
+  it("favors white for a positive score", () => {
+    expect(evalSign(cp(35))).toBe("white");
+  });
+
+  it("favors black for a negative score", () => {
+    expect(evalSign(cp(-35))).toBe("black");
+  });
+
+  it("is equal only at exactly zero centipawns", () => {
+    expect(evalSign(cp(0))).toBe("equal");
+  });
+
+  it("follows the mating side for mate scores", () => {
+    expect(evalSign(mate(4))).toBe("white");
+    expect(evalSign(mate(-4))).toBe("black");
+  });
+});
+
+describe("sideToMove", () => {
+  it("reads white from the starting position", () => {
+    expect(
+      sideToMove("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+    ).toBe("white");
+  });
+
+  it("reads black after white's first move", () => {
+    expect(
+      sideToMove("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"),
+    ).toBe("black");
   });
 });

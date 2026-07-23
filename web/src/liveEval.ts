@@ -53,3 +53,23 @@ export function whiteFraction(score: Score): number {
   }
   return 1 / (1 + Math.exp(-(score.eval_cp ?? 0) / 250));
 }
+
+/** Which side a score favors — drives the candidate-row eval chip's color. */
+export type EvalSign = "white" | "black" | "equal";
+
+/** Positive/mate-for-white favors White, negative/mate-for-black favors Black. */
+export function evalSign(score: Score): EvalSign {
+  if (score.eval_mate !== null) {
+    return score.eval_mate >= 0 ? "white" : "black";
+  }
+  const cp = score.eval_cp ?? 0;
+  if (cp === 0) {
+    return "equal";
+  }
+  return cp > 0 ? "white" : "black";
+}
+
+/** Side to move from a FEN's active-color field ("w"/"b", 2nd space-separated token). */
+export function sideToMove(fen: string): "white" | "black" {
+  return fen.split(" ")[1] === "b" ? "black" : "white";
+}

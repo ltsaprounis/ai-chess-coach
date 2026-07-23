@@ -95,6 +95,8 @@ export default function Game() {
   const evals = data.analysis?.evals ?? null;
   const clamp = (value: number) =>
     Math.max(0, Math.min(fens.length - 1, value));
+  const explainingCurrent =
+    explainState.status === "streaming" && explainState.ply === ply;
 
   return (
     <main className="page">
@@ -139,15 +141,6 @@ export default function Game() {
               ply {ply}/{fens.length - 1}
             </span>
           </div>
-          <label className="live-toggle">
-            <input
-              type="checkbox"
-              checked={live}
-              onChange={(event) => toggleLive(event.target.checked)}
-            />
-            Live engine
-          </label>
-          {live && <LiveEvalPanel state={liveEval} />}
           {evals && (
             <EvalGraph evals={evals} selectedPly={ply} onSelect={setPly} />
           )}
@@ -165,58 +158,114 @@ export default function Game() {
           )}
         </div>
 
-        <ol className="moves">
-          {data.san_moves.map((san, index) => {
-            const movePly = index + 1;
-            const moveEval: MoveEval | undefined = evals?.[index];
-            return (
-              <li key={`${movePly}-${san}`}>
-                <button
-                  type="button"
-                  className={[
-                    "move",
-                    moveEval ? `j-${moveEval.judgment}` : "",
-                    ply === movePly ? "selected" : "",
-                  ].join(" ")}
-                  onClick={() => setPly(movePly)}
-                >
-                  {movePly % 2 === 1 ? `${(movePly + 1) / 2}. ` : ""}
-                  {san}
-                  {moveEval && moveEval.cp_loss >= 100 ? (
-                    <span className="loss"> −{moveEval.cp_loss}</span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+        <section className="moves-panel">
+          <h2>Moves</h2>
+          <ol className="moves">
+            {data.san_moves.map((san, index) => {
+              const movePly = index + 1;
+              const moveEval: MoveEval | undefined = evals?.[index];
+              return (
+                <li key={`${movePly}-${san}`}>
+                  <button
+                    type="button"
+                    className={[
+                      "move",
+                      moveEval ? `j-${moveEval.judgment}` : "",
+                      ply === movePly ? "selected" : "",
+                    ].join(" ")}
+                    onClick={() => setPly(movePly)}
+                  >
+                    {movePly % 2 === 1 ? `${(movePly + 1) / 2}. ` : ""}
+                    {san}
+                    {moveEval && moveEval.cp_loss >= 100 ? (
+                      <span className="loss"> −{moveEval.cp_loss}</span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
       </div>
 
       {data.analysis && (
-        <p>
-          ACPL {data.analysis.overall_acpl} · blunders{" "}
-          {data.analysis.judgment_counts.blunder ?? 0} · mistakes{" "}
-          {data.analysis.judgment_counts.mistake ?? 0} · depth{" "}
-          {data.analysis.depth}
-        </p>
-      )}
-
-      {data.analysis && ply >= 1 && (
-        <div className="explain-section">
-          <button
-            type="button"
-            disabled={
-              explainState.status === "streaming" && explainState.ply === ply
-            }
-            onClick={() => explain(data.id, ply, agentId)}
-          >
-            {explainState.status === "streaming" && explainState.ply === ply
-              ? "Explaining…"
-              : "Explain move"}
-          </button>
-          <ExplainPanel state={explainState} />
+        <div className="acpl-strip">
+          <span>
+            <strong>{data.analysis.overall_acpl}</strong> ACPL
+          </span>
+          <span>
+            <strong>{data.analysis.judgment_counts.blunder ?? 0}</strong>{" "}
+            {(data.analysis.judgment_counts.blunder ?? 0) === 1
+              ? "blunder"
+              : "blunders"}
+          </span>
+          <span>
+            <strong>{data.analysis.judgment_counts.mistake ?? 0}</strong>{" "}
+            {(data.analysis.judgment_counts.mistake ?? 0) === 1
+              ? "mistake"
+              : "mistakes"}
+          </span>
+          <span>depth {data.analysis.depth}</span>
         </div>
       )}
+
+      <div className="panels-row">
+        <section className="panel">
+          <h2>Engine</h2>
+          <label className="live-toggle">
+            <input
+              type="checkbox"
+              checked={live}
+              onChange={(event) => toggleLive(event.target.checked)}
+            />
+            Live engine
+          </label>
+          {live ? (
+            <LiveEvalPanel state={liveEval} fen={fens[ply] ?? fens[0] ?? ""} />
+          ) : (
+            <p className="panel-empty">
+              Turn on live engine to see the engine's top candidate moves for
+              the current position.
+            </p>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>Coach</h2>
+          {data.analysis ? (
+            ply >= 1 ? (
+              <>
+                <button
+                  type="button"
+                  disabled={explainingCurrent}
+                  onClick={() => explain(data.id, ply, agentId)}
+                >
+                  {explainingCurrent ? "Explaining…" : "Explain move"}
+                </button>
+                <ExplainPanel
+                  state={explainState}
+                  sanMoves={data.san_moves}
+                  onRegenerate={() => {
+                    if (explainState.ply !== null) {
+                      explain(data.id, explainState.ply, agentId, {
+                        refresh: true,
+                      });
+                    }
+                  }}
+                />
+              </>
+            ) : (
+              <p className="panel-empty">
+                Select a move from the list to ask the coach about it.
+              </p>
+            )
+          ) : (
+            <p className="panel-empty">
+              Analyze this game to enable move explanations.
+            </p>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type OpeningStats, queryString, score, sortWorstFirst } from "./api";
+import {
+  explainUrl,
+  type OpeningStats,
+  queryString,
+  score,
+  sortWorstFirst,
+} from "./api";
 
 describe("queryString", () => {
   it("returns an empty string for no params", () => {
@@ -32,6 +38,26 @@ function stats(partial: Partial<OpeningStats> & { eco: string }): OpeningStats {
     ...partial,
   };
 }
+
+describe("explainUrl", () => {
+  it("omits refresh by default", () => {
+    expect(explainUrl("demo-059", 28)).toBe(
+      "/api/games/demo-059/explain?ply=28",
+    );
+  });
+
+  it("omits refresh when explicitly false", () => {
+    expect(explainUrl("demo-059", 28, "coach-a", false)).toBe(
+      "/api/games/demo-059/explain?ply=28&agent_id=coach-a",
+    );
+  });
+
+  it("adds refresh=true only when regenerating", () => {
+    expect(explainUrl("demo-059", 28, "coach-a", true)).toBe(
+      "/api/games/demo-059/explain?ply=28&agent_id=coach-a&refresh=true",
+    );
+  });
+});
 
 describe("score and sortWorstFirst", () => {
   it("counts draws as half a point", () => {

@@ -38,6 +38,8 @@ export type ExplainState = {
   status: ExplainStatus;
   /** The 1-based ply this explanation is for (null before the first click). */
   ply: number | null;
+  /** True while the in-flight (or last completed) request was a regenerate. */
+  isRefresh: boolean;
   /** Tool-call summaries, oldest first, shown as progress lines. */
   progress: ProgressLine[];
   /** Accumulated markdown while streaming; replaced wholesale on `done`. */
@@ -48,13 +50,14 @@ export type ExplainState = {
 export const initialExplainState: ExplainState = {
   status: "idle",
   ply: null,
+  isRefresh: false,
   progress: [],
   text: "",
   error: null,
 };
 
 export type ExplainAction =
-  | { type: "start"; ply: number }
+  | { type: "start"; ply: number; refresh?: boolean }
   | { type: "event"; event: ExplainEvent }
   | { type: "done"; payload: ExplainDone }
   | { type: "error"; message: string };
@@ -69,6 +72,7 @@ export function explainReducer(
       return {
         status: "streaming",
         ply: action.ply,
+        isRefresh: action.refresh ?? false,
         progress: [],
         text: "",
         error: null,
@@ -90,4 +94,14 @@ export function explainReducer(
     default:
       return state;
   }
+}
+
+/**
+ * Chess-style label for the ply being explained: white plies read
+ * "14.f3", black plies "14...Rxh2" — titles the coach panel and
+ * names the move without exposing raw ply numbers to the user.
+ */
+export function formatMoveLabel(ply: number, san: string): string {
+  const moveNumber = Math.ceil(ply / 2);
+  return ply % 2 === 1 ? `${moveNumber}.${san}` : `${moveNumber}...${san}`;
 }
