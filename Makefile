@@ -14,8 +14,11 @@ check:
 
 .PHONY: dev-api
 dev-api:
-	cd backend && uv run uvicorn --factory chess_coach.api:create_app \
-		--reload --port 8000
+	@cd backend && PORT=$$(uv run python -c "from chess_coach.config \
+		import load_config; print(load_config().server.port)") && \
+		echo "AI Chess Coach → http://localhost:$$PORT" && \
+		uv run uvicorn --factory chess_coach.api:create_app \
+			--reload --port $$PORT
 
 .PHONY: gen-api
 gen-api:

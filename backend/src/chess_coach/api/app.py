@@ -42,6 +42,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.provider = create_provider(cfg.llm, cfg.anthropic_api_key)
         runs: dict[str, AnalysisRun] = {}
         app.state.runs = runs
+        # Uvicorn's own URL line scrolls away on reloads; print a
+        # fresh clickable link each time the app (re)starts.
+        print(f"\nAI Chess Coach → http://localhost:{cfg.server.port}\n", flush=True)
         yield
         for run in runs.values():
             if run.task is not None:
