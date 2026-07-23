@@ -151,6 +151,26 @@ def test_render_prompt_is_deterministic_and_complete() -> None:
     assert "Training plan" in prompt
 
 
+def test_mate_scale_losses_render_as_words_not_centipawns() -> None:
+    evals = [
+        MoveEval(
+            ply=1,
+            san="f3",
+            eval_cp=None,
+            eval_mate=-2,
+            best_move="e2e4",
+            cp_loss=10_050,  # walked into a forced mate
+            judgment="blunder",
+        ),
+    ]
+    analysis = make_analysis(game_id="g-mate").model_copy(update={"evals": evals})
+    report = build_report("testuser", [analyzed("g-mate", analysis=analysis)])
+    prompt = render_prompt(report)
+
+    assert "forced-mate-scale blunder" in prompt
+    assert "10050" not in prompt  # no nonsense centipawn numbers
+
+
 def test_empty_report_prompt_has_no_empty_sections() -> None:
     prompt = render_prompt(build_report("testuser", []))
     assert "Repertoire" not in prompt
@@ -167,6 +187,7 @@ async def test_agent_sdk_provider_collects_text(
     ) -> AsyncIterator[object]:
         captured["prompt"] = prompt
         captured["model"] = options.model
+        captured["system_prompt"] = options.system_prompt
 
         async def stream() -> AsyncIterator[object]:
             yield AssistantMessage(
@@ -184,6 +205,9 @@ async def test_agent_sdk_provider_collects_text(
     assert advice == "Work on your endgames."
     assert captured["prompt"] == "coach me"
     assert captured["model"] == "claude-opus-4-8"
+    # The coach persona must replace Claude Code's coding persona.
+    system_prompt = captured["system_prompt"]
+    assert isinstance(system_prompt, str) and "chess coach" in system_prompt
 
 
 async def test_agent_sdk_provider_surfaces_error_detail_from_result(

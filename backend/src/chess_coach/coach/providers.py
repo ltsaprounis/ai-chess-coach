@@ -11,6 +11,7 @@ from claude_agent_sdk import (
     query,
 )
 
+from chess_coach.coach.prompt import SYSTEM_PROMPT
 from chess_coach.domain import LlmConfig
 
 logger = logging.getLogger(__name__)
@@ -32,11 +33,16 @@ class ClaudeAgentSdkProvider:
     and logged in on this machine.
     """
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, system_prompt: str | None = None) -> None:
         self._model = model
+        self._system_prompt = system_prompt
 
     async def complete(self, prompt: str) -> str:
-        options = ClaudeAgentOptions(model=self._model, max_turns=1)
+        options = ClaudeAgentOptions(
+            model=self._model,
+            max_turns=1,
+            system_prompt=self._system_prompt,
+        )
         chunks: list[str] = []
         fallback: str | None = None
         try:
@@ -80,7 +86,7 @@ def create_provider(cfg: LlmConfig, api_key: str | None = None) -> CoachProvider
     `api_key` is reserved for the anthropic / azure-foundry providers.
     """
     if cfg.provider == "claude-agent-sdk":
-        return ClaudeAgentSdkProvider(model=cfg.model)
+        return ClaudeAgentSdkProvider(model=cfg.model, system_prompt=SYSTEM_PROMPT)
     raise CoachProviderError(
         f"llm provider {cfg.provider!r} is not implemented yet — "
         "set llm.provider to 'claude-agent-sdk'"

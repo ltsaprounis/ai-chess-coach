@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+MATE_SCORE = 10_000  # mate folded to ±cp for loss arithmetic
+
 Color = Literal["white", "black"]
 Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]

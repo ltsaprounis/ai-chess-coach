@@ -4,7 +4,16 @@ The template is deterministic and user-visible (the UI shows it with
 a copy button), so changes here are effectively UI changes too.
 """
 
-from chess_coach.domain import PlayerReport
+from chess_coach.domain import MATE_SCORE, PlayerReport
+
+# Given to the LLM as its system prompt — it replaces the Claude Code
+# coding persona when running through the Agent SDK provider.
+SYSTEM_PROMPT = (
+    "You are a strong, practical chess coach reviewing a student's "
+    "engine-analyzed games. This is a coaching conversation, not a "
+    "software task: respond with the coaching report only, no "
+    "preamble about the nature of the request."
+)
 
 _ROLE = (
     "You are a strong, practical chess coach. Below is aggregated "
@@ -12,6 +21,10 @@ _ROLE = (
     "Centipawn loss (cp) measures how much each move worsened their "
     "position; ACPL is the average per move (lower is better)."
 )
+
+# Losses this large can only come from mate scores (evals clamp mate
+# to ±MATE_SCORE); render them as words, not nonsense centipawns.
+_MATE_SCALE = MATE_SCORE - 1_000
 
 _INSTRUCTIONS = (
     "Coach this player. Respond in markdown with exactly these "
@@ -75,8 +88,11 @@ def _critical(report: PlayerReport) -> str:
         return ""
     lines = ["## Costliest moves (position before the move, as FEN)"]
     for n, p in enumerate(report.critical_positions, start=1):
+        if p.cp_loss >= _MATE_SCALE:
+            cost = "a decisive, forced-mate-scale blunder"
+        else:
+            cost = f"lost {p.cp_loss} cp"
         lines.append(
-            f"{n}. `{p.fen}` — played {p.played} "
-            f"(lost {p.cp_loss} cp; engine preferred {p.best})"
+            f"{n}. `{p.fen}` — played {p.played} ({cost}; engine preferred {p.best})"
         )
     return "\n".join(lines)

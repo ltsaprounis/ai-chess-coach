@@ -73,6 +73,8 @@ web/                     Vite + React + TypeScript frontend
 Pydantic models — validated at the edges, serializable everywhere.
 
 ```python
+MATE_SCORE = 10_000   # mate folded to ±cp for loss arithmetic
+
 Color = Literal["white", "black"]
 Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]

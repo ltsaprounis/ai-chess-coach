@@ -7,7 +7,7 @@ import chess
 import chess.engine
 from pydantic import BaseModel
 
-MATE_SCORE = 10_000  # mate maps to ±10000 cp for loss arithmetic
+from chess_coach.domain import MATE_SCORE
 
 
 class EngineError(Exception):

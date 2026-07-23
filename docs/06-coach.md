@@ -37,11 +37,12 @@ training advice.
 ## Providers
 
 - **v1 — `ClaudeAgentSdkProvider`** (default): a one-shot
-  `claude_agent_sdk.query(...)` with `max_turns=1`. Authentication
-  and billing ride the local Claude Code login — **no API key
-  anywhere**; requires the `claude` CLI installed and logged in.
-  Errors (CLI missing, run failure, empty output) surface as
-  `CoachProviderError`.
+  `claude_agent_sdk.query(...)` with `max_turns=1` and a coach
+  system prompt that replaces the Claude Code coding persona.
+  Authentication and billing ride the local Claude Code login —
+  **no API key anywhere**; requires the `claude` CLI installed and
+  logged in. Errors (CLI missing, run failure, empty output)
+  surface as `CoachProviderError`.
 - **Planned — `anthropic`** (the API SDK; needs `ANTHROPIC_API_KEY`)
   and **`azure-foundry`** (the Azure AI Foundry demo, via the
   Anthropic SDK's `AnthropicFoundry` client). Each is one new class
