@@ -3,14 +3,10 @@
 Web app that pulls a user's chess.com games, analyzes them with
 Stockfish, classifies openings, and generates LLM coaching advice.
 
-## Current state
-
-All eight components (01–08) are built and the app runs end to end;
-work now iterates on features and polish. The milestones in
-[docs/PROPOSAL.md](../docs/PROPOSAL.md) remain the roadmap.
-
 ## Documentation map
 
+- [docs/PROPOSAL.md](../docs/PROPOSAL.md) — high-level pitch and
+  milestone roadmap.
 - [docs/README.md](../docs/README.md) — index: architecture,
   decoupling rules, shared domain types. Read this first.
 - [docs/GUIDELINES.md](../docs/GUIDELINES.md) — toolchain, style,
@@ -35,16 +31,16 @@ work now iterates on features and polish. The milestones in
 Sonnet 5 (`claude-sonnet-5`). Each knows its component's doc, scope,
 boundary rules, and verification gates:
 
-| Agent        | Owns                              | Doc     |
-|--------------|-----------------------------------|---------|
-| config-dev   | `chess_coach.config`              | docs/01 |
-| ingestion-dev| `chess_coach.ingestion`           | docs/02 |
-| storage-dev  | `chess_coach.storage`             | docs/03 |
-| engine-dev   | `chess_coach.engine`              | docs/04 |
-| openings-dev | `chess_coach.openings`            | docs/05 |
-| coach-dev    | `chess_coach.coach`               | docs/06 |
-| api-dev      | `chess_coach.api` (composition)   | docs/07 |
-| frontend-dev | `web/`                            | docs/08 |
+| Agent        | Owns                            | Doc                  |
+|--------------|---------------------------------|----------------------|
+| config-dev   | `chess_coach.config`            | docs/01-config.md    |
+| ingestion-dev| `chess_coach.ingestion`         | docs/02-ingestion.md |
+| storage-dev  | `chess_coach.storage`           | docs/03-storage.md   |
+| engine-dev   | `chess_coach.engine`            | docs/04-engine.md    |
+| openings-dev | `chess_coach.openings`          | docs/05-openings.md  |
+| coach-dev    | `chess_coach.coach`             | docs/06-coach.md     |
+| api-dev      | `chess_coach.api` (composition) | docs/07-api.md       |
+| frontend-dev | `web/`                          | docs/08-frontend.md  |
 
 When to delegate:
 - A task scoped to a single component goes to its agent. Give it a
