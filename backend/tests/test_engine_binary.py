@@ -68,3 +68,23 @@ async def test_pool_analyzes_a_real_game() -> None:
     assert analysis.overall_acpl > 2_000  # the blunder dominates
     assert analysis.judgment_counts["blunder"] == 1
     assert progress and progress[-1].ply == progress[-1].total_plies == 4
+
+
+async def test_stream_eval_reports_increasing_depths_live() -> None:
+    if not STOCKFISH_BIN.exists():
+        pytest.skip(f"no Stockfish binary at {STOCKFISH_BIN}; run `make engine`")
+
+    pool = await create_pool(STOCKFISH_BIN, workers=1)
+    try:
+        evals = [e async for e in pool.stream_eval(chess.STARTING_FEN, depth=8)]
+    finally:
+        await pool.close()
+
+    depths = [e.depth for e in evals]
+    assert depths and depths == sorted(set(depths))  # strictly increasing
+    assert depths[-1] == 8  # runs to the target depth, then stops
+    last = evals[-1]
+    # Start position: a modest white-POV cp eval and a real PV.
+    assert last.eval_cp is not None and abs(last.eval_cp) < 200
+    assert last.eval_mate is None
+    assert last.pv_san

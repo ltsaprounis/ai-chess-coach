@@ -1,0 +1,193 @@
+"""Live single-position eval stream tests (docs/04-engine.md) — stub engine."""
+
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
+
+import chess
+import chess.engine
+import pytest
+
+from chess_coach.engine import AnalysisPool, LiveEval
+from chess_coach.engine.uci import Engine
+
+
+def info(
+    depth: int | None = None,
+    score: chess.engine.PovScore | None = None,
+    pv: list[str] | None = None,
+) -> chess.engine.InfoDict:
+    """A raw engine info line; omitted fields stay absent, as on the wire."""
+    out = chess.engine.InfoDict()
+    if depth is not None:
+        out["depth"] = depth
+    if score is not None:
+        out["score"] = score
+    if pv is not None:
+        out["pv"] = [chess.Move.from_uci(uci) for uci in pv]
+    return out
+
+
+def cp(value: int, turn: chess.Color = chess.WHITE) -> chess.engine.PovScore:
+    """A relative cp score as the engine reports it (from `turn`'s POV)."""
+    return chess.engine.PovScore(chess.engine.Cp(value), turn)
+
+
+class StubEngine(Engine):
+    """Engine double streaming canned infos; tracks stream lifecycle."""
+
+    def __init__(self, infos: list[chess.engine.InfoDict]) -> None:
+        self.infos = infos
+        self.streams_started = 0
+        self.streams_open = 0
+
+    async def stream_infos(
+        self, board: chess.Board, depth: int
+    ) -> AsyncGenerator[chess.engine.InfoDict, None]:
+        self.streams_started += 1
+        self.streams_open += 1
+        try:
+            for item in self.infos:
+                yield item
+        finally:  # runs on exhaustion *and* on early close
+            self.streams_open -= 1
+
+    async def close(self) -> None:
+        pass
+
+
+def make_pool(stub: StubEngine) -> AnalysisPool:
+    engines: list[Engine] = [stub]
+    return AnalysisPool(engines)
+
+
+async def collect(stream: AsyncIterator[LiveEval]) -> list[LiveEval]:
+    return [event async for event in stream]
+
+
+def test_invalid_fen_raises_synchronously_before_any_engine_work() -> None:
+    stub = StubEngine([])
+    pool = make_pool(stub)
+
+    with pytest.raises(ValueError):
+        pool.stream_eval("not a fen", depth=12)
+
+    assert stub.streams_started == 0
+
+
+async def test_streams_one_live_eval_per_depth_from_whites_perspective() -> None:
+    # Position after 1. e4 — black to move, so the engine's relative
+    # scores are from black's POV and must flip for the white view.
+    board = chess.Board()
+    board.push_san("e4")
+    black = chess.BLACK
+    stub = StubEngine(
+        [
+            info(),  # no depth/score (e.g. a "string" line): skipped
+            info(depth=1),  # depth but no score (currmove line): skipped
+            info(depth=1, score=cp(-30, black), pv=["c7c5"]),
+            info(depth=2, score=cp(-40, black), pv=["e7e5", "g1f3"]),
+            info(depth=3, score=chess.engine.PovScore(chess.engine.Mate(-3), black)),
+        ]
+    )
+    pool = make_pool(stub)
+
+    evals = await collect(pool.stream_eval(board.fen(), depth=3))
+
+    assert [(e.depth, e.eval_cp, e.eval_mate, e.pv_san) for e in evals] == [
+        (1, 30, None, ["c5"]),
+        (2, 40, None, ["e5", "Nf3"]),
+        (3, None, 3, []),  # mate for white, cp stays None like MoveEval
+    ]
+
+
+async def test_duplicate_and_lower_depths_are_not_reemitted() -> None:
+    stub = StubEngine(
+        [
+            info(depth=1, score=cp(10)),
+            info(depth=1, score=cp(15)),  # bound update at same depth
+            info(depth=2, score=cp(20)),
+            info(depth=1, score=cp(5)),  # stale lower depth
+            info(depth=3, score=cp(25)),
+        ]
+    )
+    pool = make_pool(stub)
+
+    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=3))
+
+    assert [(e.depth, e.eval_cp) for e in evals] == [(1, 10), (2, 20), (3, 25)]
+
+
+async def test_pv_san_is_capped_at_ten_moves() -> None:
+    shuffle = ["g1f3", "g8f6", "f3g1", "f6g8"] * 3  # 12 legal half-moves
+    stub = StubEngine([info(depth=1, score=cp(0), pv=shuffle)])
+    pool = make_pool(stub)
+
+    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=1))
+
+    assert len(evals) == 1
+    assert evals[0].pv_san == ["Nf3", "Nf6", "Ng1", "Ng8"] * 2 + ["Nf3", "Nf6"]
+
+
+async def test_early_close_stops_the_search_and_releases_the_worker() -> None:
+    stub = StubEngine([info(depth=d, score=cp(10)) for d in range(1, 6)])
+    pool = make_pool(stub)
+
+    stream = pool.stream_eval(chess.STARTING_FEN, depth=5)
+    first = await anext(stream)
+    assert first.depth == 1
+    await stream.aclose()
+
+    assert stub.streams_open == 0  # inner info stream was closed too
+
+    # The single worker is back in the pool: a fresh stream runs to
+    # completion instead of waiting forever on a lost engine.
+    evals = await asyncio.wait_for(
+        collect(pool.stream_eval(chess.STARTING_FEN, depth=5)), timeout=1
+    )
+    assert [e.depth for e in evals] == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.parametrize(
+    "san_moves",
+    [
+        ["f3", "e5", "g4", "Qh4#"],  # fool's mate: checkmate on the board
+        [  # the fastest known stalemate (Sam Loyd's 10-move line)
+            "e3",
+            "a5",
+            "Qh5",
+            "Ra6",
+            "Qxa5",
+            "h5",
+            "h4",
+            "Rah6",
+            "Qxc7",
+            "f6",
+            "Qxd7+",
+            "Kf7",
+            "Qxb7",
+            "Qd3",
+            "Qxb8",
+            "Qh7",
+            "Qxc8",
+            "Kg6",
+            "Qe6",
+        ],
+    ],
+)
+async def test_terminal_positions_yield_nothing_without_engine_work(
+    san_moves: list[str],
+) -> None:
+    board = chess.Board()
+    for san in san_moves:
+        board.push_san(san)
+    assert board.outcome() is not None  # sanity: the position is over
+
+    stub = StubEngine([info(depth=1, score=cp(0))])
+    pool = make_pool(stub)
+
+    evals = await asyncio.wait_for(
+        collect(pool.stream_eval(board.fen(), depth=12)), timeout=1
+    )
+
+    assert evals == []
+    assert stub.streams_started == 0

@@ -37,11 +37,28 @@ class AnalysisPool:
         self, game: Game, opts: EngineOptions,
         on_progress: Callable[[Progress], None] | None = None,
     ) -> GameAnalysis
+    def stream_eval(
+        self, fen: str, depth: int,
+    ) -> AsyncGenerator[LiveEval]    # live single-position eval
     async def close(self) -> None    # quits engines cleanly
 
 class Progress(BaseModel):
     game_id: str; ply: int; total_plies: int
+
+class LiveEval(BaseModel):           # one event per depth reached
+    depth: int
+    eval_cp: int | None              # white's perspective, like MoveEval
+    eval_mate: int | None            # signed moves to mate, white's view
+    pv_san: list[str]                # principal variation, SAN
 ```
+
+`stream_eval` powers the live analysis board: it parses the FEN
+eagerly (raising `ValueError` on an invalid one, before any engine
+work), borrows a pool worker (waiting if all are busy analyzing),
+and yields a `LiveEval` per new depth the engine reports, finishing
+at the target depth. Terminal positions yield nothing. Closing the
+iterator early (client gone, position changed) must stop the search
+and return the worker to the pool.
 
 Internally each worker holds one engine from
 `chess.engine.popen_uci(bin_path)` (async API) and calls

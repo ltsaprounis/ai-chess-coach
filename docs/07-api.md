@@ -36,6 +36,7 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider; optional body `{agent_id}` (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id}` |
+| GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40); `eval` event per `LiveEval`, then `done` |
 
 Request/response models are pydantic, so FastAPI's OpenAPI schema is
 complete — the frontend generates its TS types from it
@@ -55,6 +56,11 @@ unexpected to 500.
   `make engine` hint; one run per player at a time (409 otherwise).
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report.
+- Live eval (`/api/eval`): engine's `stream_eval` does the work; the
+  route maps its `ValueError` (bad FEN) to 400 and a missing pool to
+  503, and closes the iterator when the client disconnects so the
+  worker frees immediately. One stream per request; the frontend
+  drops the old stream when the shown position changes.
 
 ## Dependencies
 

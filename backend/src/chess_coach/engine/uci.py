@@ -1,6 +1,7 @@
 """One UCI engine process via python-chess (docs/04-engine.md)."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import chess
@@ -62,6 +63,23 @@ class Engine:
         pv = info.get("pv")
         best = pv[0].uci() if pv else None
         return PositionEval(cp=white.score(), mate=white.mate(), best_uci=best)
+
+    async def stream_infos(
+        self, board: chess.Board, depth: int
+    ) -> AsyncGenerator[chess.engine.InfoDict, None]:
+        """Stream raw search infos live, up to a depth-limited search.
+
+        Closing the generator early stops the underlying search.
+        """
+        try:
+            analysis = await self._engine.analysis(
+                board, chess.engine.Limit(depth=depth)
+            )
+        except chess.engine.EngineError as exc:
+            raise EngineError(f"analysis failed for {board.fen()}: {exc}") from exc
+        with analysis:  # __exit__ stops the search if we leave early
+            async for info in analysis:
+                yield info
 
     async def close(self) -> None:
         await self._engine.quit()

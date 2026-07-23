@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -249,6 +250,39 @@ async def analyze_progress(username: str, runs: RunsDep) -> EventSourceResponse:
                     return
         finally:
             run.unsubscribe(queue)
+
+    return EventSourceResponse(stream())
+
+
+@router.get("/eval")
+async def eval_position(
+    pool: PoolDep,
+    cfg: CfgDep,
+    fen: str,
+    depth: int | None = None,
+) -> EventSourceResponse:
+    """SSE live eval of one position: `eval` per depth, then `done`."""
+    if pool is None:
+        raise HTTPException(
+            status_code=503,
+            detail="engine binary not found — build it with `make engine`",
+        )
+    resolved = cfg.engine.depth if depth is None else depth
+    clamped = max(1, min(40, resolved))
+    try:
+        # stream_eval parses the FEN eagerly, so a bad one fails here
+        # as a 400 — before any streaming response begins.
+        evals = pool.stream_eval(fen, clamped)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid FEN: {exc}") from exc
+
+    async def stream() -> AsyncIterator[dict[str, str]]:
+        # aclosing: a client disconnect closes this generator, which
+        # must close the engine stream so the worker frees promptly.
+        async with aclosing(evals) as events:
+            async for event in events:
+                yield {"event": "eval", "data": event.model_dump_json()}
+        yield {"event": "done", "data": ""}
 
     return EventSourceResponse(stream())
 

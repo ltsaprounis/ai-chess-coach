@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+import chess
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,7 +19,7 @@ from chess_coach.config import (
     StorageConfig,
 )
 from chess_coach.domain import CoachAgent, Game, GameAnalysis
-from chess_coach.engine import EngineOptions, Progress, ProgressCallback
+from chess_coach.engine import EngineOptions, LiveEval, Progress, ProgressCallback
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import open_db, save_analysis, upsert_games
 from tests.factories import make_analysis, make_game
@@ -52,6 +53,17 @@ class StubPool:
         if on_progress is not None:
             on_progress(Progress(game_id=game.id, ply=total, total_plies=total))
         return make_analysis(game_id=game.id, depth=opts.depth)
+
+    def stream_eval(self, fen: str, depth: int) -> AsyncIterator[LiveEval]:
+        chess.Board(fen)  # same eager ValueError on a bad FEN as the pool
+        return self._live_evals(depth)
+
+    @staticmethod
+    async def _live_evals(depth: int) -> AsyncIterator[LiveEval]:
+        # The final event echoes the requested depth so tests can see
+        # what the route resolved (default and clamping).
+        yield LiveEval(depth=1, eval_cp=20, eval_mate=None, pv_san=["e4"])
+        yield LiveEval(depth=depth, eval_cp=35, eval_mate=None, pv_san=["e4", "e5"])
 
     async def close(self) -> None:
         pass
@@ -395,6 +407,46 @@ def test_coach_409s_without_analyzed_games(client: TestClient, db_path: Path) ->
     response = post(client, "/api/players/testuser/coach")
     assert response.status_code == 409
     assert "analyze first" in response.json()["error"]["message"]
+
+
+def test_eval_streams_eval_events_then_done(client: TestClient) -> None:
+    response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    body = response.text
+    assert "event: eval" in body
+    assert '"depth":1' in body
+    assert '"depth":16' in body  # engine.depth config default applied
+    assert '"pv_san":["e4","e5"]' in body
+    # The done event closes the stream, after the last eval.
+    assert body.index("event: done") > body.rindex("event: eval")
+
+
+def test_eval_clamps_depth(client: TestClient) -> None:
+    response = get(
+        client, "/api/eval", params={"fen": chess.STARTING_FEN, "depth": "99"}
+    )
+    assert '"depth":40' in response.text
+
+
+def test_eval_400s_on_invalid_fen(client: TestClient) -> None:
+    response = get(client, "/api/eval", params={"fen": "not a fen"})
+    assert response.status_code == 400
+    assert "invalid FEN" in response.json()["error"]["message"]
+
+
+def test_eval_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> None:
+    config = AppConfig(
+        engine=EngineConfig(bin_path=tmp_path / "missing-stockfish"),
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
+    )
+    with TestClient(create_app(config)) as client:
+        response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
+    assert response.status_code == 503
+    assert "make engine" in response.json()["error"]["message"]
 
 
 def test_unknown_user_maps_to_404_envelope(
