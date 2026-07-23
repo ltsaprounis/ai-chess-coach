@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "_comment": "port is hardcoded (the launch format needs a literal); it must match server.port in coach.config.yaml — change both together. No --reload: this runs the app for previews, make dev-api is the dev loop.",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--project", "backend", "uvicorn", "--factory", "chess_coach.api:create_app", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
