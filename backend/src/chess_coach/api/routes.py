@@ -32,6 +32,7 @@ from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
     Db,
     GameFilters,
+    count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_game,
@@ -141,10 +142,12 @@ def game_detail(game_id: str, db: DbDep) -> GameDetail:
 
 class AnalyzeRequest(BaseModel):
     game_ids: list[str] | None = None
+    limit: int | None = None  # bulk path only; capped by config
 
 
 class AnalyzeResult(BaseModel):
     queued: int
+    remaining: int  # unanalyzed games not covered by this run
 
 
 @router.post("/players/{username}/analyze", status_code=202)
@@ -176,13 +179,19 @@ async def analyze_player(
             if (game := get_game(db, game_id)) is not None
         ]
     else:
-        games = games_needing_analysis(db, user, cfg.engine.depth)
+        limit = cfg.engine.analyze_limit
+        if body is not None and body.limit is not None:
+            limit = min(body.limit, cfg.engine.analyze_limit)
+        games = games_needing_analysis(db, user, cfg.engine.depth, limit)
 
+    remaining = max(
+        0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
+    )
     run = AnalysisRun(len(games))
     runs[user] = run
     opts = EngineOptions(depth=cfg.engine.depth, thresholds=cfg.thresholds)
     run.task = asyncio.create_task(_run_analysis(db, pool, run, games, opts))
-    return AnalyzeResult(queued=len(games))
+    return AnalyzeResult(queued=len(games), remaining=remaining)
 
 
 async def _run_analysis(

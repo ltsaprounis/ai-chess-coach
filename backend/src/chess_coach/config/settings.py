@@ -21,6 +21,7 @@ class EngineConfig(BaseModel):
     depth: int = 16
     workers: int = 2
     bin_path: Path | None = None  # None -> engines/stockfish/src/stockfish
+    analyze_limit: int = 100  # newest games per "analyze all" run
 
 
 class ServerConfig(BaseModel):

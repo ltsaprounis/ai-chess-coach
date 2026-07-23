@@ -5,6 +5,7 @@
 engine:
   depth: 16        # Stockfish search depth per position
   workers: 2       # parallel engine processes
+  analyze_limit: 100   # max games per "analyze" run (newest first)
   # bin_path: engines/stockfish/src/stockfish   # default: submodule build
 
 thresholds:        # centipawn loss per judgment

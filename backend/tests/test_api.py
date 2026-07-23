@@ -76,7 +76,8 @@ def client(
     fake_bin.touch()
 
     config = AppConfig(
-        engine=EngineConfig(bin_path=fake_bin),
+        # analyze_limit is small so the cap is easy to exercise.
+        engine=EngineConfig(bin_path=fake_bin, analyze_limit=2),
         storage=StorageConfig(db_path=db_path),
         openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
         anthropic_api_key="sk-test",
@@ -238,7 +239,7 @@ def test_analyze_runs_and_persists(client: TestClient, db_path: Path) -> None:
 
     response = post(client, "/api/players/testuser/analyze")
     assert response.status_code == 202
-    assert response.json() == {"queued": 2}
+    assert response.json() == {"queued": 2, "remaining": 0}
 
     wait_until_analyzed(client, "testuser", 2)
     detail: Any = get(client, "/api/games/g-1").json()
@@ -259,6 +260,44 @@ def test_analyze_fills_opening_avg_cp_loss(
 
     stats: Any = get(client, "/api/players/testuser/openings").json()
     assert stats[0]["avg_cp_loss"] == 2.5
+
+
+def test_analyze_limits_to_newest_and_reports_remaining(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=1),
+            make_game(id="g-mid", end_time=2),
+            make_game(id="g-new", end_time=3),
+        ],
+    )
+
+    # Explicit limit below the config cap.
+    response = post(client, "/api/players/testuser/analyze", json={"limit": 1})
+    assert response.json() == {"queued": 1, "remaining": 2}
+    wait_until_analyzed(client, "testuser", 1)
+    analyzed: Any = get(
+        client, "/api/players/testuser/games", params={"analyzed": "true"}
+    ).json()
+    assert [g["id"] for g in analyzed] == ["g-new"]  # newest first
+
+    # No body: config analyze_limit (2) applies to what's left.
+    response = post(client, "/api/players/testuser/analyze")
+    assert response.json() == {"queued": 2, "remaining": 0}
+    wait_until_analyzed(client, "testuser", 3)
+
+
+def test_analyze_limit_is_capped_by_config(client: TestClient, db_path: Path) -> None:
+    seed(
+        db_path,
+        [make_game(id=f"g-{n}", end_time=n) for n in range(1, 5)],
+    )
+
+    # Asking for 999 still yields at most the configured cap of 2.
+    response = post(client, "/api/players/testuser/analyze", json={"limit": 999})
+    assert response.json() == {"queued": 2, "remaining": 2}
 
 
 def test_analyze_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ from chess_coach.domain import Opening
 from chess_coach.storage import (
     Db,
     GameFilters,
+    count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_game,
@@ -104,6 +105,25 @@ def test_analysis_round_trip(db: Db) -> None:
     assert detail is not None
     assert detail.analysis == analysis
     assert list_analyses(db, "testuser") == [analysis]
+
+
+def test_games_needing_analysis_limit_takes_newest(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="g-1", end_time=1),
+            make_game(id="g-2", end_time=2),
+            make_game(id="g-3", end_time=3),
+        ],
+    )
+    assert [g.id for g in games_needing_analysis(db, "testuser", 16, limit=2)] == [
+        "g-3",
+        "g-2",
+    ]
+    assert count_games_needing_analysis(db, "testuser", 16) == 3
+
+    save_analysis(db, make_analysis(game_id="g-3"))
+    assert count_games_needing_analysis(db, "testuser", 16) == 2
 
 
 def test_games_needing_analysis_respects_depth(db: Db) -> None:

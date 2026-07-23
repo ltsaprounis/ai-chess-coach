@@ -142,18 +142,33 @@ def latest_game_time(db: Db, username: str) -> int | None:
     return None if latest is None else int(latest)
 
 
-def games_needing_analysis(db: Db, username: str, depth: int) -> list[Game]:
-    """Games with no analysis, or one shallower than `depth`."""
+def games_needing_analysis(
+    db: Db, username: str, depth: int, limit: int | None = None
+) -> list[Game]:
+    """Newest games with no analysis, or one shallower than `depth`."""
     rows = db.execute(
         """
         SELECT g.* FROM games AS g
         LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE g.username = ? AND (a.game_id IS NULL OR a.depth < ?)
         ORDER BY g.end_time DESC
+        LIMIT ?
         """,
-        (username, depth),
+        (username, depth, -1 if limit is None else limit),
     ).fetchall()
     return [Game.model_validate(_game_fields(row)) for row in rows]
+
+
+def count_games_needing_analysis(db: Db, username: str, depth: int) -> int:
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS n FROM games AS g
+        LEFT JOIN analyses AS a ON a.game_id = g.id
+        WHERE g.username = ? AND (a.game_id IS NULL OR a.depth < ?)
+        """,
+        (username, depth),
+    ).fetchone()
+    return int(row["n"])
 
 
 def list_analyzed_games(db: Db, username: str) -> list[AnalyzedGame]:

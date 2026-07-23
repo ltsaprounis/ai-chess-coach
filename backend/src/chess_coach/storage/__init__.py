@@ -4,6 +4,7 @@ from chess_coach.storage.analyses import list_analyses, save_analysis
 from chess_coach.storage.db import Db, open_db
 from chess_coach.storage.games import (
     GameFilters,
+    count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_game,
@@ -18,6 +19,7 @@ from chess_coach.storage.games import (
 __all__ = [
     "Db",
     "GameFilters",
+    "count_games_needing_analysis",
     "games_missing_opening",
     "games_needing_analysis",
     "get_game",

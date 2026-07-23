@@ -16,5 +16,7 @@ def get(
     return cast(httpx.Response, client.get(url, params=params))  # pyright: ignore[reportUnknownMemberType]
 
 
-def post(client: TestClient, url: str) -> httpx.Response:
-    return cast(httpx.Response, client.post(url))  # pyright: ignore[reportUnknownMemberType]
+def post(
+    client: TestClient, url: str, json: dict[str, object] | None = None
+) -> httpx.Response:
+    return cast(httpx.Response, client.post(url, json=json))  # pyright: ignore[reportUnknownMemberType]

@@ -29,7 +29,7 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging) |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed) |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
-| POST   | `/api/players/{u}/analyze`             | Enqueue unanalyzed games (or body `game_ids`); 202 |
+| POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → provider; returns `{prompt, advice}` |

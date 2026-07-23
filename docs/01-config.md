@@ -12,7 +12,8 @@ at paths injected from this config.
 def load_config(path: Path = Path("coach.config.yaml")) -> AppConfig
 
 class AppConfig(BaseModel):
-    engine: EngineConfig        # depth=16, workers=2;
+    engine: EngineConfig        # depth=16, workers=2, analyze_limit
+                                # =100 (cap per analyze run);
                                 # bin_path None -> repo submodule build
     thresholds: Thresholds      # centipawn loss: inaccuracy=50,
                                 # mistake=100, blunder=200
