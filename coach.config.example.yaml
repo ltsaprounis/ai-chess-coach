@@ -13,15 +13,21 @@ thresholds:        # centipawn loss per judgment
   mistake: 100
   blunder: 200
 
-llm:
-  # claude-agent-sdk rides your Claude Code login: no API key needed.
-  # anthropic (needs ANTHROPIC_API_KEY) and azure-foundry are planned.
-  provider: claude-agent-sdk
-  model: claude-opus-4-8
-  max_tokens: 4096
+# coach:            # roster of selectable coaches shown in the UI
+#   # Providers: claude-agent-sdk ships today and rides your Claude
+#   # Code login (no API key needed); anthropic (needs
+#   # ANTHROPIC_API_KEY) and azure-foundry are planned.
+#   agents:
+#     - id: claude
+#       label: Claude
+#       provider: claude-agent-sdk
+#       model: claude-opus-4-8
+#       max_tokens: 4096
+#   default_agent: claude   # default: the first agent's id
 
 server:
-  port: 8000
+  port: 8000       # .claude/launch.json hardcodes this port for the
+                   # browser-preview launcher — change both together
 
 storage:
   db_path: data/coach.sqlite3   # gitignored; created on demand

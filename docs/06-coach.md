@@ -19,7 +19,9 @@ class CoachProvider(Protocol):
     async def complete(self, prompt: str) -> str
 
 # LlmConfig is a domain type, populated by config. The factory
-# raises if the selected provider needs a key that is None.
+# raises if the selected provider needs a key that is None. The
+# API layer calls it once per configured agent (`CoachAgent` is an
+# LlmConfig subclass) to build the selectable-provider map.
 def create_provider(cfg: LlmConfig,
                     api_key: str | None) -> CoachProvider
 ```
@@ -54,9 +56,10 @@ training advice.
 - `chess_coach.domain`; `claude-agent-sdk` for the v1 provider;
   python-chess (replaying moves to FEN for critical positions).
 - Consumed by the [API layer](07-api.md), which assembles the
-  input from [storage](03-storage.md) and injects `cfg.llm` (+ the
-  API key once the anthropic provider lands). No imports of
-  storage, engine, or openings.
+  input from [storage](03-storage.md) and injects each configured
+  `CoachAgent` from `cfg.coach.agents` (+ the API key once the
+  anthropic provider lands). No imports of storage, engine, or
+  openings.
 
 ## Build plan
 

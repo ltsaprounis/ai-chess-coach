@@ -115,7 +115,7 @@ class PlayerReport(BaseModel):
 
 Composites elided above for brevity (`OpeningStats`,
 `CriticalPosition`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
-`LlmConfig`) also live in `domain.py` — the component docs state
-their shapes where they are used. Types may grow, but changes to
+`LlmConfig`, `CoachAgent`) also live in `domain.py` — the component
+docs state their shapes where they are used. Types may grow, but changes to
 them are contract changes — update the affected component docs in
 the same commit.

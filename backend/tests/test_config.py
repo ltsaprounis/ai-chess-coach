@@ -22,9 +22,14 @@ def test_missing_file_yields_defaults(tmp_path: Path) -> None:
     assert config.thresholds.blunder == 200
 
 
-def test_empty_file_yields_defaults(tmp_path: Path) -> None:
+def test_empty_file_yields_default_coach_roster(tmp_path: Path) -> None:
     config = load_config(write(tmp_path, ""), env=KEY_ENV)
-    assert config.llm.model == "claude-opus-4-8"
+    assert len(config.coach.agents) == 1
+    agent = config.coach.agents[0]
+    assert (agent.id, agent.label) == ("claude", "Claude")
+    assert agent.provider == "claude-agent-sdk"
+    assert agent.model == "claude-opus-4-8"
+    assert config.coach.default_agent == "claude"
 
 
 def test_partial_override_keeps_other_defaults(tmp_path: Path) -> None:
@@ -54,12 +59,72 @@ def test_secret_in_file_is_rejected(tmp_path: Path) -> None:
 
 def test_default_provider_needs_no_api_key(tmp_path: Path) -> None:
     config = load_config(tmp_path / "nope.yaml", env={})
-    assert config.llm.provider == "claude-agent-sdk"
+    assert config.coach.agents[0].provider == "claude-agent-sdk"
     assert config.anthropic_api_key is None
 
 
-def test_anthropic_provider_requires_api_key(tmp_path: Path) -> None:
+def test_custom_roster_with_explicit_default(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "coach:\n"
+        "  agents:\n"
+        "    - id: claude\n"
+        "      label: Claude\n"
+        "    - id: fast\n"
+        "      label: Fast Claude\n"
+        "      model: claude-haiku-4-5\n"
+        "  default_agent: fast\n",
+    )
+    config = load_config(path, env=KEY_ENV)
+    assert [a.id for a in config.coach.agents] == ["claude", "fast"]
+    assert config.coach.agents[1].model == "claude-haiku-4-5"
+    assert config.coach.default_agent == "fast"
+
+
+def test_duplicate_agent_ids_are_rejected(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "coach:\n"
+        "  agents:\n"
+        "    - id: claude\n"
+        "      label: One\n"
+        "    - id: claude\n"
+        "      label: Two\n",
+    )
+    with pytest.raises(ConfigError, match="unique"):
+        load_config(path, env=KEY_ENV)
+
+
+def test_unknown_default_agent_is_rejected(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "coach:\n"
+        "  agents:\n"
+        "    - id: claude\n"
+        "      label: Claude\n"
+        "  default_agent: nope\n",
+    )
+    with pytest.raises(ConfigError, match="not a configured agent id"):
+        load_config(path, env=KEY_ENV)
+
+
+def test_legacy_llm_key_gets_migration_hint(tmp_path: Path) -> None:
     path = write(tmp_path, "llm:\n  provider: anthropic\n")
+    with pytest.raises(ConfigError, match=r"coach\.agents"):
+        load_config(path, env=KEY_ENV)
+
+
+def test_anthropic_agent_requires_api_key(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "coach:\n"
+        "  agents:\n"
+        "    - id: claude\n"
+        "      label: Claude\n"
+        "    - id: api\n"
+        "      label: API Claude\n"
+        "      provider: anthropic\n",
+    )
     with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
         load_config(path, env={})
 

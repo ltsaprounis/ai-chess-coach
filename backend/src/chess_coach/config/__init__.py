@@ -3,6 +3,7 @@
 from chess_coach.config.settings import (
     DEFAULT_CONFIG_PATH,
     AppConfig,
+    CoachConfig,
     ConfigError,
     EngineConfig,
     OpeningsConfig,
@@ -14,6 +15,7 @@ from chess_coach.config.settings import (
 __all__ = [
     "DEFAULT_CONFIG_PATH",
     "AppConfig",
+    "CoachConfig",
     "ConfigError",
     "EngineConfig",
     "OpeningsConfig",

@@ -33,6 +33,17 @@ class LlmConfig(BaseModel):
     max_tokens: int = 4096
 
 
+class CoachAgent(LlmConfig):
+    """A selectable coach: an LLM configuration with an identity.
+
+    Configured in the `coach.agents` YAML list; the API exposes the
+    roster and routes each coaching request to the chosen agent.
+    """
+
+    id: str
+    label: str
+
+
 class Game(BaseModel):
     id: str
     username: str

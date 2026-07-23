@@ -10,7 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chess_coach.api.routes import router
 from chess_coach.api.runs import AnalysisRun
-from chess_coach.coach import create_provider
+from chess_coach.coach import CoachProvider, create_provider
 from chess_coach.config import AppConfig, load_config
 from chess_coach.engine import create_pool
 from chess_coach.ingestion import UnknownUserError
@@ -39,7 +39,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if engine_bin.exists()
             else None
         )
-        app.state.provider = create_provider(cfg.llm, cfg.anthropic_api_key)
+        # One provider per configured agent; a misconfigured agent
+        # fails startup (fail fast, consistent with config).
+        providers: dict[str, CoachProvider] = {
+            agent.id: create_provider(agent, cfg.anthropic_api_key)
+            for agent in cfg.coach.agents
+        }
+        app.state.providers = providers
         runs: dict[str, AnalysisRun] = {}
         app.state.runs = runs
         # Uvicorn's own URL line scrolls away on reloads; print a

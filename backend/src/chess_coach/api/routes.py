@@ -21,6 +21,7 @@ from chess_coach.domain import (
     Game,
     GameDetail,
     GameSummary,
+    LlmProvider,
     OpeningStats,
     PlayerReport,
     Result,
@@ -70,8 +71,8 @@ def _runs(request: Request) -> dict[str, AnalysisRun]:
     return cast(dict[str, AnalysisRun], request.app.state.runs)
 
 
-def _provider(request: Request) -> CoachProvider:
-    return cast(CoachProvider, request.app.state.provider)
+def _providers(request: Request) -> dict[str, CoachProvider]:
+    return cast(dict[str, CoachProvider], request.app.state.providers)
 
 
 DbDep = Annotated[Db, Depends(_db)]
@@ -79,7 +80,7 @@ BookDep = Annotated[OpeningBook, Depends(_book)]
 CfgDep = Annotated[AppConfig, Depends(_cfg)]
 PoolDep = Annotated[AnalysisPool | None, Depends(_pool)]
 RunsDep = Annotated[dict[str, AnalysisRun], Depends(_runs)]
-ProviderDep = Annotated[CoachProvider, Depends(_provider)]
+ProvidersDep = Annotated[dict[str, CoachProvider], Depends(_providers)]
 
 
 class SyncResult(BaseModel):
@@ -252,9 +253,45 @@ async def analyze_progress(username: str, runs: RunsDep) -> EventSourceResponse:
     return EventSourceResponse(stream())
 
 
+class CoachAgentInfo(BaseModel):
+    """Selectable agent as shown to the UI; no LLM knobs exposed."""
+
+    id: str
+    label: str
+    provider: LlmProvider
+    model: str
+
+
+class CoachAgentsResponse(BaseModel):
+    agents: list[CoachAgentInfo]
+    default: str
+
+
+@router.get("/coach/agents")
+def coach_agents(cfg: CfgDep) -> CoachAgentsResponse:
+    """The configured coach roster and the default agent id."""
+    return CoachAgentsResponse(
+        agents=[
+            CoachAgentInfo(
+                id=agent.id,
+                label=agent.label,
+                provider=agent.provider,
+                model=agent.model,
+            )
+            for agent in cfg.coach.agents
+        ],
+        default=cfg.coach.default_agent,
+    )
+
+
+class CoachRequest(BaseModel):
+    agent_id: str | None = None  # None -> config default agent
+
+
 class CoachResponse(BaseModel):
     prompt: str
     advice: str
+    agent_id: str
 
 
 @router.get("/players/{username}/report")
@@ -266,9 +303,19 @@ def player_report(username: str, db: DbDep) -> PlayerReport:
 
 @router.post("/players/{username}/coach")
 async def coach_player(
-    username: str, db: DbDep, provider: ProviderDep
+    username: str,
+    db: DbDep,
+    cfg: CfgDep,
+    providers: ProvidersDep,
+    body: CoachRequest | None = None,
 ) -> CoachResponse:
-    """Build the report, render the prompt, and ask the coach LLM."""
+    """Build the report, render the prompt, and ask the chosen agent."""
+    agent_id = cfg.coach.default_agent
+    if body is not None and body.agent_id is not None:
+        agent_id = body.agent_id
+    provider = providers.get(agent_id)
+    if provider is None:
+        raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
     user = username.lower()
     report = build_report(user, list_analyzed_games(db, user))
     if report.games_analyzed == 0:
@@ -281,4 +328,4 @@ async def coach_player(
         advice = await provider.complete(prompt)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return CoachResponse(prompt=prompt, advice=advice)
+    return CoachResponse(prompt=prompt, advice=advice, agent_id=agent_id)

@@ -12,8 +12,10 @@ wires them together behind an HTTP API and owns all orchestration
    [openings](05-openings.md)
 4. `await create_pool(bin_path, cfg.engine.workers)` —
    [engine](04-engine.md)
-5. `create_provider(cfg.llm, cfg.anthropic_api_key)` —
-   [coach](06-coach.md)
+5. `create_provider(agent, cfg.anthropic_api_key)` for each agent in
+   `cfg.coach.agents` → `dict[agent_id, CoachProvider]` on
+   `app.state.providers` — [coach](06-coach.md). A misconfigured
+   agent fails startup (fail fast, consistent with config).
 6. Register routers; serve the built frontend statically in prod
    (SPA fallback: unknown non-API paths serve index.html so
    client-side routes survive refreshes and deep links).
@@ -32,7 +34,8 @@ injected into routes via FastAPI dependencies.
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses |
-| POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → provider; returns `{prompt, advice}` |
+| GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
+| POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider; optional body `{agent_id}` (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id}` |
 
 Request/response models are pydantic, so FastAPI's OpenAPI schema is
 complete — the frontend generates its TS types from it

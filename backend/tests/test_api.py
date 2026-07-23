@@ -12,11 +12,12 @@ import chess_coach.api.routes as routes
 from chess_coach.api import create_app
 from chess_coach.config import (
     AppConfig,
+    CoachConfig,
     EngineConfig,
     OpeningsConfig,
     StorageConfig,
 )
-from chess_coach.domain import Game, GameAnalysis
+from chess_coach.domain import CoachAgent, Game, GameAnalysis
 from chess_coach.engine import EngineOptions, Progress, ProgressCallback
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import open_db, save_analysis, upsert_games
@@ -29,12 +30,13 @@ TESTDATA = Path(__file__).parent / "testdata"
 class StubProvider:
     """Canned coach advice; records the prompt it was given."""
 
-    def __init__(self) -> None:
+    def __init__(self, advice: str = "Practice rook endgames.") -> None:
+        self.advice = advice
         self.prompts: list[str] = []
 
     async def complete(self, prompt: str) -> str:
         self.prompts.append(prompt)
-        return "Practice rook endgames."
+        return self.advice
 
 
 class StubPool:
@@ -67,8 +69,9 @@ def client(
     async def fake_create_pool(bin_path: Path, workers: int) -> StubPool:
         return StubPool()
 
-    def fake_create_provider(cfg: object, api_key: object = None) -> StubProvider:
-        return StubProvider()
+    def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
+        # Advice names the agent so tests can see who answered.
+        return StubProvider(advice=f"advice from {cfg.id}")
 
     monkeypatch.setattr(app_module, "create_pool", fake_create_pool)
     monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
@@ -80,6 +83,12 @@ def client(
         engine=EngineConfig(bin_path=fake_bin, analyze_limit=2),
         storage=StorageConfig(db_path=db_path),
         openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        coach=CoachConfig(
+            agents=[
+                CoachAgent(id="claude", label="Claude"),
+                CoachAgent(id="beta", label="Beta", model="claude-sonnet-4-5"),
+            ]
+        ),
         anthropic_api_key="sk-test",
     )
     with TestClient(create_app(config)) as test_client:
@@ -331,12 +340,53 @@ def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> 
     assert report["overall_acpl"] == 2.5
 
 
-def test_coach_returns_prompt_and_advice(client: TestClient, db_path: Path) -> None:
+def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
+    body: Any = get(client, "/api/coach/agents").json()
+    assert body["default"] == "claude"
+    # Exact match also proves max_tokens is not exposed.
+    assert body["agents"] == [
+        {
+            "id": "claude",
+            "label": "Claude",
+            "provider": "claude-agent-sdk",
+            "model": "claude-opus-4-8",
+        },
+        {
+            "id": "beta",
+            "label": "Beta",
+            "provider": "claude-agent-sdk",
+            "model": "claude-sonnet-4-5",
+        },
+    ]
+
+
+def test_coach_uses_default_agent_without_a_body(
+    client: TestClient, db_path: Path
+) -> None:
     seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
 
     body: Any = post(client, "/api/players/testuser/coach").json()
-    assert body["advice"] == "Practice rook endgames."
+    assert body["agent_id"] == "claude"
+    assert body["advice"] == "advice from claude"
     assert "## Player profile: testuser" in body["prompt"]
+
+
+def test_coach_routes_to_the_requested_agent(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    body: Any = post(
+        client, "/api/players/testuser/coach", json={"agent_id": "beta"}
+    ).json()
+    assert body["agent_id"] == "beta"
+    assert body["advice"] == "advice from beta"
+
+
+def test_coach_400s_on_unknown_agent(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = post(client, "/api/players/testuser/coach", json={"agent_id": "nope"})
+    assert response.status_code == 400
+    assert "unknown coach agent" in response.json()["error"]["message"]
 
 
 def test_coach_409s_without_analyzed_games(client: TestClient, db_path: Path) -> None:

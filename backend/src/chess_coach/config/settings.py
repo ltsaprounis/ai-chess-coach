@@ -3,12 +3,12 @@
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import Self, cast
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from chess_coach.domain import LlmConfig, Thresholds
+from chess_coach.domain import CoachAgent, Thresholds
 
 DEFAULT_CONFIG_PATH = Path("coach.config.yaml")
 
@@ -36,10 +36,40 @@ class OpeningsConfig(BaseModel):
     book_dir: Path | None = None  # None -> <repo root>/vendor/chess-openings
 
 
+def _default_agents() -> list[CoachAgent]:
+    return [CoachAgent(id="claude", label="Claude")]  # LlmConfig defaults
+
+
+class CoachConfig(BaseModel):
+    agents: list[CoachAgent] = Field(default_factory=_default_agents)
+    default_agent: str = ""  # resolved: "" -> first agent's id
+
+    @model_validator(mode="after")
+    def _check_roster(self) -> Self:
+        if not self.agents:
+            raise ValueError("coach.agents must list at least one agent")
+        ids = [agent.id for agent in self.agents]
+        if not all(ids):
+            raise ValueError("every coach.agents entry needs a non-empty id")
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        if duplicates:
+            raise ValueError(
+                f"coach.agents ids must be unique; duplicated: {', '.join(duplicates)}"
+            )
+        if not self.default_agent:
+            self.default_agent = ids[0]
+        elif self.default_agent not in ids:
+            raise ValueError(
+                f"coach.default_agent {self.default_agent!r} is not a "
+                f"configured agent id (configured: {', '.join(ids)})"
+            )
+        return self
+
+
 class AppConfig(BaseModel):
     engine: EngineConfig = Field(default_factory=EngineConfig)
     thresholds: Thresholds = Field(default_factory=Thresholds)
-    llm: LlmConfig = Field(default_factory=LlmConfig)
+    coach: CoachConfig = Field(default_factory=CoachConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     openings: OpeningsConfig = Field(default_factory=OpeningsConfig)
@@ -54,7 +84,7 @@ def load_config(
 
     A missing file means all defaults. Fails fast with `ConfigError`
     on invalid YAML/values, on secrets placed in the file, and on a
-    missing API key for the selected LLM provider.
+    missing API key for a provider some coach agent requires.
     """
     path = DEFAULT_CONFIG_PATH if path is None else path
     env = os.environ if env is None else env
@@ -65,6 +95,12 @@ def load_config(
             f"{path}: secrets never go in the config file; "
             "set the ANTHROPIC_API_KEY environment variable instead"
         )
+    if "llm" in raw:
+        raise ConfigError(
+            f"{path}: the top-level 'llm' section was replaced by the "
+            "coach agent roster; move it to 'coach.agents' "
+            "(see coach.config.example.yaml)"
+        )
 
     try:
         config = AppConfig.model_validate(raw)
@@ -72,10 +108,11 @@ def load_config(
         raise ConfigError(f"{path} is invalid:\n{exc}") from exc
 
     config.anthropic_api_key = env.get("ANTHROPIC_API_KEY")
-    if config.llm.provider == "anthropic" and not config.anthropic_api_key:
+    needs_key = any(a.provider == "anthropic" for a in config.coach.agents)
+    if needs_key and not config.anthropic_api_key:
         raise ConfigError(
-            "llm.provider is 'anthropic' but the ANTHROPIC_API_KEY "
-            "environment variable is not set"
+            "a coach agent uses provider 'anthropic' but the "
+            "ANTHROPIC_API_KEY environment variable is not set"
         )
     return config
 
