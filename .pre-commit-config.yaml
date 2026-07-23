@@ -17,3 +17,17 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: lockfile-public-registry
+        name: lockfile is registry-agnostic
+        # A machine-level npm registry override (e.g. a private mirror)
+        # makes pnpm record feed-specific tarball URLs in the lockfile.
+        # A registry-agnostic lockfile contains no URLs at all, so any
+        # URL here means it must be regenerated:
+        #   cd web && rm -rf node_modules pnpm-lock.yaml && \
+        #     pnpm install --lockfile-only --registry=https://registry.npmjs.org/
+        # (Adjust this check if a git- or URL-sourced dependency is ever
+        # added deliberately.)
+        entry: bash -c 'if grep -qE "tarball:|https?://" web/pnpm-lock.yaml; then echo "web/pnpm-lock.yaml contains registry URLs; see .pre-commit-config.yaml for the fix"; exit 1; fi'
+        language: system
+        files: ^web/pnpm-lock\.yaml$
+        pass_filenames: false

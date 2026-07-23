@@ -61,281 +61,281 @@ importers:
 packages:
 
   '@babel/code-frame@7.29.7':
-    resolution: {integrity: sha1-8vu/6ofESiFZDsUVt3iywm2IZuc=, tarball: https://registry.npmjs.org/@babel/code-frame/-/code-frame-7.29.7.tgz}
+    resolution: {integrity: sha1-8vu/6ofESiFZDsUVt3iywm2IZuc=}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-identifier@7.29.7':
-    resolution: {integrity: sha1-vYcITO0MeW7Ea9pJLeboPSnon8I=, tarball: https://registry.npmjs.org/@babel/helper-validator-identifier/-/helper-validator-identifier-7.29.7.tgz}
+    resolution: {integrity: sha1-vYcITO0MeW7Ea9pJLeboPSnon8I=}
     engines: {node: '>=6.9.0'}
 
   '@biomejs/biome@2.5.4':
-    resolution: {integrity: sha1-uR9PiffGVXFjF2zYQaEdtq46nqA=, tarball: https://registry.npmjs.org/@biomejs/biome/-/biome-2.5.4.tgz}
+    resolution: {integrity: sha1-uR9PiffGVXFjF2zYQaEdtq46nqA=}
     engines: {node: '>=14.21.3'}
     hasBin: true
 
   '@biomejs/cli-darwin-arm64@2.5.4':
-    resolution: {integrity: sha1-KLQrNKeKksi/I+95prPb1WO3N40=, tarball: https://registry.npmjs.org/@biomejs/cli-darwin-arm64/-/cli-darwin-arm64-2.5.4.tgz}
+    resolution: {integrity: sha1-KLQrNKeKksi/I+95prPb1WO3N40=}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [darwin]
 
   '@biomejs/cli-darwin-x64@2.5.4':
-    resolution: {integrity: sha1-6pJPWPyveH83isC/oYJoVFfxQBE=, tarball: https://registry.npmjs.org/@biomejs/cli-darwin-x64/-/cli-darwin-x64-2.5.4.tgz}
+    resolution: {integrity: sha1-6pJPWPyveH83isC/oYJoVFfxQBE=}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [darwin]
 
   '@biomejs/cli-linux-arm64-musl@2.5.4':
-    resolution: {integrity: sha1-Ih05rwU5GhcHHbcU5AXgZ1cF6a0=, tarball: https://registry.npmjs.org/@biomejs/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.5.4.tgz}
+    resolution: {integrity: sha1-Ih05rwU5GhcHHbcU5AXgZ1cF6a0=}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
   '@biomejs/cli-linux-arm64@2.5.4':
-    resolution: {integrity: sha1-I5gTJg7SLtietJcFYHhTu16DuJk=, tarball: https://registry.npmjs.org/@biomejs/cli-linux-arm64/-/cli-linux-arm64-2.5.4.tgz}
+    resolution: {integrity: sha1-I5gTJg7SLtietJcFYHhTu16DuJk=}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
   '@biomejs/cli-linux-x64-musl@2.5.4':
-    resolution: {integrity: sha1-KmrwjChOp+RPcyq/WFwHpm3an1s=, tarball: https://registry.npmjs.org/@biomejs/cli-linux-x64-musl/-/cli-linux-x64-musl-2.5.4.tgz}
+    resolution: {integrity: sha1-KmrwjChOp+RPcyq/WFwHpm3an1s=}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
   '@biomejs/cli-linux-x64@2.5.4':
-    resolution: {integrity: sha1-RAwFuUAD5TPtbDMJfUCwSTAPpWo=, tarball: https://registry.npmjs.org/@biomejs/cli-linux-x64/-/cli-linux-x64-2.5.4.tgz}
+    resolution: {integrity: sha1-RAwFuUAD5TPtbDMJfUCwSTAPpWo=}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
   '@biomejs/cli-win32-arm64@2.5.4':
-    resolution: {integrity: sha1-nilkO3sOejwhGM6Z5RCr4XA4XHI=, tarball: https://registry.npmjs.org/@biomejs/cli-win32-arm64/-/cli-win32-arm64-2.5.4.tgz}
+    resolution: {integrity: sha1-nilkO3sOejwhGM6Z5RCr4XA4XHI=}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [win32]
 
   '@biomejs/cli-win32-x64@2.5.4':
-    resolution: {integrity: sha1-pSpUVOTgvnvQjXiKH73lKJhN8JU=, tarball: https://registry.npmjs.org/@biomejs/cli-win32-x64/-/cli-win32-x64-2.5.4.tgz}
+    resolution: {integrity: sha1-pSpUVOTgvnvQjXiKH73lKJhN8JU=}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
 
   '@dnd-kit/accessibility@3.1.1':
-    resolution: {integrity: sha1-O0ICvWuzcKBzD2c0hneFkZvqxq8=, tarball: https://registry.npmjs.org/@dnd-kit/accessibility/-/accessibility-3.1.1.tgz}
+    resolution: {integrity: sha1-O0ICvWuzcKBzD2c0hneFkZvqxq8=}
     peerDependencies:
       react: '>=16.8.0'
 
   '@dnd-kit/core@6.3.1':
-    resolution: {integrity: sha1-TDZAamLHuqxJlyb4mZNfk/Dm0AM=, tarball: https://registry.npmjs.org/@dnd-kit/core/-/core-6.3.1.tgz}
+    resolution: {integrity: sha1-TDZAamLHuqxJlyb4mZNfk/Dm0AM=}
     peerDependencies:
       react: '>=16.8.0'
       react-dom: '>=16.8.0'
 
   '@dnd-kit/modifiers@9.0.0':
-    resolution: {integrity: sha1-lqAoDHexDHFu952Xks560ENwdx0=, tarball: https://registry.npmjs.org/@dnd-kit/modifiers/-/modifiers-9.0.0.tgz}
+    resolution: {integrity: sha1-lqAoDHexDHFu952Xks560ENwdx0=}
     peerDependencies:
       '@dnd-kit/core': ^6.3.0
       react: '>=16.8.0'
 
   '@dnd-kit/utilities@3.2.2':
-    resolution: {integrity: sha1-WjK2rzVtxfdNYbN9b3EppAQM7Xs=, tarball: https://registry.npmjs.org/@dnd-kit/utilities/-/utilities-3.2.2.tgz}
+    resolution: {integrity: sha1-WjK2rzVtxfdNYbN9b3EppAQM7Xs=}
     peerDependencies:
       react: '>=16.8.0'
 
   '@emnapi/core@1.11.1':
-    resolution: {integrity: sha1-ueEGTzprFjHiQeY460jXNr/TcqY=, tarball: https://registry.npmjs.org/@emnapi/core/-/core-1.11.1.tgz}
+    resolution: {integrity: sha1-ueEGTzprFjHiQeY460jXNr/TcqY=}
 
   '@emnapi/runtime@1.11.1':
-    resolution: {integrity: sha1-WPHz1dgamxL3k6tojJY3GQECfCQ=, tarball: https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.1.tgz}
+    resolution: {integrity: sha1-WPHz1dgamxL3k6tojJY3GQECfCQ=}
 
   '@emnapi/wasi-threads@1.2.2':
-    resolution: {integrity: sha1-TJO+z1v6OxPRu9zAau44MhrYE5o=, tarball: https://registry.npmjs.org/@emnapi/wasi-threads/-/wasi-threads-1.2.2.tgz}
+    resolution: {integrity: sha1-TJO+z1v6OxPRu9zAau44MhrYE5o=}
 
   '@jridgewell/sourcemap-codec@1.5.5':
-    resolution: {integrity: sha1-aRKwDSxjHA0Vzhp6tXzWV/Ko+Lo=, tarball: https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz}
+    resolution: {integrity: sha1-aRKwDSxjHA0Vzhp6tXzWV/Ko+Lo=}
 
   '@napi-rs/wasm-runtime@1.1.6':
-    resolution: {integrity: sha1-7TOAbQ+b6Y3HbQw9T9hy/acBtdU=, tarball: https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.1.6.tgz}
+    resolution: {integrity: sha1-7TOAbQ+b6Y3HbQw9T9hy/acBtdU=}
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
   '@oxc-project/types@0.139.0':
-    resolution: {integrity: sha1-ONdrnb+TTCoCvhdPsyzuvxgv50I=, tarball: https://registry.npmjs.org/@oxc-project/types/-/types-0.139.0.tgz}
+    resolution: {integrity: sha1-ONdrnb+TTCoCvhdPsyzuvxgv50I=}
 
   '@redocly/ajv@8.11.2':
-    resolution: {integrity: sha1-RuG/Mh7ArB4P0x3qQaPR/L3NoLU=, tarball: https://registry.npmjs.org/@redocly/ajv/-/ajv-8.11.2.tgz}
+    resolution: {integrity: sha1-RuG/Mh7ArB4P0x3qQaPR/L3NoLU=}
 
   '@redocly/config@0.22.0':
-    resolution: {integrity: sha1-skVPRy+dKyF9VvguTyjTRpAfMkI=, tarball: https://registry.npmjs.org/@redocly/config/-/config-0.22.0.tgz}
+    resolution: {integrity: sha1-skVPRy+dKyF9VvguTyjTRpAfMkI=}
 
   '@redocly/openapi-core@1.34.17':
-    resolution: {integrity: sha1-HuswcMOZql01V9CFOdP4gnvRzzs=, tarball: https://registry.npmjs.org/@redocly/openapi-core/-/openapi-core-1.34.17.tgz}
+    resolution: {integrity: sha1-HuswcMOZql01V9CFOdP4gnvRzzs=}
     engines: {node: '>=18.17.0', npm: '>=9.5.0'}
 
   '@rolldown/binding-android-arm64@1.1.5':
-    resolution: {integrity: sha1-9Yy5oKgSjtBYIoJyBShUf8XANfM=, tarball: https://registry.npmjs.org/@rolldown/binding-android-arm64/-/binding-android-arm64-1.1.5.tgz}
+    resolution: {integrity: sha1-9Yy5oKgSjtBYIoJyBShUf8XANfM=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [android]
 
   '@rolldown/binding-darwin-arm64@1.1.5':
-    resolution: {integrity: sha1-RBFEwFpKgxqnUmmrw6SjJDdOpwc=, tarball: https://registry.npmjs.org/@rolldown/binding-darwin-arm64/-/binding-darwin-arm64-1.1.5.tgz}
+    resolution: {integrity: sha1-RBFEwFpKgxqnUmmrw6SjJDdOpwc=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [darwin]
 
   '@rolldown/binding-darwin-x64@1.1.5':
-    resolution: {integrity: sha1-yC4wZSzvUsSvkl1cZsiVWkAxmBY=, tarball: https://registry.npmjs.org/@rolldown/binding-darwin-x64/-/binding-darwin-x64-1.1.5.tgz}
+    resolution: {integrity: sha1-yC4wZSzvUsSvkl1cZsiVWkAxmBY=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [darwin]
 
   '@rolldown/binding-freebsd-x64@1.1.5':
-    resolution: {integrity: sha1-wy6c5/ocD7K4CROio6BcPpB9BrA=, tarball: https://registry.npmjs.org/@rolldown/binding-freebsd-x64/-/binding-freebsd-x64-1.1.5.tgz}
+    resolution: {integrity: sha1-wy6c5/ocD7K4CROio6BcPpB9BrA=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [freebsd]
 
   '@rolldown/binding-linux-arm-gnueabihf@1.1.5':
-    resolution: {integrity: sha1-zpC14iMWretQLqAQWC9JjNBgTyc=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-arm-gnueabihf/-/binding-linux-arm-gnueabihf-1.1.5.tgz}
+    resolution: {integrity: sha1-zpC14iMWretQLqAQWC9JjNBgTyc=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm]
     os: [linux]
 
   '@rolldown/binding-linux-arm64-gnu@1.1.5':
-    resolution: {integrity: sha1-kZRxEMTdqk7vsATlJogHCXcIUgE=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.1.5.tgz}
+    resolution: {integrity: sha1-kZRxEMTdqk7vsATlJogHCXcIUgE=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
   '@rolldown/binding-linux-arm64-musl@1.1.5':
-    resolution: {integrity: sha1-6zKy1BCMHHArkejN6KBD6uXKqU0=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-arm64-musl/-/binding-linux-arm64-musl-1.1.5.tgz}
+    resolution: {integrity: sha1-6zKy1BCMHHArkejN6KBD6uXKqU0=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
   '@rolldown/binding-linux-ppc64-gnu@1.1.5':
-    resolution: {integrity: sha1-zLlDwR5acmVcuwL8EWNUHOtkB4I=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-ppc64-gnu/-/binding-linux-ppc64-gnu-1.1.5.tgz}
+    resolution: {integrity: sha1-zLlDwR5acmVcuwL8EWNUHOtkB4I=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
   '@rolldown/binding-linux-s390x-gnu@1.1.5':
-    resolution: {integrity: sha1-ozcx7lZ+kLdfrG5eVTB+iiswOPA=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-s390x-gnu/-/binding-linux-s390x-gnu-1.1.5.tgz}
+    resolution: {integrity: sha1-ozcx7lZ+kLdfrG5eVTB+iiswOPA=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
   '@rolldown/binding-linux-x64-gnu@1.1.5':
-    resolution: {integrity: sha1-p0wBqqzt/BHDm2/rozpfoMZUlJ8=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.1.5.tgz}
+    resolution: {integrity: sha1-p0wBqqzt/BHDm2/rozpfoMZUlJ8=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.1.5':
-    resolution: {integrity: sha1-KM0XhJT6HmXbpBIim1zlXE3Vy9E=, tarball: https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.1.5.tgz}
+    resolution: {integrity: sha1-KM0XhJT6HmXbpBIim1zlXE3Vy9E=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
   '@rolldown/binding-openharmony-arm64@1.1.5':
-    resolution: {integrity: sha1-98dfqRP8IIhNJqfUiNT1xZfNccA=, tarball: https://registry.npmjs.org/@rolldown/binding-openharmony-arm64/-/binding-openharmony-arm64-1.1.5.tgz}
+    resolution: {integrity: sha1-98dfqRP8IIhNJqfUiNT1xZfNccA=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [openharmony]
 
   '@rolldown/binding-wasm32-wasi@1.1.5':
-    resolution: {integrity: sha1-w3lYGUd4cIHfNj6hBhQPzV/sJS0=, tarball: https://registry.npmjs.org/@rolldown/binding-wasm32-wasi/-/binding-wasm32-wasi-1.1.5.tgz}
+    resolution: {integrity: sha1-w3lYGUd4cIHfNj6hBhQPzV/sJS0=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [wasm32]
 
   '@rolldown/binding-win32-arm64-msvc@1.1.5':
-    resolution: {integrity: sha1-8jyIaU96cpoS85UCSu4434Cha6M=, tarball: https://registry.npmjs.org/@rolldown/binding-win32-arm64-msvc/-/binding-win32-arm64-msvc-1.1.5.tgz}
+    resolution: {integrity: sha1-8jyIaU96cpoS85UCSu4434Cha6M=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [win32]
 
   '@rolldown/binding-win32-x64-msvc@1.1.5':
-    resolution: {integrity: sha1-M3fI3g5WqIV/ESF1YRRwkOh0y0Y=, tarball: https://registry.npmjs.org/@rolldown/binding-win32-x64-msvc/-/binding-win32-x64-msvc-1.1.5.tgz}
+    resolution: {integrity: sha1-M3fI3g5WqIV/ESF1YRRwkOh0y0Y=}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [win32]
 
   '@rolldown/pluginutils@1.0.1':
-    resolution: {integrity: sha1-4/zuCT+7XOdl4a0Ij/TeKIn2+b4=, tarball: https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz}
+    resolution: {integrity: sha1-4/zuCT+7XOdl4a0Ij/TeKIn2+b4=}
 
   '@standard-schema/spec@1.1.0':
-    resolution: {integrity: sha1-p5tV26+GBIEvUtFAssmrQbwVC7g=, tarball: https://registry.npmjs.org/@standard-schema/spec/-/spec-1.1.0.tgz}
+    resolution: {integrity: sha1-p5tV26+GBIEvUtFAssmrQbwVC7g=}
 
   '@tanstack/query-core@5.101.2':
-    resolution: {integrity: sha1-yQH7draBaf9eHkQBdATn4ukM4a8=, tarball: https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.101.2.tgz}
+    resolution: {integrity: sha1-yQH7draBaf9eHkQBdATn4ukM4a8=}
 
   '@tanstack/react-query@5.101.2':
-    resolution: {integrity: sha1-2IYzG80p34S8BMRdkxkrggfRfH8=, tarball: https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.101.2.tgz}
+    resolution: {integrity: sha1-2IYzG80p34S8BMRdkxkrggfRfH8=}
     peerDependencies:
       react: ^18 || ^19
 
   '@tybys/wasm-util@0.10.3':
-    resolution: {integrity: sha1-AVy6np3UfOFNA9KoxdVHv7FpZl0=, tarball: https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.3.tgz}
+    resolution: {integrity: sha1-AVy6np3UfOFNA9KoxdVHv7FpZl0=}
 
   '@types/chai@5.2.3':
-    resolution: {integrity: sha1-jpzZ4cNYH6azQaWu1ViOsoW+C0o=, tarball: https://registry.npmjs.org/@types/chai/-/chai-5.2.3.tgz}
+    resolution: {integrity: sha1-jpzZ4cNYH6azQaWu1ViOsoW+C0o=}
 
   '@types/debug@4.1.13':
-    resolution: {integrity: sha1-ItHMnVQtNZPK6nZPl0MGqzYobuc=, tarball: https://registry.npmjs.org/@types/debug/-/debug-4.1.13.tgz}
+    resolution: {integrity: sha1-ItHMnVQtNZPK6nZPl0MGqzYobuc=}
 
   '@types/deep-eql@4.0.2':
-    resolution: {integrity: sha1-M0MRlx06BxIefrkbaEpgXn7qnL0=, tarball: https://registry.npmjs.org/@types/deep-eql/-/deep-eql-4.0.2.tgz}
+    resolution: {integrity: sha1-M0MRlx06BxIefrkbaEpgXn7qnL0=}
 
   '@types/estree-jsx@1.0.5':
-    resolution: {integrity: sha1-hYqI6iDzT+ZREfAFpon6Hr9w3Bg=, tarball: https://registry.npmjs.org/@types/estree-jsx/-/estree-jsx-1.0.5.tgz}
+    resolution: {integrity: sha1-hYqI6iDzT+ZREfAFpon6Hr9w3Bg=}
 
   '@types/estree@1.0.9':
-    resolution: {integrity: sha1-zz8Oh2177hWpOrkluCv1cKOQSiQ=, tarball: https://registry.npmjs.org/@types/estree/-/estree-1.0.9.tgz}
+    resolution: {integrity: sha1-zz8Oh2177hWpOrkluCv1cKOQSiQ=}
 
   '@types/hast@3.0.5':
-    resolution: {integrity: sha1-SAIN5MDmNJL0yp20IGjBCPaLf48=, tarball: https://registry.npmjs.org/@types/hast/-/hast-3.0.5.tgz}
+    resolution: {integrity: sha1-SAIN5MDmNJL0yp20IGjBCPaLf48=}
 
   '@types/mdast@4.0.4':
-    resolution: {integrity: sha1-fM9y7dLxqn3TQ34YDGQ3NYWATdY=, tarball: https://registry.npmjs.org/@types/mdast/-/mdast-4.0.4.tgz}
+    resolution: {integrity: sha1-fM9y7dLxqn3TQ34YDGQ3NYWATdY=}
 
   '@types/ms@2.1.0':
-    resolution: {integrity: sha1-BSqmekjszEMJ1/AZG35BQ0uQu3g=, tarball: https://registry.npmjs.org/@types/ms/-/ms-2.1.0.tgz}
+    resolution: {integrity: sha1-BSqmekjszEMJ1/AZG35BQ0uQu3g=}
 
   '@types/node@24.13.3':
-    resolution: {integrity: sha1-SfGL08ZHhm3NpRoHVsFF4UWQzhY=, tarball: https://registry.npmjs.org/@types/node/-/node-24.13.3.tgz}
+    resolution: {integrity: sha1-SfGL08ZHhm3NpRoHVsFF4UWQzhY=}
 
   '@types/react-dom@19.2.3':
-    resolution: {integrity: sha1-weMF0VpSo+UI1U3Kdw0gLLY6vyw=, tarball: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.3.tgz}
+    resolution: {integrity: sha1-weMF0VpSo+UI1U3Kdw0gLLY6vyw=}
     peerDependencies:
       '@types/react': ^19.2.0
 
   '@types/react@19.2.17':
-    resolution: {integrity: sha1-3MrDZbqg8XNOwnD/S1HIlGXo3H8=, tarball: https://registry.npmjs.org/@types/react/-/react-19.2.17.tgz}
+    resolution: {integrity: sha1-3MrDZbqg8XNOwnD/S1HIlGXo3H8=}
 
   '@types/unist@2.0.11':
-    resolution: {integrity: sha1-Ea9XsSfjJId3SEH3pOVOqxZtA8Q=, tarball: https://registry.npmjs.org/@types/unist/-/unist-2.0.11.tgz}
+    resolution: {integrity: sha1-Ea9XsSfjJId3SEH3pOVOqxZtA8Q=}
 
   '@types/unist@3.0.3':
-    resolution: {integrity: sha1-rKqw+RnOaczmKcLU7S60rcG2wgw=, tarball: https://registry.npmjs.org/@types/unist/-/unist-3.0.3.tgz}
+    resolution: {integrity: sha1-rKqw+RnOaczmKcLU7S60rcG2wgw=}
 
   '@ungap/structured-clone@1.3.3':
-    resolution: {integrity: sha1-CUBB4aTLGYfwODNUISgayL45C8w=, tarball: https://registry.npmjs.org/@ungap/structured-clone/-/structured-clone-1.3.3.tgz}
+    resolution: {integrity: sha1-CUBB4aTLGYfwODNUISgayL45C8w=}
 
   '@vitejs/plugin-react@6.0.3':
-    resolution: {integrity: sha1-VfHX9VhTTRCu8DwAfcIIt8N3HOQ=, tarball: https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.0.3.tgz}
+    resolution: {integrity: sha1-VfHX9VhTTRCu8DwAfcIIt8N3HOQ=}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0
@@ -348,10 +348,10 @@ packages:
         optional: true
 
   '@vitest/expect@4.1.10':
-    resolution: {integrity: sha1-eZwG/ES7DPfieEE3tifFzBcyhdQ=, tarball: https://registry.npmjs.org/@vitest/expect/-/expect-4.1.10.tgz}
+    resolution: {integrity: sha1-eZwG/ES7DPfieEE3tifFzBcyhdQ=}
 
   '@vitest/mocker@4.1.10':
-    resolution: {integrity: sha1-JBOYerTNf6HCthS0BMQHv2rR6tE=, tarball: https://registry.npmjs.org/@vitest/mocker/-/mocker-4.1.10.tgz}
+    resolution: {integrity: sha1-JBOYerTNf6HCthS0BMQHv2rR6tE=}
     peerDependencies:
       msw: ^2.4.9
       vite: ^6.0.0 || ^7.0.0 || ^8.0.0
@@ -362,87 +362,87 @@ packages:
         optional: true
 
   '@vitest/pretty-format@4.1.10':
-    resolution: {integrity: sha1-dVQucnOgjMEP1Nja1OPrHxbNlYw=, tarball: https://registry.npmjs.org/@vitest/pretty-format/-/pretty-format-4.1.10.tgz}
+    resolution: {integrity: sha1-dVQucnOgjMEP1Nja1OPrHxbNlYw=}
 
   '@vitest/runner@4.1.10':
-    resolution: {integrity: sha1-/r8KIakWhCFCLRlVNw5gb+q2A1U=, tarball: https://registry.npmjs.org/@vitest/runner/-/runner-4.1.10.tgz}
+    resolution: {integrity: sha1-/r8KIakWhCFCLRlVNw5gb+q2A1U=}
 
   '@vitest/snapshot@4.1.10':
-    resolution: {integrity: sha1-fj6f7H1NRyMuSTz9y9IXDeQ3HAQ=, tarball: https://registry.npmjs.org/@vitest/snapshot/-/snapshot-4.1.10.tgz}
+    resolution: {integrity: sha1-fj6f7H1NRyMuSTz9y9IXDeQ3HAQ=}
 
   '@vitest/spy@4.1.10':
-    resolution: {integrity: sha1-XAv6l7Vrup43QDyXbbd2/2q1b2U=, tarball: https://registry.npmjs.org/@vitest/spy/-/spy-4.1.10.tgz}
+    resolution: {integrity: sha1-XAv6l7Vrup43QDyXbbd2/2q1b2U=}
 
   '@vitest/utils@4.1.10':
-    resolution: {integrity: sha1-/8cQVfGL/Msf0FhjZevCgkiS5AM=, tarball: https://registry.npmjs.org/@vitest/utils/-/utils-4.1.10.tgz}
+    resolution: {integrity: sha1-/8cQVfGL/Msf0FhjZevCgkiS5AM=}
 
   agent-base@7.1.4:
-    resolution: {integrity: sha1-48121MVI7oldPD/Y3B9sW5Ay56g=, tarball: https://registry.npmjs.org/agent-base/-/agent-base-7.1.4.tgz}
+    resolution: {integrity: sha1-48121MVI7oldPD/Y3B9sW5Ay56g=}
     engines: {node: '>= 14'}
 
   ansi-colors@4.1.3:
-    resolution: {integrity: sha1-N2ETQOsiQ+cMxgTK011jJw1IeBs=, tarball: https://registry.npmjs.org/ansi-colors/-/ansi-colors-4.1.3.tgz}
+    resolution: {integrity: sha1-N2ETQOsiQ+cMxgTK011jJw1IeBs=}
     engines: {node: '>=6'}
 
   argparse@2.0.1:
-    resolution: {integrity: sha1-JG9Q88p4oyQPbJl+ipvR6sSeSzg=, tarball: https://registry.npmjs.org/argparse/-/argparse-2.0.1.tgz}
+    resolution: {integrity: sha1-JG9Q88p4oyQPbJl+ipvR6sSeSzg=}
 
   assertion-error@2.0.1:
-    resolution: {integrity: sha1-9kGhlrM1aQsQcL8AtudZP+wZC/c=, tarball: https://registry.npmjs.org/assertion-error/-/assertion-error-2.0.1.tgz}
+    resolution: {integrity: sha1-9kGhlrM1aQsQcL8AtudZP+wZC/c=}
     engines: {node: '>=12'}
 
   bail@2.0.2:
-    resolution: {integrity: sha1-0m9c2P5db4MqMVF7n3w1YEC6bV0=, tarball: https://registry.npmjs.org/bail/-/bail-2.0.2.tgz}
+    resolution: {integrity: sha1-0m9c2P5db4MqMVF7n3w1YEC6bV0=}
 
   balanced-match@1.0.2:
-    resolution: {integrity: sha1-6D46fj8wCzTLnYf2FfoMvzV2kO4=, tarball: https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.2.tgz}
+    resolution: {integrity: sha1-6D46fj8wCzTLnYf2FfoMvzV2kO4=}
 
   brace-expansion@2.1.2:
-    resolution: {integrity: sha1-C7oicf631Fiw0xrRNiWqpHVEMeI=, tarball: https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.1.2.tgz}
+    resolution: {integrity: sha1-C7oicf631Fiw0xrRNiWqpHVEMeI=}
 
   ccount@2.0.1:
-    resolution: {integrity: sha1-F6O/gjAuCHDW2kOgExGovAKj7PU=, tarball: https://registry.npmjs.org/ccount/-/ccount-2.0.1.tgz}
+    resolution: {integrity: sha1-F6O/gjAuCHDW2kOgExGovAKj7PU=}
 
   chai@6.2.2:
-    resolution: {integrity: sha1-rkG1LJrKh3NFBTYnF/MlX6zaNg4=, tarball: https://registry.npmjs.org/chai/-/chai-6.2.2.tgz}
+    resolution: {integrity: sha1-rkG1LJrKh3NFBTYnF/MlX6zaNg4=}
     engines: {node: '>=18'}
 
   change-case@5.4.4:
-    resolution: {integrity: sha1-DVK1B9j7jyBDQ0MjgdGm17/5egI=, tarball: https://registry.npmjs.org/change-case/-/change-case-5.4.4.tgz}
+    resolution: {integrity: sha1-DVK1B9j7jyBDQ0MjgdGm17/5egI=}
 
   character-entities-html4@2.1.0:
-    resolution: {integrity: sha1-HxrblAyXGksiujndymthjcblays=, tarball: https://registry.npmjs.org/character-entities-html4/-/character-entities-html4-2.1.0.tgz}
+    resolution: {integrity: sha1-HxrblAyXGksiujndymthjcblays=}
 
   character-entities-legacy@3.0.0:
-    resolution: {integrity: sha1-dryDqQc4kB17wiOp6TdZ/dVgEls=, tarball: https://registry.npmjs.org/character-entities-legacy/-/character-entities-legacy-3.0.0.tgz}
+    resolution: {integrity: sha1-dryDqQc4kB17wiOp6TdZ/dVgEls=}
 
   character-entities@2.0.2:
-    resolution: {integrity: sha1-LQnC5yzZUjB2zLIRV9/2atQ/zCI=, tarball: https://registry.npmjs.org/character-entities/-/character-entities-2.0.2.tgz}
+    resolution: {integrity: sha1-LQnC5yzZUjB2zLIRV9/2atQ/zCI=}
 
   character-reference-invalid@2.0.1:
-    resolution: {integrity: sha1-hcZrBB5DtHIQ+vQBJ4q/gIrEXLk=, tarball: https://registry.npmjs.org/character-reference-invalid/-/character-reference-invalid-2.0.1.tgz}
+    resolution: {integrity: sha1-hcZrBB5DtHIQ+vQBJ4q/gIrEXLk=}
 
   chess.js@1.4.0:
-    resolution: {integrity: sha1-7cFDlJLRoNf1MLpysrU5i67OKKE=, tarball: https://registry.npmjs.org/chess.js/-/chess.js-1.4.0.tgz}
+    resolution: {integrity: sha1-7cFDlJLRoNf1MLpysrU5i67OKKE=}
 
   colorette@1.4.0:
-    resolution: {integrity: sha1-UZD7uHJ2JZqGrXAL/yxtb6o/ykA=, tarball: https://registry.npmjs.org/colorette/-/colorette-1.4.0.tgz}
+    resolution: {integrity: sha1-UZD7uHJ2JZqGrXAL/yxtb6o/ykA=}
 
   comma-separated-tokens@2.0.3:
-    resolution: {integrity: sha1-TonJRYrLYbyP7xn0UplzsjkoOe4=, tarball: https://registry.npmjs.org/comma-separated-tokens/-/comma-separated-tokens-2.0.3.tgz}
+    resolution: {integrity: sha1-TonJRYrLYbyP7xn0UplzsjkoOe4=}
 
   convert-source-map@2.0.0:
-    resolution: {integrity: sha1-S1YPZJ/E6RjdCrdc9JYei8iC2Co=, tarball: https://registry.npmjs.org/convert-source-map/-/convert-source-map-2.0.0.tgz}
+    resolution: {integrity: sha1-S1YPZJ/E6RjdCrdc9JYei8iC2Co=}
 
   cookie@1.1.1:
-    resolution: {integrity: sha1-O7m9/II2nbnC9pyTycPOsxDIizw=, tarball: https://registry.npmjs.org/cookie/-/cookie-1.1.1.tgz}
+    resolution: {integrity: sha1-O7m9/II2nbnC9pyTycPOsxDIizw=}
     engines: {node: '>=18'}
 
   csstype@3.2.3:
-    resolution: {integrity: sha1-7EjA8+mT5QZIyG2lWeJhCZXPmJo=, tarball: https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz}
+    resolution: {integrity: sha1-7EjA8+mT5QZIyG2lWeJhCZXPmJo=}
 
   debug@4.4.3:
-    resolution: {integrity: sha1-xq5DLZvZZiWC/OCHCbA4xY6ePWo=, tarball: https://registry.npmjs.org/debug/-/debug-4.4.3.tgz}
+    resolution: {integrity: sha1-xq5DLZvZZiWC/OCHCbA4xY6ePWo=}
     engines: {node: '>=6.0'}
     peerDependencies:
       supports-color: '*'
@@ -451,40 +451,40 @@ packages:
         optional: true
 
   decode-named-character-reference@1.3.0:
-    resolution: {integrity: sha1-PkBgN2CHTC5YZ2kbWZ1zp9oltT8=, tarball: https://registry.npmjs.org/decode-named-character-reference/-/decode-named-character-reference-1.3.0.tgz}
+    resolution: {integrity: sha1-PkBgN2CHTC5YZ2kbWZ1zp9oltT8=}
 
   dequal@2.0.3:
-    resolution: {integrity: sha1-JkQhTxmX057Q7g7OcjNUkKesZ74=, tarball: https://registry.npmjs.org/dequal/-/dequal-2.0.3.tgz}
+    resolution: {integrity: sha1-JkQhTxmX057Q7g7OcjNUkKesZ74=}
     engines: {node: '>=6'}
 
   detect-libc@2.1.2:
-    resolution: {integrity: sha1-aJxdzcGQDvVYOky59te0c3QgdK0=, tarball: https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz}
+    resolution: {integrity: sha1-aJxdzcGQDvVYOky59te0c3QgdK0=}
     engines: {node: '>=8'}
 
   devlop@1.1.0:
-    resolution: {integrity: sha1-TbfCyk3G4Og0wwvnDJS7yXbccBg=, tarball: https://registry.npmjs.org/devlop/-/devlop-1.1.0.tgz}
+    resolution: {integrity: sha1-TbfCyk3G4Og0wwvnDJS7yXbccBg=}
 
   es-module-lexer@2.3.1:
-    resolution: {integrity: sha1-W/LfBpmdu+XwBqX0ahH7n1t7ORs=, tarball: https://registry.npmjs.org/es-module-lexer/-/es-module-lexer-2.3.1.tgz}
+    resolution: {integrity: sha1-W/LfBpmdu+XwBqX0ahH7n1t7ORs=}
 
   estree-util-is-identifier-name@3.0.0:
-    resolution: {integrity: sha1-C170xP8TUIs03NAez6lF9h/OXb0=, tarball: https://registry.npmjs.org/estree-util-is-identifier-name/-/estree-util-is-identifier-name-3.0.0.tgz}
+    resolution: {integrity: sha1-C170xP8TUIs03NAez6lF9h/OXb0=}
 
   estree-walker@3.0.3:
-    resolution: {integrity: sha1-Z8PlSexAKkh7T8GT0ZU6UkdSNA0=, tarball: https://registry.npmjs.org/estree-walker/-/estree-walker-3.0.3.tgz}
+    resolution: {integrity: sha1-Z8PlSexAKkh7T8GT0ZU6UkdSNA0=}
 
   expect-type@1.4.0:
-    resolution: {integrity: sha1-JO338MxppE0AhWe6RZSrlvPDo9Y=, tarball: https://registry.npmjs.org/expect-type/-/expect-type-1.4.0.tgz}
+    resolution: {integrity: sha1-JO338MxppE0AhWe6RZSrlvPDo9Y=}
     engines: {node: '>=12.0.0'}
 
   extend@3.0.2:
-    resolution: {integrity: sha1-+LETa0Bx+9jrFAr/hYsQGewpFfo=, tarball: https://registry.npmjs.org/extend/-/extend-3.0.2.tgz}
+    resolution: {integrity: sha1-+LETa0Bx+9jrFAr/hYsQGewpFfo=}
 
   fast-deep-equal@3.1.3:
-    resolution: {integrity: sha1-On1WtVnWy8PrUSMlJE5hmmXGxSU=, tarball: https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz}
+    resolution: {integrity: sha1-On1WtVnWy8PrUSMlJE5hmmXGxSU=}
 
   fdir@6.5.0:
-    resolution: {integrity: sha1-7Sq5Z6MxreYvGNB32uGSaE1Q01A=, tarball: https://registry.npmjs.org/fdir/-/fdir-6.5.0.tgz}
+    resolution: {integrity: sha1-7Sq5Z6MxreYvGNB32uGSaE1Q01A=}
     engines: {node: '>=12.0.0'}
     peerDependencies:
       picomatch: ^3 || ^4
@@ -493,304 +493,304 @@ packages:
         optional: true
 
   fsevents@2.3.3:
-    resolution: {integrity: sha1-ysZAd4XQNnWipeGlMFxpezR9kNY=, tarball: https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz}
+    resolution: {integrity: sha1-ysZAd4XQNnWipeGlMFxpezR9kNY=}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
   hast-util-to-jsx-runtime@2.3.6:
-    resolution: {integrity: sha1-/zGJeq5Z9iIy4hWU6sfva2MzPpg=, tarball: https://registry.npmjs.org/hast-util-to-jsx-runtime/-/hast-util-to-jsx-runtime-2.3.6.tgz}
+    resolution: {integrity: sha1-/zGJeq5Z9iIy4hWU6sfva2MzPpg=}
 
   hast-util-whitespace@3.0.0:
-    resolution: {integrity: sha1-d3jtnTyS3Z6MXI9kiknCH8UctiE=, tarball: https://registry.npmjs.org/hast-util-whitespace/-/hast-util-whitespace-3.0.0.tgz}
+    resolution: {integrity: sha1-d3jtnTyS3Z6MXI9kiknCH8UctiE=}
 
   html-url-attributes@3.0.1:
-    resolution: {integrity: sha1-g7BSzV5DcHG3Vs10rnD3CIcMLYc=, tarball: https://registry.npmjs.org/html-url-attributes/-/html-url-attributes-3.0.1.tgz}
+    resolution: {integrity: sha1-g7BSzV5DcHG3Vs10rnD3CIcMLYc=}
 
   https-proxy-agent@7.0.6:
-    resolution: {integrity: sha1-2o3+rH2hMLBcK6S1nJts1mYRprk=, tarball: https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz}
+    resolution: {integrity: sha1-2o3+rH2hMLBcK6S1nJts1mYRprk=}
     engines: {node: '>= 14'}
 
   index-to-position@1.2.0:
-    resolution: {integrity: sha1-yADrNNrPTb+WubBsfreNX3BBOLQ=, tarball: https://registry.npmjs.org/index-to-position/-/index-to-position-1.2.0.tgz}
+    resolution: {integrity: sha1-yADrNNrPTb+WubBsfreNX3BBOLQ=}
     engines: {node: '>=18'}
 
   inline-style-parser@0.2.7:
-    resolution: {integrity: sha1-sfxov8AxO4aFdF5EZON/k3a5yQk=, tarball: https://registry.npmjs.org/inline-style-parser/-/inline-style-parser-0.2.7.tgz}
+    resolution: {integrity: sha1-sfxov8AxO4aFdF5EZON/k3a5yQk=}
 
   is-alphabetical@2.0.1:
-    resolution: {integrity: sha1-AQcgU+p8EDbfPH0Zptqux/GeeJs=, tarball: https://registry.npmjs.org/is-alphabetical/-/is-alphabetical-2.0.1.tgz}
+    resolution: {integrity: sha1-AQcgU+p8EDbfPH0Zptqux/GeeJs=}
 
   is-alphanumerical@2.0.1:
-    resolution: {integrity: sha1-fAP76W4+kxET5X+WSwo2jMLf2HU=, tarball: https://registry.npmjs.org/is-alphanumerical/-/is-alphanumerical-2.0.1.tgz}
+    resolution: {integrity: sha1-fAP76W4+kxET5X+WSwo2jMLf2HU=}
 
   is-decimal@2.0.1:
-    resolution: {integrity: sha1-lGnS3BkNAhT9h9eLeMrswMwU7vc=, tarball: https://registry.npmjs.org/is-decimal/-/is-decimal-2.0.1.tgz}
+    resolution: {integrity: sha1-lGnS3BkNAhT9h9eLeMrswMwU7vc=}
 
   is-hexadecimal@2.0.1:
-    resolution: {integrity: sha1-hrW/Zo/KMHSY0xnfwDKJ14GpACc=, tarball: https://registry.npmjs.org/is-hexadecimal/-/is-hexadecimal-2.0.1.tgz}
+    resolution: {integrity: sha1-hrW/Zo/KMHSY0xnfwDKJ14GpACc=}
 
   is-plain-obj@4.1.0:
-    resolution: {integrity: sha1-1lAl7ew2V84DL9fbY8l4g+rtcfA=, tarball: https://registry.npmjs.org/is-plain-obj/-/is-plain-obj-4.1.0.tgz}
+    resolution: {integrity: sha1-1lAl7ew2V84DL9fbY8l4g+rtcfA=}
     engines: {node: '>=12'}
 
   js-levenshtein@1.1.6:
-    resolution: {integrity: sha1-xs7ljrNVA3LfjeuF+tXOZs4B1Z0=, tarball: https://registry.npmjs.org/js-levenshtein/-/js-levenshtein-1.1.6.tgz}
+    resolution: {integrity: sha1-xs7ljrNVA3LfjeuF+tXOZs4B1Z0=}
     engines: {node: '>=0.10.0'}
 
   js-tokens@4.0.0:
-    resolution: {integrity: sha1-GSA/tZmR35jjoocFDUZHzerzJJk=, tarball: https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz}
+    resolution: {integrity: sha1-GSA/tZmR35jjoocFDUZHzerzJJk=}
 
   js-yaml@4.2.0:
-    resolution: {integrity: sha1-K9noVoLdkb1GmvuAnYFgQ7PUlSQ=, tarball: https://registry.npmjs.org/js-yaml/-/js-yaml-4.2.0.tgz}
+    resolution: {integrity: sha1-K9noVoLdkb1GmvuAnYFgQ7PUlSQ=}
     hasBin: true
 
   json-schema-traverse@1.0.0:
-    resolution: {integrity: sha1-rnvLNlard6c7pcSb9lTzjmtoYOI=, tarball: https://registry.npmjs.org/json-schema-traverse/-/json-schema-traverse-1.0.0.tgz}
+    resolution: {integrity: sha1-rnvLNlard6c7pcSb9lTzjmtoYOI=}
 
   lightningcss-android-arm64@1.32.0:
-    resolution: {integrity: sha1-8DOIURbf79nG9UeHUj41FLYeGWg=, tarball: https://registry.npmjs.org/lightningcss-android-arm64/-/lightningcss-android-arm64-1.32.0.tgz}
+    resolution: {integrity: sha1-8DOIURbf79nG9UeHUj41FLYeGWg=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [android]
 
   lightningcss-darwin-arm64@1.32.0:
-    resolution: {integrity: sha1-ULcYcbAcgZlYS2SeKSVH+up6+bU=, tarball: https://registry.npmjs.org/lightningcss-darwin-arm64/-/lightningcss-darwin-arm64-1.32.0.tgz}
+    resolution: {integrity: sha1-ULcYcbAcgZlYS2SeKSVH+up6+bU=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [darwin]
 
   lightningcss-darwin-x64@1.32.0:
-    resolution: {integrity: sha1-NfPpczLRMLnKGB4RtWje1q68bV4=, tarball: https://registry.npmjs.org/lightningcss-darwin-x64/-/lightningcss-darwin-x64-1.32.0.tgz}
+    resolution: {integrity: sha1-NfPpczLRMLnKGB4RtWje1q68bV4=}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [darwin]
 
   lightningcss-freebsd-x64@1.32.0:
-    resolution: {integrity: sha1-l3enZHK2Ttb/lDQq1kx7r9eUpXU=, tarball: https://registry.npmjs.org/lightningcss-freebsd-x64/-/lightningcss-freebsd-x64-1.32.0.tgz}
+    resolution: {integrity: sha1-l3enZHK2Ttb/lDQq1kx7r9eUpXU=}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [freebsd]
 
   lightningcss-linux-arm-gnueabihf@1.32.0:
-    resolution: {integrity: sha1-E65lLhq3O5E117faFy9mbEEK1T0=, tarball: https://registry.npmjs.org/lightningcss-linux-arm-gnueabihf/-/lightningcss-linux-arm-gnueabihf-1.32.0.tgz}
+    resolution: {integrity: sha1-E65lLhq3O5E117faFy9mbEEK1T0=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm]
     os: [linux]
 
   lightningcss-linux-arm64-gnu@1.32.0:
-    resolution: {integrity: sha1-QXhYeVqUWS9oASOhsfnaig4e8zU=, tarball: https://registry.npmjs.org/lightningcss-linux-arm64-gnu/-/lightningcss-linux-arm64-gnu-1.32.0.tgz}
+    resolution: {integrity: sha1-QXhYeVqUWS9oASOhsfnaig4e8zU=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.32.0:
-    resolution: {integrity: sha1-a+NmkugQtxgECAL9gJYjz/5zITM=, tarball: https://registry.npmjs.org/lightningcss-linux-arm64-musl/-/lightningcss-linux-arm64-musl-1.32.0.tgz}
+    resolution: {integrity: sha1-a+NmkugQtxgECAL9gJYjz/5zITM=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
   lightningcss-linux-x64-gnu@1.32.0:
-    resolution: {integrity: sha1-C3gDr06yHP043Tn+Kru1PH3QkfY=, tarball: https://registry.npmjs.org/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.32.0.tgz}
+    resolution: {integrity: sha1-C3gDr06yHP043Tn+Kru1PH3QkfY=}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
   lightningcss-linux-x64-musl@1.32.0:
-    resolution: {integrity: sha1-iNyLqGXd3bGsXvBLDxYYBEGMFjs=, tarball: https://registry.npmjs.org/lightningcss-linux-x64-musl/-/lightningcss-linux-x64-musl-1.32.0.tgz}
+    resolution: {integrity: sha1-iNyLqGXd3bGsXvBLDxYYBEGMFjs=}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.32.0:
-    resolution: {integrity: sha1-TzC6P6XpJfW3n5RejMDRdsOxqzg=, tarball: https://registry.npmjs.org/lightningcss-win32-arm64-msvc/-/lightningcss-win32-arm64-msvc-1.32.0.tgz}
+    resolution: {integrity: sha1-TzC6P6XpJfW3n5RejMDRdsOxqzg=}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [win32]
 
   lightningcss-win32-x64-msvc@1.32.0:
-    resolution: {integrity: sha1-FBqlYFZFBkkokCu0rwRfp9n0Igo=, tarball: https://registry.npmjs.org/lightningcss-win32-x64-msvc/-/lightningcss-win32-x64-msvc-1.32.0.tgz}
+    resolution: {integrity: sha1-FBqlYFZFBkkokCu0rwRfp9n0Igo=}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [win32]
 
   lightningcss@1.32.0:
-    resolution: {integrity: sha1-uFqulkhtyxv0mnyFcSISc/Tx5Kk=, tarball: https://registry.npmjs.org/lightningcss/-/lightningcss-1.32.0.tgz}
+    resolution: {integrity: sha1-uFqulkhtyxv0mnyFcSISc/Tx5Kk=}
     engines: {node: '>= 12.0.0'}
 
   longest-streak@3.1.0:
-    resolution: {integrity: sha1-YvpnzZWHQqFXSvnzmGY2QQLZDNQ=, tarball: https://registry.npmjs.org/longest-streak/-/longest-streak-3.1.0.tgz}
+    resolution: {integrity: sha1-YvpnzZWHQqFXSvnzmGY2QQLZDNQ=}
 
   magic-string@0.30.21:
-    resolution: {integrity: sha1-VnY+wJoPqAkd8nh5/ZTRkHjADZE=, tarball: https://registry.npmjs.org/magic-string/-/magic-string-0.30.21.tgz}
+    resolution: {integrity: sha1-VnY+wJoPqAkd8nh5/ZTRkHjADZE=}
 
   mdast-util-from-markdown@2.0.3:
-    resolution: {integrity: sha1-yVgiuRqrdfGKTL6LL1G4c+0s8Mc=, tarball: https://registry.npmjs.org/mdast-util-from-markdown/-/mdast-util-from-markdown-2.0.3.tgz}
+    resolution: {integrity: sha1-yVgiuRqrdfGKTL6LL1G4c+0s8Mc=}
 
   mdast-util-mdx-expression@2.0.1:
-    resolution: {integrity: sha1-Q/CrrJrcdW4ghvY4IqOMjTw6UJY=, tarball: https://registry.npmjs.org/mdast-util-mdx-expression/-/mdast-util-mdx-expression-2.0.1.tgz}
+    resolution: {integrity: sha1-Q/CrrJrcdW4ghvY4IqOMjTw6UJY=}
 
   mdast-util-mdx-jsx@3.2.0:
-    resolution: {integrity: sha1-/QTGeip0me+5BailxXjd3J/a2g0=, tarball: https://registry.npmjs.org/mdast-util-mdx-jsx/-/mdast-util-mdx-jsx-3.2.0.tgz}
+    resolution: {integrity: sha1-/QTGeip0me+5BailxXjd3J/a2g0=}
 
   mdast-util-mdxjs-esm@2.0.1:
-    resolution: {integrity: sha1-AZz751etYt1VfbNaaV5zFLzJ+pc=, tarball: https://registry.npmjs.org/mdast-util-mdxjs-esm/-/mdast-util-mdxjs-esm-2.0.1.tgz}
+    resolution: {integrity: sha1-AZz751etYt1VfbNaaV5zFLzJ+pc=}
 
   mdast-util-phrasing@4.1.0:
-    resolution: {integrity: sha1-fMCo3sMOrwS3salmGpKtszgqpuM=, tarball: https://registry.npmjs.org/mdast-util-phrasing/-/mdast-util-phrasing-4.1.0.tgz}
+    resolution: {integrity: sha1-fMCo3sMOrwS3salmGpKtszgqpuM=}
 
   mdast-util-to-hast@13.2.1:
-    resolution: {integrity: sha1-1/+EykmaV+LAYK5nVIrZUOaJoFM=, tarball: https://registry.npmjs.org/mdast-util-to-hast/-/mdast-util-to-hast-13.2.1.tgz}
+    resolution: {integrity: sha1-1/+EykmaV+LAYK5nVIrZUOaJoFM=}
 
   mdast-util-to-markdown@2.1.2:
-    resolution: {integrity: sha1-+RD/5giX8Eu0t+fuQ0SG92KINhs=, tarball: https://registry.npmjs.org/mdast-util-to-markdown/-/mdast-util-to-markdown-2.1.2.tgz}
+    resolution: {integrity: sha1-+RD/5giX8Eu0t+fuQ0SG92KINhs=}
 
   mdast-util-to-string@4.0.0:
-    resolution: {integrity: sha1-elEhR1VWoE5+3etnsmSq550xKBQ=, tarball: https://registry.npmjs.org/mdast-util-to-string/-/mdast-util-to-string-4.0.0.tgz}
+    resolution: {integrity: sha1-elEhR1VWoE5+3etnsmSq550xKBQ=}
 
   micromark-core-commonmark@2.0.3:
-    resolution: {integrity: sha1-xpFjDkhQIaaM8o28Kyyifr9njNQ=, tarball: https://registry.npmjs.org/micromark-core-commonmark/-/micromark-core-commonmark-2.0.3.tgz}
+    resolution: {integrity: sha1-xpFjDkhQIaaM8o28Kyyifr9njNQ=}
 
   micromark-factory-destination@2.0.1:
-    resolution: {integrity: sha1-j++OD3CB8EdPvdkt61DJkKAmRjk=, tarball: https://registry.npmjs.org/micromark-factory-destination/-/micromark-factory-destination-2.0.1.tgz}
+    resolution: {integrity: sha1-j++OD3CB8EdPvdkt61DJkKAmRjk=}
 
   micromark-factory-label@2.0.1:
-    resolution: {integrity: sha1-UmfvqX8eUlTvx/ILRZo4yyEFi6E=, tarball: https://registry.npmjs.org/micromark-factory-label/-/micromark-factory-label-2.0.1.tgz}
+    resolution: {integrity: sha1-UmfvqX8eUlTvx/ILRZo4yyEFi6E=}
 
   micromark-factory-space@2.0.1:
-    resolution: {integrity: sha1-NtAhLpYrKzEh+FJfx6PHwCnzNPw=, tarball: https://registry.npmjs.org/micromark-factory-space/-/micromark-factory-space-2.0.1.tgz}
+    resolution: {integrity: sha1-NtAhLpYrKzEh+FJfx6PHwCnzNPw=}
 
   micromark-factory-title@2.0.1:
-    resolution: {integrity: sha1-I35KpdWKlYY/AQMtnumwkPHebpQ=, tarball: https://registry.npmjs.org/micromark-factory-title/-/micromark-factory-title-2.0.1.tgz}
+    resolution: {integrity: sha1-I35KpdWKlYY/AQMtnumwkPHebpQ=}
 
   micromark-factory-whitespace@2.0.1:
-    resolution: {integrity: sha1-BrJrKYPE0nv8xlezPiUTTUhosLE=, tarball: https://registry.npmjs.org/micromark-factory-whitespace/-/micromark-factory-whitespace-2.0.1.tgz}
+    resolution: {integrity: sha1-BrJrKYPE0nv8xlezPiUTTUhosLE=}
 
   micromark-util-character@2.1.1:
-    resolution: {integrity: sha1-L5h4MaQNTFEKwmHomFLE6XA8zaY=, tarball: https://registry.npmjs.org/micromark-util-character/-/micromark-util-character-2.1.1.tgz}
+    resolution: {integrity: sha1-L5h4MaQNTFEKwmHomFLE6XA8zaY=}
 
   micromark-util-chunked@2.0.1:
-    resolution: {integrity: sha1-R/vNk0caP8yrhs/wOEf8NVLbEFE=, tarball: https://registry.npmjs.org/micromark-util-chunked/-/micromark-util-chunked-2.0.1.tgz}
+    resolution: {integrity: sha1-R/vNk0caP8yrhs/wOEf8NVLbEFE=}
 
   micromark-util-classify-character@2.0.1:
-    resolution: {integrity: sha1-05n6+cRcoUyLS+mLHqSBvO2Htik=, tarball: https://registry.npmjs.org/micromark-util-classify-character/-/micromark-util-classify-character-2.0.1.tgz}
+    resolution: {integrity: sha1-05n6+cRcoUyLS+mLHqSBvO2Htik=}
 
   micromark-util-combine-extensions@2.0.1:
-    resolution: {integrity: sha1-Kg9JCrCL/1zC/V7sbdDKBPibMKk=, tarball: https://registry.npmjs.org/micromark-util-combine-extensions/-/micromark-util-combine-extensions-2.0.1.tgz}
+    resolution: {integrity: sha1-Kg9JCrCL/1zC/V7sbdDKBPibMKk=}
 
   micromark-util-decode-numeric-character-reference@2.0.2:
-    resolution: {integrity: sha1-/PFbZgl5OI5vEYzba/fXnXPSb+U=, tarball: https://registry.npmjs.org/micromark-util-decode-numeric-character-reference/-/micromark-util-decode-numeric-character-reference-2.0.2.tgz}
+    resolution: {integrity: sha1-/PFbZgl5OI5vEYzba/fXnXPSb+U=}
 
   micromark-util-decode-string@2.0.1:
-    resolution: {integrity: sha1-bLmVguXScehO/KjmGoB5lNcWHrI=, tarball: https://registry.npmjs.org/micromark-util-decode-string/-/micromark-util-decode-string-2.0.1.tgz}
+    resolution: {integrity: sha1-bLmVguXScehO/KjmGoB5lNcWHrI=}
 
   micromark-util-encode@2.0.1:
-    resolution: {integrity: sha1-DVHRwJVVHPqsNoMmljz1XxX1QLg=, tarball: https://registry.npmjs.org/micromark-util-encode/-/micromark-util-encode-2.0.1.tgz}
+    resolution: {integrity: sha1-DVHRwJVVHPqsNoMmljz1XxX1QLg=}
 
   micromark-util-html-tag-name@2.0.1:
-    resolution: {integrity: sha1-5AQDCWSBmGtBwQZif5j3LU0QuCU=, tarball: https://registry.npmjs.org/micromark-util-html-tag-name/-/micromark-util-html-tag-name-2.0.1.tgz}
+    resolution: {integrity: sha1-5AQDCWSBmGtBwQZif5j3LU0QuCU=}
 
   micromark-util-normalize-identifier@2.0.1:
-    resolution: {integrity: sha1-ww13sugyrPZSb4vxqke8nJQ4wW0=, tarball: https://registry.npmjs.org/micromark-util-normalize-identifier/-/micromark-util-normalize-identifier-2.0.1.tgz}
+    resolution: {integrity: sha1-ww13sugyrPZSb4vxqke8nJQ4wW0=}
 
   micromark-util-resolve-all@2.0.1:
-    resolution: {integrity: sha1-4aLWLN0jcjCirhGDkCexk4HjHos=, tarball: https://registry.npmjs.org/micromark-util-resolve-all/-/micromark-util-resolve-all-2.0.1.tgz}
+    resolution: {integrity: sha1-4aLWLN0jcjCirhGDkCexk4HjHos=}
 
   micromark-util-sanitize-uri@2.0.1:
-    resolution: {integrity: sha1-q4l4m4GKWHUrc9a1UjhiG3+qj9c=, tarball: https://registry.npmjs.org/micromark-util-sanitize-uri/-/micromark-util-sanitize-uri-2.0.1.tgz}
+    resolution: {integrity: sha1-q4l4m4GKWHUrc9a1UjhiG3+qj9c=}
 
   micromark-util-subtokenize@2.1.0:
-    resolution: {integrity: sha1-2K3lug8xl6HPaimZ+7/mNXoaGe4=, tarball: https://registry.npmjs.org/micromark-util-subtokenize/-/micromark-util-subtokenize-2.1.0.tgz}
+    resolution: {integrity: sha1-2K3lug8xl6HPaimZ+7/mNXoaGe4=}
 
   micromark-util-symbol@2.0.1:
-    resolution: {integrity: sha1-5dpJTo6ysHGg0I+zT2zv7GwKGbg=, tarball: https://registry.npmjs.org/micromark-util-symbol/-/micromark-util-symbol-2.0.1.tgz}
+    resolution: {integrity: sha1-5dpJTo6ysHGg0I+zT2zv7GwKGbg=}
 
   micromark-util-types@2.0.2:
-    resolution: {integrity: sha1-8AIl9fWg68MlT5bDa2YFxLOTkI4=, tarball: https://registry.npmjs.org/micromark-util-types/-/micromark-util-types-2.0.2.tgz}
+    resolution: {integrity: sha1-8AIl9fWg68MlT5bDa2YFxLOTkI4=}
 
   micromark@4.0.2:
-    resolution: {integrity: sha1-kTlaPhiEoZjmIRbjPJxWjjmTb9s=, tarball: https://registry.npmjs.org/micromark/-/micromark-4.0.2.tgz}
+    resolution: {integrity: sha1-kTlaPhiEoZjmIRbjPJxWjjmTb9s=}
 
   minimatch@5.1.9:
-    resolution: {integrity: sha1-EpPvFdsAmLOUVA6Pn3RPn9qN7ks=, tarball: https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz}
+    resolution: {integrity: sha1-EpPvFdsAmLOUVA6Pn3RPn9qN7ks=}
     engines: {node: '>=10'}
 
   ms@2.1.3:
-    resolution: {integrity: sha1-V0yBOM4dK1hh8LRFedut1gxmFbI=, tarball: https://registry.npmjs.org/ms/-/ms-2.1.3.tgz}
+    resolution: {integrity: sha1-V0yBOM4dK1hh8LRFedut1gxmFbI=}
 
   nanoid@3.3.16:
-    resolution: {integrity: sha1-oE2OxLHxAAnS1TOUeu/kKTc3gWw=, tarball: https://registry.npmjs.org/nanoid/-/nanoid-3.3.16.tgz}
+    resolution: {integrity: sha1-oE2OxLHxAAnS1TOUeu/kKTc3gWw=}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
   obug@2.1.3:
-    resolution: {integrity: sha1-wCxg+Vq9YDQJMw52fbfygjGTMx4=, tarball: https://registry.npmjs.org/obug/-/obug-2.1.3.tgz}
+    resolution: {integrity: sha1-wCxg+Vq9YDQJMw52fbfygjGTMx4=}
     engines: {node: '>=12.20.0'}
 
   openapi-typescript@7.13.0:
-    resolution: {integrity: sha1-XQ3F6V1kj7qFsVNRoLkcWBXYNgs=, tarball: https://registry.npmjs.org/openapi-typescript/-/openapi-typescript-7.13.0.tgz}
+    resolution: {integrity: sha1-XQ3F6V1kj7qFsVNRoLkcWBXYNgs=}
     hasBin: true
     peerDependencies:
       typescript: ^5.x
 
   parse-entities@4.0.2:
-    resolution: {integrity: sha1-YdRvXtKOTuYundxD1rAQGIRD8Vk=, tarball: https://registry.npmjs.org/parse-entities/-/parse-entities-4.0.2.tgz}
+    resolution: {integrity: sha1-YdRvXtKOTuYundxD1rAQGIRD8Vk=}
 
   parse-json@8.3.0:
-    resolution: {integrity: sha1-iKGVohVwJROaIxek8vklK2EwTtU=, tarball: https://registry.npmjs.org/parse-json/-/parse-json-8.3.0.tgz}
+    resolution: {integrity: sha1-iKGVohVwJROaIxek8vklK2EwTtU=}
     engines: {node: '>=18'}
 
   pathe@2.0.3:
-    resolution: {integrity: sha1-PsvsVUIWhbcKnahyss/z4cvtFxY=, tarball: https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz}
+    resolution: {integrity: sha1-PsvsVUIWhbcKnahyss/z4cvtFxY=}
 
   picocolors@1.1.1:
-    resolution: {integrity: sha1-PTIa8+q5ObCDyPkpodEs2oHCa2s=, tarball: https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz}
+    resolution: {integrity: sha1-PTIa8+q5ObCDyPkpodEs2oHCa2s=}
 
   picomatch@4.0.5:
-    resolution: {integrity: sha1-UepXoX2G9gX4EDlZX7xA7QalX6s=, tarball: https://registry.npmjs.org/picomatch/-/picomatch-4.0.5.tgz}
+    resolution: {integrity: sha1-UepXoX2G9gX4EDlZX7xA7QalX6s=}
     engines: {node: '>=12'}
 
   pluralize@8.0.0:
-    resolution: {integrity: sha1-Gm+hajjRKhkB4DIPoBcFHFOc47E=, tarball: https://registry.npmjs.org/pluralize/-/pluralize-8.0.0.tgz}
+    resolution: {integrity: sha1-Gm+hajjRKhkB4DIPoBcFHFOc47E=}
     engines: {node: '>=4'}
 
   postcss@8.5.19:
-    resolution: {integrity: sha1-Ra1c/eSZQI4gFHNII3VROBqSIDc=, tarball: https://registry.npmjs.org/postcss/-/postcss-8.5.19.tgz}
+    resolution: {integrity: sha1-Ra1c/eSZQI4gFHNII3VROBqSIDc=}
     engines: {node: ^10 || ^12 || >=14}
 
   property-information@7.2.0:
-    resolution: {integrity: sha1-CAmzQmTplcC/zTInAooeNSEK+Ao=, tarball: https://registry.npmjs.org/property-information/-/property-information-7.2.0.tgz}
+    resolution: {integrity: sha1-CAmzQmTplcC/zTInAooeNSEK+Ao=}
 
   react-chessboard@5.10.0:
-    resolution: {integrity: sha1-CW6IZspbGNY608NE6NFKs3wM8XY=, tarball: https://registry.npmjs.org/react-chessboard/-/react-chessboard-5.10.0.tgz}
+    resolution: {integrity: sha1-CW6IZspbGNY608NE6NFKs3wM8XY=}
     engines: {node: '>=20.11.0', pnpm: '>=9.4.0'}
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
 
   react-dom@19.2.7:
-    resolution: {integrity: sha1-BFDcmundv/du8ZZAHNi4x/tGbMw=, tarball: https://registry.npmjs.org/react-dom/-/react-dom-19.2.7.tgz}
+    resolution: {integrity: sha1-BFDcmundv/du8ZZAHNi4x/tGbMw=}
     peerDependencies:
       react: ^19.2.7
 
   react-markdown@10.1.0:
-    resolution: {integrity: sha1-4ivCD63bwHYFwVKEJVZTwPO61co=, tarball: https://registry.npmjs.org/react-markdown/-/react-markdown-10.1.0.tgz}
+    resolution: {integrity: sha1-4ivCD63bwHYFwVKEJVZTwPO61co=}
     peerDependencies:
       '@types/react': '>=18'
       react: '>=18'
 
   react-router-dom@7.18.1:
-    resolution: {integrity: sha1-DRsTjikTkwWa1IHD4Q42Y4WpeKQ=, tarball: https://registry.npmjs.org/react-router-dom/-/react-router-dom-7.18.1.tgz}
+    resolution: {integrity: sha1-DRsTjikTkwWa1IHD4Q42Y4WpeKQ=}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18'
       react-dom: '>=18'
 
   react-router@7.18.1:
-    resolution: {integrity: sha1-YSWdFZS5XBrOKZ7kxXRTVw8MIvE=, tarball: https://registry.npmjs.org/react-router/-/react-router-7.18.1.tgz}
+    resolution: {integrity: sha1-YSWdFZS5XBrOKZ7kxXRTVw8MIvE=}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18'
@@ -800,124 +800,124 @@ packages:
         optional: true
 
   react@19.2.7:
-    resolution: {integrity: sha1-H0ehv8BvjsiFdSxvSvFDaan4Jgs=, tarball: https://registry.npmjs.org/react/-/react-19.2.7.tgz}
+    resolution: {integrity: sha1-H0ehv8BvjsiFdSxvSvFDaan4Jgs=}
     engines: {node: '>=0.10.0'}
 
   remark-parse@11.0.0:
-    resolution: {integrity: sha1-qmB0P8s36/awaSBOtNowTkDbRaE=, tarball: https://registry.npmjs.org/remark-parse/-/remark-parse-11.0.0.tgz}
+    resolution: {integrity: sha1-qmB0P8s36/awaSBOtNowTkDbRaE=}
 
   remark-rehype@11.1.2:
-    resolution: {integrity: sha1-Kt2q3agMqb2aoNp2PnTRYydoOzc=, tarball: https://registry.npmjs.org/remark-rehype/-/remark-rehype-11.1.2.tgz}
+    resolution: {integrity: sha1-Kt2q3agMqb2aoNp2PnTRYydoOzc=}
 
   require-from-string@2.0.2:
-    resolution: {integrity: sha1-iaf92TgmEmcxjq/hT5wy5ZjDaQk=, tarball: https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz}
+    resolution: {integrity: sha1-iaf92TgmEmcxjq/hT5wy5ZjDaQk=}
     engines: {node: '>=0.10.0'}
 
   rolldown@1.1.5:
-    resolution: {integrity: sha1-M5quJQhENR/FW3TiZS0+vW+6OJ0=, tarball: https://registry.npmjs.org/rolldown/-/rolldown-1.1.5.tgz}
+    resolution: {integrity: sha1-M5quJQhENR/FW3TiZS0+vW+6OJ0=}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
   scheduler@0.27.0:
-    resolution: {integrity: sha1-DE74LWfR5cHjWej8dtOofwRf5b0=, tarball: https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz}
+    resolution: {integrity: sha1-DE74LWfR5cHjWej8dtOofwRf5b0=}
 
   set-cookie-parser@2.7.2:
-    resolution: {integrity: sha1-zNCGc6muXS5E6iot4lCJ5nx+32g=, tarball: https://registry.npmjs.org/set-cookie-parser/-/set-cookie-parser-2.7.2.tgz}
+    resolution: {integrity: sha1-zNCGc6muXS5E6iot4lCJ5nx+32g=}
 
   siginfo@2.0.0:
-    resolution: {integrity: sha1-MudscLeXJOO7Vny51UPrhYzPrzA=, tarball: https://registry.npmjs.org/siginfo/-/siginfo-2.0.0.tgz}
+    resolution: {integrity: sha1-MudscLeXJOO7Vny51UPrhYzPrzA=}
 
   source-map-js@1.2.1:
-    resolution: {integrity: sha1-HOVlD93YerwJnto33P8CTCZnrkY=, tarball: https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.1.tgz}
+    resolution: {integrity: sha1-HOVlD93YerwJnto33P8CTCZnrkY=}
     engines: {node: '>=0.10.0'}
 
   space-separated-tokens@2.0.2:
-    resolution: {integrity: sha1-Hs2dI1CjhEVyw/SjErzrAYNIhZ8=, tarball: https://registry.npmjs.org/space-separated-tokens/-/space-separated-tokens-2.0.2.tgz}
+    resolution: {integrity: sha1-Hs2dI1CjhEVyw/SjErzrAYNIhZ8=}
 
   stackback@0.0.2:
-    resolution: {integrity: sha1-Gsig2Ug4SNFpXkGLbQMaPDzmjjs=, tarball: https://registry.npmjs.org/stackback/-/stackback-0.0.2.tgz}
+    resolution: {integrity: sha1-Gsig2Ug4SNFpXkGLbQMaPDzmjjs=}
 
   std-env@4.2.0:
-    resolution: {integrity: sha1-jr4OxgSFZoq0ciezEvQlTN+AydM=, tarball: https://registry.npmjs.org/std-env/-/std-env-4.2.0.tgz}
+    resolution: {integrity: sha1-jr4OxgSFZoq0ciezEvQlTN+AydM=}
 
   stringify-entities@4.0.4:
-    resolution: {integrity: sha1-s7ee9fJ3zErHPK6wI2xbqTmzpPM=, tarball: https://registry.npmjs.org/stringify-entities/-/stringify-entities-4.0.4.tgz}
+    resolution: {integrity: sha1-s7ee9fJ3zErHPK6wI2xbqTmzpPM=}
 
   style-to-js@1.1.21:
-    resolution: {integrity: sha1-KQiUEYf4V+eeKOnNeACLmgs+Do0=, tarball: https://registry.npmjs.org/style-to-js/-/style-to-js-1.1.21.tgz}
+    resolution: {integrity: sha1-KQiUEYf4V+eeKOnNeACLmgs+Do0=}
 
   style-to-object@1.0.14:
-    resolution: {integrity: sha1-HSLw5yZruMbYyuXK9OxPAF4I9hE=, tarball: https://registry.npmjs.org/style-to-object/-/style-to-object-1.0.14.tgz}
+    resolution: {integrity: sha1-HSLw5yZruMbYyuXK9OxPAF4I9hE=}
 
   supports-color@10.2.2:
-    resolution: {integrity: sha1-RmwpeMxc0AUtVCoLV2RhwrgC67Q=, tarball: https://registry.npmjs.org/supports-color/-/supports-color-10.2.2.tgz}
+    resolution: {integrity: sha1-RmwpeMxc0AUtVCoLV2RhwrgC67Q=}
     engines: {node: '>=18'}
 
   tinybench@2.9.0:
-    resolution: {integrity: sha1-EDyfi6bXI3pHq23R3P93JRhjQms=, tarball: https://registry.npmjs.org/tinybench/-/tinybench-2.9.0.tgz}
+    resolution: {integrity: sha1-EDyfi6bXI3pHq23R3P93JRhjQms=}
 
   tinyexec@1.2.4:
-    resolution: {integrity: sha1-rkW7Lt69qUxw9OqJfg8SQ+Rw23E=, tarball: https://registry.npmjs.org/tinyexec/-/tinyexec-1.2.4.tgz}
+    resolution: {integrity: sha1-rkW7Lt69qUxw9OqJfg8SQ+Rw23E=}
     engines: {node: '>=18'}
 
   tinyglobby@0.2.17:
-    resolution: {integrity: sha1-ViqabJ6ys7Ej05cZ+a9btE/NdjE=, tarball: https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz}
+    resolution: {integrity: sha1-ViqabJ6ys7Ej05cZ+a9btE/NdjE=}
     engines: {node: '>=12.0.0'}
 
   tinyrainbow@3.1.0:
-    resolution: {integrity: sha1-HYpiOJP5XPCi3bnl0RFQ4ZFAlCE=, tarball: https://registry.npmjs.org/tinyrainbow/-/tinyrainbow-3.1.0.tgz}
+    resolution: {integrity: sha1-HYpiOJP5XPCi3bnl0RFQ4ZFAlCE=}
     engines: {node: '>=14.0.0'}
 
   trim-lines@3.0.1:
-    resolution: {integrity: sha1-2ALjMqB9+GHEiALAQyEBexvYczg=, tarball: https://registry.npmjs.org/trim-lines/-/trim-lines-3.0.1.tgz}
+    resolution: {integrity: sha1-2ALjMqB9+GHEiALAQyEBexvYczg=}
 
   trough@2.2.0:
-    resolution: {integrity: sha1-lKYL1r03XBUsHfkRpLEdWwJW9Q8=, tarball: https://registry.npmjs.org/trough/-/trough-2.2.0.tgz}
+    resolution: {integrity: sha1-lKYL1r03XBUsHfkRpLEdWwJW9Q8=}
 
   tslib@2.8.1:
-    resolution: {integrity: sha1-YS7+TtI11Wfoq6Xypfq3AoCt6D8=, tarball: https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz}
+    resolution: {integrity: sha1-YS7+TtI11Wfoq6Xypfq3AoCt6D8=}
 
   type-fest@4.41.0:
-    resolution: {integrity: sha1-auHI5XMSc8K/H1itOcuuLJGkbFg=, tarball: https://registry.npmjs.org/type-fest/-/type-fest-4.41.0.tgz}
+    resolution: {integrity: sha1-auHI5XMSc8K/H1itOcuuLJGkbFg=}
     engines: {node: '>=16'}
 
   typescript@6.0.3:
-    resolution: {integrity: sha1-kCUdwAeRbpcnhsuU100VsYVXfSE=, tarball: https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz}
+    resolution: {integrity: sha1-kCUdwAeRbpcnhsuU100VsYVXfSE=}
     engines: {node: '>=14.17'}
     hasBin: true
 
   undici-types@7.18.2:
-    resolution: {integrity: sha1-KTV6iee3ykrvO/D9P9DNc4hCKek=, tarball: https://registry.npmjs.org/undici-types/-/undici-types-7.18.2.tgz}
+    resolution: {integrity: sha1-KTV6iee3ykrvO/D9P9DNc4hCKek=}
 
   unified@11.0.5:
-    resolution: {integrity: sha1-9mZ3YQpcCp7pDKsrjU1mA3Am2eE=, tarball: https://registry.npmjs.org/unified/-/unified-11.0.5.tgz}
+    resolution: {integrity: sha1-9mZ3YQpcCp7pDKsrjU1mA3Am2eE=}
 
   unist-util-is@6.0.1:
-    resolution: {integrity: sha1-0KP4by3Q23rNfYwkeAgLXGf5xqk=, tarball: https://registry.npmjs.org/unist-util-is/-/unist-util-is-6.0.1.tgz}
+    resolution: {integrity: sha1-0KP4by3Q23rNfYwkeAgLXGf5xqk=}
 
   unist-util-position@5.0.0:
-    resolution: {integrity: sha1-Z48gq1yhIHqX1+qKOINzyc+Ja+Q=, tarball: https://registry.npmjs.org/unist-util-position/-/unist-util-position-5.0.0.tgz}
+    resolution: {integrity: sha1-Z48gq1yhIHqX1+qKOINzyc+Ja+Q=}
 
   unist-util-stringify-position@4.0.0:
-    resolution: {integrity: sha1-RJxuIaiA4IVb9aq63rOnQDFKusI=, tarball: https://registry.npmjs.org/unist-util-stringify-position/-/unist-util-stringify-position-4.0.0.tgz}
+    resolution: {integrity: sha1-RJxuIaiA4IVb9aq63rOnQDFKusI=}
 
   unist-util-visit-parents@6.0.2:
-    resolution: {integrity: sha1-d333+5hlLOFrS3zZmdChpA76OgI=, tarball: https://registry.npmjs.org/unist-util-visit-parents/-/unist-util-visit-parents-6.0.2.tgz}
+    resolution: {integrity: sha1-d333+5hlLOFrS3zZmdChpA76OgI=}
 
   unist-util-visit@5.1.0:
-    resolution: {integrity: sha1-mioosKp2oV4NpwoIpYY6LwYOJGg=, tarball: https://registry.npmjs.org/unist-util-visit/-/unist-util-visit-5.1.0.tgz}
+    resolution: {integrity: sha1-mioosKp2oV4NpwoIpYY6LwYOJGg=}
 
   uri-js-replace@1.0.1:
-    resolution: {integrity: sha1-woW7NStwHJ39rv/E2lvnf5NskEg=, tarball: https://registry.npmjs.org/uri-js-replace/-/uri-js-replace-1.0.1.tgz}
+    resolution: {integrity: sha1-woW7NStwHJ39rv/E2lvnf5NskEg=}
 
   vfile-message@4.0.3:
-    resolution: {integrity: sha1-h7RN3de3DwZBwuPtCGS6c+LqjfQ=, tarball: https://registry.npmjs.org/vfile-message/-/vfile-message-4.0.3.tgz}
+    resolution: {integrity: sha1-h7RN3de3DwZBwuPtCGS6c+LqjfQ=}
 
   vfile@6.0.3:
-    resolution: {integrity: sha1-NlKrHEllMYUr9VprrFevmB68OKs=, tarball: https://registry.npmjs.org/vfile/-/vfile-6.0.3.tgz}
+    resolution: {integrity: sha1-NlKrHEllMYUr9VprrFevmB68OKs=}
 
   vite@8.1.4:
-    resolution: {integrity: sha1-PNcR8x3oBeUVSrR5SDSeaTMU1YE=, tarball: https://registry.npmjs.org/vite/-/vite-8.1.4.tgz}
+    resolution: {integrity: sha1-PNcR8x3oBeUVSrR5SDSeaTMU1YE=}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -960,7 +960,7 @@ packages:
         optional: true
 
   vitest@4.1.10:
-    resolution: {integrity: sha1-fpKF7+JksRZwULejp/80eI4bevw=, tarball: https://registry.npmjs.org/vitest/-/vitest-4.1.10.tgz}
+    resolution: {integrity: sha1-fpKF7+JksRZwULejp/80eI4bevw=}
     engines: {node: ^20.0.0 || ^22.0.0 || >=24.0.0}
     hasBin: true
     peerDependencies:
@@ -1001,19 +1001,19 @@ packages:
         optional: true
 
   why-is-node-running@2.3.0:
-    resolution: {integrity: sha1-o/aalxB/SUs83Dvd3Yg6fWXOvwQ=, tarball: https://registry.npmjs.org/why-is-node-running/-/why-is-node-running-2.3.0.tgz}
+    resolution: {integrity: sha1-o/aalxB/SUs83Dvd3Yg6fWXOvwQ=}
     engines: {node: '>=8'}
     hasBin: true
 
   yaml-ast-parser@0.0.43:
-    resolution: {integrity: sha1-6KI+b7TDgHarkplcXcoz89PXybs=, tarball: https://registry.npmjs.org/yaml-ast-parser/-/yaml-ast-parser-0.0.43.tgz}
+    resolution: {integrity: sha1-6KI+b7TDgHarkplcXcoz89PXybs=}
 
   yargs-parser@21.1.1:
-    resolution: {integrity: sha1-kJa87r+ZDSG7MfqVFuDt4pSnfTU=, tarball: https://registry.npmjs.org/yargs-parser/-/yargs-parser-21.1.1.tgz}
+    resolution: {integrity: sha1-kJa87r+ZDSG7MfqVFuDt4pSnfTU=}
     engines: {node: '>=12'}
 
   zwitch@2.0.4:
-    resolution: {integrity: sha1-yCfUsKy3b8PmhaTG7CkC1RBw6dc=, tarball: https://registry.npmjs.org/zwitch/-/zwitch-2.0.4.tgz}
+    resolution: {integrity: sha1-yCfUsKy3b8PmhaTG7CkC1RBw6dc=}
 
 snapshots:
 
