@@ -21,6 +21,9 @@ def load_config(
 class AppConfig(BaseModel):
     engine: EngineConfig        # depth=16, workers=2, analyze_limit
                                 # =100 (cap per analyze run);
+                                # multipv=5 (1-10; candidate lines for
+                                # live eval and the coach's engine
+                                # tool — batch analysis stays 1);
                                 # bin_path None -> repo submodule build
     thresholds: Thresholds      # centipawn loss: inaccuracy=50,
                                 # mistake=100, blunder=200

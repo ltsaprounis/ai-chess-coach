@@ -9,7 +9,7 @@ import chess
 import chess.engine
 from pydantic import BaseModel
 
-from chess_coach.domain import Game, GameAnalysis
+from chess_coach.domain import EvalLine, Game, GameAnalysis
 from chess_coach.engine.analysis import EngineOptions, analyze_game
 from chess_coach.engine.uci import Engine, PositionEval
 
@@ -21,12 +21,9 @@ class Progress(BaseModel):
 
 
 class LiveEval(BaseModel):
-    """One live-analysis event per depth reached (docs/04-engine.md)."""
+    """Snapshot of the current MultiPV candidate lines (docs/04-engine.md)."""
 
-    depth: int
-    eval_cp: int | None  # white's perspective, like MoveEval
-    eval_mate: int | None  # signed moves to mate, white's view
-    pv_san: list[str]  # principal variation from this position, SAN
+    lines: list[EvalLine]  # sorted by multipv rank
 
 
 ProgressCallback = Callable[[Progress], None]
@@ -73,8 +70,10 @@ class AnalysisPool:
         finally:
             self._idle.put_nowait(engine)
 
-    def stream_eval(self, fen: str, depth: int) -> AsyncGenerator[LiveEval, None]:
-        """Live single-position eval: one `LiveEval` per new depth.
+    def stream_eval(
+        self, fen: str, depth: int, multipv: int = 1
+    ) -> AsyncGenerator[LiveEval, None]:
+        """Live MultiPV eval: one `LiveEval` per changed lines snapshot.
 
         Parses the FEN eagerly so an invalid one raises `ValueError`
         here, before any worker checkout or engine work. The generator
@@ -82,10 +81,25 @@ class AnalysisPool:
         stops the search and returns the worker.
         """
         board = chess.Board(fen)
-        return self._stream_eval(board, depth)
+        return self._stream_eval(board, depth, multipv)
+
+    async def eval_lines(
+        self, fen: str, depth: int, multipv: int = 1
+    ) -> list[EvalLine]:
+        """One-shot MultiPV eval: same search, returning the final snapshot.
+
+        Parses the FEN eagerly, like `stream_eval`. Terminal positions
+        return `[]`.
+        """
+        board = chess.Board(fen)
+        last: LiveEval | None = None
+        async with aclosing(self._stream_eval(board, depth, multipv)) as stream:
+            async for live in stream:
+                last = live
+        return last.lines if last is not None else []
 
     async def _stream_eval(
-        self, board: chess.Board, depth: int
+        self, board: chess.Board, depth: int, multipv: int
     ) -> AsyncGenerator[LiveEval, None]:
         if board.outcome() is not None:  # mate/stalemate: nothing to search
             return
@@ -93,14 +107,19 @@ class AnalysisPool:
         try:
             # aclosing: an early close of *this* generator (client gone,
             # position changed) must also stop the engine search, now.
-            async with aclosing(engine.stream_infos(board, depth)) as infos:
-                last_depth = 0
+            async with aclosing(engine.stream_infos(board, depth, multipv)) as infos:
+                lines_by_rank: dict[int, EvalLine] = {}
+                last_snapshot: list[EvalLine] | None = None
                 async for info in infos:
-                    live = _live_eval(info, board)
-                    if live is None or live.depth <= last_depth:
+                    line = _eval_line(info, board)
+                    if line is None:
                         continue
-                    last_depth = live.depth
-                    yield live
+                    lines_by_rank[line.multipv] = line
+                    snapshot = [lines_by_rank[rank] for rank in sorted(lines_by_rank)]
+                    if snapshot == last_snapshot:  # no change: skip emission
+                        continue
+                    last_snapshot = snapshot
+                    yield LiveEval(lines=snapshot)
         finally:
             self._idle.put_nowait(engine)
 
@@ -114,14 +133,15 @@ async def create_pool(bin_path: Path, workers: int) -> AnalysisPool:
     return AnalysisPool(engines)
 
 
-def _live_eval(info: chess.engine.InfoDict, board: chess.Board) -> LiveEval | None:
-    """Convert one raw info to a `LiveEval`; None when it carries no eval."""
+def _eval_line(info: chess.engine.InfoDict, board: chess.Board) -> EvalLine | None:
+    """Convert one raw per-line info to an `EvalLine`; None with no eval."""
     depth = info.get("depth")
     score = info.get("score")
     if depth is None or score is None:
         return None
     white = score.white()
-    return LiveEval(
+    return EvalLine(
+        multipv=info.get("multipv", 1),
         depth=depth,
         eval_cp=white.score(),
         eval_mate=white.mate(),

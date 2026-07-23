@@ -36,7 +36,8 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider; optional body `{agent_id}` (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id}` |
-| GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40); `eval` event per `LiveEval`, then `done` |
+| GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
+| GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent). Cached hit: one `done` event with the full text. Miss: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
 
 Request/response models are pydantic, so FastAPI's OpenAPI schema is
 complete — the frontend generates its TS types from it
@@ -61,6 +62,21 @@ unexpected to 500.
   503, and closes the iterator when the client disconnects so the
   worker frees immediately. One stream per request; the frontend
   drops the old stream when the shown position changes.
+- Explain (`/api/games/{id}/explain`) runs only on explicit user
+  request (LLM calls cost money) and caches per
+  (game, ply, agent) via storage's explanation repo. Miss path:
+  `get_game` (404 unknown, 409 unanalyzed) → coach
+  `build_move_context` (`ValueError` → 400, like unknown `agent_id`)
+  → `eval_lines(fen_before)` with config depth/multipv (missing pool
+  → 503, `EngineError` → 502) → `render_explain_prompt` →
+  `provider.explain(prompt,
+  analyst)` streamed as SSE, then `save_explanation`. The `analyst`
+  is the API layer's wrapper around `pool.eval_lines` with config
+  depth/multipv — this is where coach meets engine; they never
+  import each other. Client disconnects abort generation and cache
+  nothing. A `CoachProviderError` raised mid-stream is too late for
+  an HTTPException, so it becomes an `error` SSE event instead and
+  nothing is cached.
 
 ## Dependencies
 

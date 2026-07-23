@@ -2,19 +2,30 @@
 // no React, unit-tested in liveEval.test.ts.
 
 /**
- * One SSE `eval` event from `GET /api/eval`. Hand-declared because
- * SSE payloads are not part of the OpenAPI schema; mirrors the
- * backend's LiveEval model (white's perspective, mate as signed
- * moves to mate).
+ * One MultiPV candidate line, white's POV; the score assumes its
+ * first move (`pv_san[0]`) is played. Hand-declared because SSE
+ * payloads are not part of the OpenAPI schema; mirrors the backend's
+ * `EvalLine` domain model.
  */
-export type LiveEval = {
+export type EvalLine = {
+  multipv: number;
   depth: number;
   eval_cp: number | null;
   eval_mate: number | null;
   pv_san: string[];
 };
 
-type Score = Pick<LiveEval, "eval_cp" | "eval_mate">;
+/**
+ * One SSE `eval` event from `GET /api/eval` — a snapshot of the
+ * current MultiPV candidate lines, sorted by multipv rank.
+ * Hand-declared because SSE payloads are not part of the OpenAPI
+ * schema; mirrors the backend's `LiveEval` model.
+ */
+export type LiveEval = {
+  lines: EvalLine[];
+};
+
+type Score = Pick<EvalLine, "eval_cp" | "eval_mate">;
 
 /** Score as text: cp as ±x.xx pawns, mate as "M n" / "−M n". */
 export function formatEval(score: Score): string {

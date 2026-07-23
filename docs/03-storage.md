@@ -25,6 +25,14 @@ analyses (
   overall_acpl REAL,                 -- feeds opening_stats averages
   acpl_by_phase TEXT, judgment_counts TEXT
 );
+explanations (                       -- cached coach move explanations
+  game_id TEXT NOT NULL REFERENCES games(id),
+  ply INTEGER NOT NULL,              -- 1-based, matches MoveEval.ply
+  agent_id TEXT NOT NULL,            -- coach agent that produced it
+  text TEXT NOT NULL,                -- the explanation, markdown
+  created_at INTEGER NOT NULL,      -- unix seconds
+  PRIMARY KEY (game_id, ply, agent_id)
+);
 ```
 
 Indexes on `games(username, end_time)`. Migrations are numbered SQL
@@ -52,6 +60,14 @@ def set_opening(db: Db, game_id: str, opening: Opening) -> None
 # Analysis repo
 def save_analysis(db: Db, analysis: GameAnalysis) -> None
 def list_analyses(db: Db, username: str) -> list[GameAnalysis]
+
+# Explanation cache (coach move explanations are expensive; the API
+# layer reads before generating and writes after — one per
+# game/ply/agent, upsert overwrites)
+def get_explanation(db: Db, game_id: str, ply: int,
+                    agent_id: str) -> str | None
+def save_explanation(db: Db, game_id: str, ply: int,
+                     agent_id: str, text: str) -> None
 ```
 
 Pydantic handles the JSON columns (`model_dump_json` /

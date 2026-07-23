@@ -3,17 +3,30 @@
 from collections.abc import AsyncIterator
 
 import pytest
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    ToolUseBlock,
+)
 
 import chess_coach.coach.providers as providers_module
 from chess_coach.coach import (
+    ClaudeAgentSdkProvider,
+    CoachProvider,
     CoachProviderError,
+    ExplainEvent,
+    MoveContext,
+    build_move_context,
     build_report,
     create_provider,
+    render_explain_prompt,
     render_prompt,
 )
 from chess_coach.domain import (
     AnalyzedGame,
+    EvalLine,
     GameAnalysis,
     LlmConfig,
     MoveEval,
@@ -213,8 +226,6 @@ async def test_agent_sdk_provider_collects_text(
 async def test_agent_sdk_provider_surfaces_error_detail_from_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from claude_agent_sdk import ResultMessage
-
     def fake_query(
         *, prompt: str, options: ClaudeAgentOptions
     ) -> AsyncIterator[object]:
@@ -256,3 +267,311 @@ async def test_agent_sdk_provider_wraps_failures(
 def test_unimplemented_providers_raise_clearly() -> None:
     with pytest.raises(CoachProviderError, match="not implemented"):
         create_provider(LlmConfig(provider="anthropic"))
+
+
+def test_provider_satisfies_protocol() -> None:
+    provider: CoachProvider = create_provider(LlmConfig())
+    assert isinstance(provider, ClaudeAgentSdkProvider)
+
+
+# --- build_move_context ---------------------------------------------------
+
+_EXPLAIN_EVALS = [
+    MoveEval(
+        ply=1, san="e4", eval_cp=30, eval_mate=None,
+        best_move="e2e4", cp_loss=0, judgment="best",
+    ),
+    MoveEval(
+        ply=2, san="e5", eval_cp=30, eval_mate=None,
+        best_move="e7e5", cp_loss=0, judgment="best",
+    ),
+    MoveEval(
+        ply=3, san="Nf3", eval_cp=-270, eval_mate=None,
+        best_move="d2d4", cp_loss=300, judgment="blunder",
+    ),
+]  # fmt: skip
+
+
+def test_build_move_context_normal_ply() -> None:
+    analysis = make_analysis(game_id="g-ctx").model_copy(
+        update={"evals": _EXPLAIN_EVALS}
+    )
+    game = make_game(id="g-ctx", san_moves=["e4", "e5", "Nf3"], color="white")
+
+    ctx = build_move_context(game, analysis, RUY, ply=3)
+
+    assert ctx.username == "testuser"
+    assert ctx.color == "white"
+    assert ctx.opening_name == "Ruy Lopez"
+    assert ctx.ply == 3
+    assert ctx.san == "Nf3"
+    assert ctx.fen_before.startswith(
+        "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w"
+    )
+    assert ctx.fen_after.startswith(
+        "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b"
+    )
+    assert ctx.best_move == "d4"  # UCI d2d4 rendered as SAN on fen_before
+    assert ctx.cp_loss == 300
+    assert ctx.judgment == "blunder"
+
+
+def test_build_move_context_first_ply_uses_starting_position() -> None:
+    evals = [_EXPLAIN_EVALS[0]]
+    analysis = make_analysis(game_id="g-ctx").model_copy(update={"evals": evals})
+    game = make_game(id="g-ctx", san_moves=["e4"], color="white")
+
+    ctx = build_move_context(game, analysis, opening=None, ply=1)
+
+    assert ctx.fen_before == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    assert ctx.san == "e4"
+    assert ctx.opening_name is None
+
+
+def test_build_move_context_out_of_range_ply_raises() -> None:
+    analysis = make_analysis(game_id="g-ctx").model_copy(
+        update={"evals": _EXPLAIN_EVALS}
+    )
+    game = make_game(id="g-ctx", san_moves=["e4", "e5", "Nf3"])
+
+    with pytest.raises(ValueError, match="out of range"):
+        build_move_context(game, analysis, opening=None, ply=4)
+    with pytest.raises(ValueError, match="out of range"):
+        build_move_context(game, analysis, opening=None, ply=0)
+
+
+# --- render_explain_prompt -------------------------------------------------
+
+_EXPLAIN_CTX = MoveContext(
+    username="testuser",
+    color="white",
+    opening_name="Ruy Lopez",
+    ply=3,
+    san="Nf3",
+    fen_before="rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+    fen_after="rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 1",
+    best_move="d4",
+    cp_loss=300,
+    judgment="blunder",
+)
+
+
+def test_render_explain_prompt_is_deterministic_and_complete() -> None:
+    lines = [
+        EvalLine(
+            multipv=1,
+            depth=18,
+            eval_cp=35,
+            eval_mate=None,
+            pv_san=["d4", "exd4", "Nxd4", "Nf6", "Nc3", "Bb4"],
+        ),
+        EvalLine(
+            multipv=2, depth=18, eval_cp=10, eval_mate=None, pv_san=["Bc4", "Nf6"]
+        ),
+    ]
+
+    prompt = render_explain_prompt(_EXPLAIN_CTX, lines)
+
+    assert prompt == render_explain_prompt(_EXPLAIN_CTX, lines)
+    assert "## Move explanation for testuser" in prompt
+    assert "testuser was playing white in a Ruy Lopez game." in prompt
+    assert f"`{_EXPLAIN_CTX.fen_before}`" in prompt
+    assert f"`{_EXPLAIN_CTX.fen_after}`" in prompt
+    assert "played **Nf3** (lost 300 cp; judged **blunder**)" in prompt
+    assert "engine's preferred **d4**" in prompt
+    assert "| 1 | 18 | +0.35 | d4 exd4 Nxd4 Nf6 Nc3 … |" in prompt  # truncated pv
+    assert "| 2 | 18 | +0.10 | Bc4 Nf6 |" in prompt
+    assert "analyze_position" in prompt
+
+
+def test_render_explain_prompt_mate_scale_no_opening_no_lines() -> None:
+    ctx = _EXPLAIN_CTX.model_copy(
+        update={"opening_name": None, "color": "black", "cp_loss": 10_050}
+    )
+
+    prompt = render_explain_prompt(ctx, [])
+
+    assert "testuser was playing black." in prompt
+    assert "forced-mate-scale blunder" in prompt
+    assert "10050" not in prompt
+    assert "Candidate lines" not in prompt
+
+
+# --- ClaudeAgentSdkProvider.explain -----------------------------------------
+
+
+async def stub_analyst(fen: str) -> list[EvalLine]:
+    return [
+        EvalLine(multipv=1, depth=12, eval_cp=-40, eval_mate=None,
+                  pv_san=["Bxf7+", "Kxf7"]),
+    ]  # fmt: skip
+
+
+async def test_agent_sdk_provider_explain_streams_text_and_tool_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        captured["prompt"] = prompt
+        captured["options"] = options
+
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="Let's look at this position.")],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="t1",
+                        name="mcp__engine__analyze_position",
+                        input={"fen": "fen-after"},
+                    )
+                ],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[TextBlock(text="Black wins the exchange next.")],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=2,
+                session_id="s",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    events = [
+        event async for event in provider.explain("explain this move", stub_analyst)
+    ]
+
+    assert events == [
+        ExplainEvent(type="text", text="Let's look at this position."),
+        ExplainEvent(type="tool", text="engine: analyzing fen-after"),
+        ExplainEvent(type="text", text="Black wins the exchange next."),
+    ]
+    assert captured["prompt"] == "explain this move"
+    options = captured["options"]
+    assert isinstance(options, ClaudeAgentOptions)
+    assert options.max_turns == 8
+    assert options.tools == []
+    assert options.allowed_tools == ["mcp__engine__analyze_position"]
+    mcp_servers = options.mcp_servers
+    assert isinstance(mcp_servers, dict)
+    assert "engine" in mcp_servers
+
+
+async def test_agent_sdk_provider_explain_surfaces_error_detail_from_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            yield ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=True,
+                num_turns=0,
+                session_id="s",
+                result="Not logged in · Please run /login",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    with pytest.raises(CoachProviderError, match="Not logged in"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_agent_sdk_provider_explain_wraps_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        raise FileNotFoundError("claude binary not found")
+
+    monkeypatch.setattr(providers_module, "query", broken_query)
+
+    provider = create_provider(LlmConfig())
+    with pytest.raises(CoachProviderError, match="installed and logged in"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_agent_sdk_provider_explain_raises_on_empty_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            yield ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=1,
+                session_id="s",
+                result=None,
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    with pytest.raises(CoachProviderError, match="returned no text"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_agent_sdk_provider_explain_early_close_closes_the_sdk_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A client disconnect closes explain() mid-stream; that close must
+    # reach the SDK query generator now, not wait for GC finalization.
+    sdk_stream_closed = False
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            nonlocal sdk_stream_closed
+            try:
+                yield AssistantMessage(
+                    content=[TextBlock(text="First thought.")],
+                    model="claude-opus-4-8",
+                )
+                yield AssistantMessage(
+                    content=[TextBlock(text="Never consumed.")],
+                    model="claude-opus-4-8",
+                )
+            finally:
+                sdk_stream_closed = True
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    events = provider.explain("explain this move", stub_analyst)
+    first = await anext(events)
+    assert first == ExplainEvent(type="text", text="First thought.")
+    await events.aclose()
+    assert sdk_stream_closed

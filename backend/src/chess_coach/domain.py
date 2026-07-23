@@ -70,6 +70,20 @@ class MoveEval(BaseModel):
     judgment: Judgment
 
 
+class EvalLine(BaseModel):
+    """One candidate line from a MultiPV search of a single position.
+
+    The score is the eval of the position assuming the line is played
+    (best play by both sides) — i.e. "the eval after the first move".
+    """
+
+    multipv: int  # 1-based rank; 1 is the engine's best line
+    depth: int
+    eval_cp: int | None  # white's perspective, like MoveEval
+    eval_mate: int | None  # signed moves to mate, white's view
+    pv_san: list[str]  # SAN; first entry is the candidate move
+
+
 class GameAnalysis(BaseModel):
     game_id: str
     depth: int

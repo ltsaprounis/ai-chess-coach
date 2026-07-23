@@ -80,11 +80,27 @@ async def test_stream_eval_reports_increasing_depths_live() -> None:
     finally:
         await pool.close()
 
-    depths = [e.depth for e in evals]
-    assert depths and depths == sorted(set(depths))  # strictly increasing
+    depths = [e.lines[0].depth for e in evals]
+    assert depths and depths == sorted(depths)  # non-decreasing
     assert depths[-1] == 8  # runs to the target depth, then stops
-    last = evals[-1]
+    last = evals[-1].lines[0]
+    assert last.multipv == 1
     # Start position: a modest white-POV cp eval and a real PV.
     assert last.eval_cp is not None and abs(last.eval_cp) < 200
     assert last.eval_mate is None
     assert last.pv_san
+
+
+async def test_eval_lines_reports_multiple_candidate_lines() -> None:
+    if not STOCKFISH_BIN.exists():
+        pytest.skip(f"no Stockfish binary at {STOCKFISH_BIN}; run `make engine`")
+
+    pool = await create_pool(STOCKFISH_BIN, workers=1)
+    try:
+        lines = await pool.eval_lines(chess.STARTING_FEN, depth=8, multipv=3)
+    finally:
+        await pool.close()
+
+    assert [line.multipv for line in lines] == sorted(line.multipv for line in lines)
+    assert len(lines) <= 3  # capped at the number of legal moves naturally
+    assert all(line.pv_san for line in lines)

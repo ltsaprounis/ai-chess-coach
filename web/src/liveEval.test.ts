@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
+import type { EvalLine } from "./liveEval";
 import { formatEval, whiteFraction } from "./liveEval";
 
 const cp = (value: number) => ({ eval_cp: value, eval_mate: null });
 const mate = (value: number) => ({ eval_cp: null, eval_mate: value });
+
+/** A full MultiPV line, as one entry in a `LiveEval` snapshot. */
+const line = (partial: Partial<EvalLine> = {}): EvalLine => ({
+  multipv: 1,
+  depth: 18,
+  eval_cp: 35,
+  eval_mate: null,
+  pv_san: ["Nf3", "Nc6"],
+  ...partial,
+});
 
 describe("formatEval", () => {
   it("formats centipawns as signed pawns", () => {
@@ -40,5 +51,13 @@ describe("whiteFraction", () => {
   it("pins mate to the mating side's end", () => {
     expect(whiteFraction(mate(5))).toBe(1);
     expect(whiteFraction(mate(-5))).toBe(0);
+  });
+});
+
+describe("EvalLine snapshot lines", () => {
+  it("format and bar helpers work over a full snapshot line", () => {
+    const rank2 = line({ multipv: 2, eval_cp: -70, pv_san: ["e4", "e5"] });
+    expect(formatEval(rank2)).toBe("−0.70");
+    expect(whiteFraction(rank2)).toBeLessThan(0.5);
   });
 });

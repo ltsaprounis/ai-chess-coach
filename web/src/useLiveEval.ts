@@ -3,6 +3,7 @@ import { evalUrl } from "./api.ts";
 import type { LiveEval } from "./liveEval.ts";
 
 export type LiveEvalState = {
+  /** Latest MultiPV snapshot (all candidate lines), or null before one arrives. */
   latest: LiveEval | null;
   done: boolean;
   error: boolean;
@@ -14,11 +15,12 @@ const IDLE: LiveEvalState = { latest: null, done: false, error: false };
 const DEBOUNCE_MS = 300;
 
 /**
- * Stream `GET /api/eval` for `fen` (null = idle). One EventSource at
- * a time: a fen change or unmount closes the current stream. An
- * error before any eval means the engine is unavailable — close and
- * stop, since EventSource would otherwise auto-reconnect forever; a
- * drop after evals arrived just keeps the last one and stops.
+ * Stream `GET /api/eval` for `fen` (null = idle); the server decides
+ * depth and how many MultiPV lines to send. One EventSource at a
+ * time: a fen change or unmount closes the current stream. An error
+ * before any eval means the engine is unavailable — close and stop,
+ * since EventSource would otherwise auto-reconnect forever; a drop
+ * after evals arrived just keeps the last snapshot and stops.
  */
 export function useLiveEval(fen: string | null): LiveEvalState {
   const [state, setState] = useState<LiveEvalState>(IDLE);

@@ -38,18 +38,19 @@ class AnalysisPool:
         on_progress: ProgressCallback | None = None,
     ) -> GameAnalysis
     def stream_eval(
-        self, fen: str, depth: int,
+        self, fen: str, depth: int, multipv: int = 1,
     ) -> AsyncGenerator[LiveEval]    # live single-position eval
+    async def eval_lines(
+        self, fen: str, depth: int, multipv: int = 1,
+    ) -> list[EvalLine]              # one-shot: final lines at depth
     async def close(self) -> None    # quits engines cleanly
 
 class Progress(BaseModel):
     game_id: str; ply: int; total_plies: int
 
-class LiveEval(BaseModel):           # one event per depth reached
-    depth: int
-    eval_cp: int | None              # white's perspective, like MoveEval
-    eval_mate: int | None            # signed moves to mate, white's view
-    pv_san: list[str]                # principal variation, SAN
+class LiveEval(BaseModel):           # snapshot of the candidate lines
+    lines: list[EvalLine]            # sorted by multipv rank; domain
+                                     # type — see README.md
 
 async def analyze_game(              # pure logic; the pool drives it
     game: Game, opts: EngineOptions, evaluate: EvaluateFn
@@ -74,14 +75,25 @@ map; raw `chess.engine` errors never escape this component.
 `stream_eval` powers the live analysis board: it parses the FEN
 eagerly (raising `ValueError` on an invalid one, before any engine
 work), borrows a pool worker (waiting if all are busy analyzing),
-and yields a `LiveEval` per new depth the engine reports, finishing
-at the target depth. Terminal positions yield nothing. Closing the
-iterator early (client gone, position changed) must stop the search
-and return the worker to the pool.
+and runs one MultiPV search (`multipv` candidate lines; scores are
+white-POV, and each line's score is the eval assuming its first move
+is played). It maintains a lines-by-rank snapshot from the engine's
+per-line infos and yields a `LiveEval` whenever the snapshot changes,
+finishing at the target depth. Terminal positions yield nothing.
+Closing the iterator early (client gone, position changed) must stop
+the search and return the worker to the pool.
+
+`eval_lines` is the non-streaming form — same search, returning only
+the final snapshot. It exists for the coach's engine tool and for
+seeding explain prompts ([06-coach.md](06-coach.md), wired by the
+[API layer](07-api.md)). Terminal positions return `[]`. Both
+`stream_eval` and `eval_lines` cap `multipv` at the number of legal
+moves naturally (the engine reports fewer lines).
 
 Internally each worker holds one engine from
 `chess.engine.popen_uci(bin_path)` (async API) and calls
-`engine.analyse(board, chess.engine.Limit(depth=...))` per position.
+`engine.analyse(board, chess.engine.Limit(depth=...))` per position;
+live searches pass `multipv=` through to `engine.analysis(...)`.
 
 ## Analysis logic
 
@@ -104,8 +116,8 @@ Internally each worker holds one engine from
 ## Dependencies
 
 - `chess_coach.domain` and python-chess. Depth, thresholds, workers,
-  and the binary path are injected by the [API layer](07-api.md)
-  from [config](01-config.md) — no imports.
+  multipv, and the binary path are injected by the
+  [API layer](07-api.md) from [config](01-config.md) — no imports.
 - Results are persisted by the API layer via [storage](03-storage.md).
 
 ## Build plan

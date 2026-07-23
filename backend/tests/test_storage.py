@@ -12,6 +12,7 @@ from chess_coach.storage import (
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
+    get_explanation,
     get_game,
     latest_game_time,
     list_analyses,
@@ -19,6 +20,7 @@ from chess_coach.storage import (
     open_db,
     opening_stats,
     save_analysis,
+    save_explanation,
     set_opening,
     upsert_games,
 )
@@ -174,4 +176,41 @@ def test_reopen_persists_data_and_migrations_are_idempotent(tmp_path: Path) -> N
 
     second = open_db(path)  # migrations must be a no-op here
     assert [g.id for g in list_games(second, "testuser", GameFilters())] == ["game-1"]
+    second.close()
+
+
+def test_get_explanation_misses_when_absent(db: Db) -> None:
+    upsert_games(db, [make_game()])
+    assert get_explanation(db, "game-1", 1, "coach-a") is None
+
+
+def test_save_and_get_explanation_round_trip(db: Db) -> None:
+    upsert_games(db, [make_game()])
+    save_explanation(db, "game-1", 1, "coach-a", "1. e4 is a strong opening move.")
+
+    assert (
+        get_explanation(db, "game-1", 1, "coach-a") == "1. e4 is a strong opening move."
+    )
+    # A different ply, agent, or game is a distinct cache entry.
+    assert get_explanation(db, "game-1", 2, "coach-a") is None
+    assert get_explanation(db, "game-1", 1, "coach-b") is None
+
+
+def test_save_explanation_overwrites_existing_text(db: Db) -> None:
+    upsert_games(db, [make_game()])
+    save_explanation(db, "game-1", 1, "coach-a", "first draft")
+    save_explanation(db, "game-1", 1, "coach-a", "revised explanation")
+
+    assert get_explanation(db, "game-1", 1, "coach-a") == "revised explanation"
+
+
+def test_explanation_survives_close_and_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "explanations.sqlite3"
+    first = open_db(path)
+    upsert_games(first, [make_game()])
+    save_explanation(first, "game-1", 3, "coach-a", "castle early for safety")
+    first.close()
+
+    second = open_db(path)  # migration 003 must be a no-op here
+    assert get_explanation(second, "game-1", 3, "coach-a") == "castle early for safety"
     second.close()

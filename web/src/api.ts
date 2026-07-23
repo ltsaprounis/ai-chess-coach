@@ -138,7 +138,19 @@ export function progressUrl(username: string): string {
   return `/api/players/${encodeURIComponent(username)}/analyze/progress`;
 }
 
-/** SSE live-eval stream for one position; depth defaults server-side. */
+/** SSE live-eval stream for one position; depth/multipv default server-side. */
 export function evalUrl(fen: string): string {
   return `/api/eval${queryString({ fen })}`;
+}
+
+/** SSE move-explanation stream; agent defaults server-side when omitted. */
+export function explainUrl(
+  gameId: string,
+  ply: number,
+  agentId?: string,
+): string {
+  return `/api/games/${encodeURIComponent(gameId)}/explain${queryString({
+    ply,
+    agent_id: agentId,
+  })}`;
 }

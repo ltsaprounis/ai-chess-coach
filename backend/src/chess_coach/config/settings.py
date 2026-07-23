@@ -22,6 +22,9 @@ class EngineConfig(BaseModel):
     workers: int = 2
     bin_path: Path | None = None  # None -> engines/stockfish/src/stockfish
     analyze_limit: int = 100  # newest games per "analyze all" run
+    # candidate lines for live eval and the coach's engine tool;
+    # batch analysis stays single-PV and ignores this.
+    multipv: int = Field(default=5, ge=1, le=10)
 
 
 class ServerConfig(BaseModel):

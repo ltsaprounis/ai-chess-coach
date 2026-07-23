@@ -65,15 +65,18 @@ class Engine:
         return PositionEval(cp=white.score(), mate=white.mate(), best_uci=best)
 
     async def stream_infos(
-        self, board: chess.Board, depth: int
+        self, board: chess.Board, depth: int, multipv: int = 1
     ) -> AsyncGenerator[chess.engine.InfoDict, None]:
-        """Stream raw search infos live, up to a depth-limited search.
+        """Stream raw per-line search infos live, up to a depth-limited
+        MultiPV search.
 
-        Closing the generator early stops the underlying search.
+        Closing the generator early stops the underlying search. The
+        engine reports fewer than `multipv` lines when the position has
+        fewer legal moves.
         """
         try:
             analysis = await self._engine.analysis(
-                board, chess.engine.Limit(depth=depth)
+                board, chess.engine.Limit(depth=depth), multipv=multipv
             )
         except chess.engine.EngineError as exc:
             raise EngineError(f"analysis failed for {board.fen()}: {exc}") from exc

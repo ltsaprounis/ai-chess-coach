@@ -14,11 +14,15 @@ from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
     CoachProvider,
     CoachProviderError,
+    PositionAnalystFn,
+    build_move_context,
     build_report,
+    render_explain_prompt,
     render_prompt,
 )
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
+    EvalLine,
     Game,
     GameDetail,
     GameSummary,
@@ -28,7 +32,7 @@ from chess_coach.domain import (
     Result,
     TimeClass,
 )
-from chess_coach.engine import AnalysisPool, EngineOptions, Progress
+from chess_coach.engine import AnalysisPool, EngineError, EngineOptions, Progress
 from chess_coach.ingestion import sync_games
 from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
@@ -37,12 +41,14 @@ from chess_coach.storage import (
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
+    get_explanation,
     get_game,
     latest_game_time,
     list_analyzed_games,
     list_games,
     opening_stats,
     save_analysis,
+    save_explanation,
     set_opening,
     upsert_games,
 )
@@ -260,6 +266,7 @@ async def eval_position(
     cfg: CfgDep,
     fen: str,
     depth: int | None = None,
+    multipv: int | None = None,
 ) -> EventSourceResponse:
     """SSE live eval of one position: `eval` per depth, then `done`."""
     if pool is None:
@@ -267,12 +274,14 @@ async def eval_position(
             status_code=503,
             detail="engine binary not found — build it with `make engine`",
         )
-    resolved = cfg.engine.depth if depth is None else depth
-    clamped = max(1, min(40, resolved))
+    resolved_depth = cfg.engine.depth if depth is None else depth
+    clamped_depth = max(1, min(40, resolved_depth))
+    resolved_multipv = cfg.engine.multipv if multipv is None else multipv
+    clamped_multipv = max(1, min(10, resolved_multipv))
     try:
         # stream_eval parses the FEN eagerly, so a bad one fails here
         # as a 400 — before any streaming response begins.
-        evals = pool.stream_eval(fen, clamped)
+        evals = pool.stream_eval(fen, clamped_depth, clamped_multipv)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid FEN: {exc}") from exc
 
@@ -283,6 +292,107 @@ async def eval_position(
             async for event in events:
                 yield {"event": "eval", "data": event.model_dump_json()}
         yield {"event": "done", "data": ""}
+
+    return EventSourceResponse(stream())
+
+
+class ExplainDone(BaseModel):
+    """Terminal `done` SSE payload: the full markdown explanation."""
+
+    text: str
+
+
+class ExplainError(BaseModel):
+    """Mid-stream `error` SSE payload — too late for an HTTPException,
+    since the stream has already started.
+    """
+
+    message: str
+
+
+@router.get("/games/{game_id}/explain")
+async def explain_move(
+    game_id: str,
+    db: DbDep,
+    cfg: CfgDep,
+    pool: PoolDep,
+    providers: ProvidersDep,
+    ply: int,
+    agent_id: str | None = None,
+) -> EventSourceResponse:
+    """SSE coach explanation of one played move; cached per (game, ply, agent)."""
+    resolved_agent_id = cfg.coach.default_agent if agent_id is None else agent_id
+    provider = providers.get(resolved_agent_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=400, detail=f"unknown coach agent: {resolved_agent_id}"
+        )
+
+    game = get_game(db, game_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail=f"unknown game: {game_id}")
+    analysis = game.analysis
+    if analysis is None:
+        raise HTTPException(
+            status_code=409,
+            detail="no analysis for this game — analyze this game first",
+        )
+
+    cached = get_explanation(db, game_id, ply, resolved_agent_id)
+    if cached is not None:
+
+        async def cached_stream() -> AsyncIterator[dict[str, str]]:
+            yield {"event": "done", "data": ExplainDone(text=cached).model_dump_json()}
+
+        return EventSourceResponse(cached_stream())
+
+    try:
+        ctx = build_move_context(game, analysis, game.opening, ply)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if pool is None:
+        raise HTTPException(
+            status_code=503,
+            detail="engine binary not found — build it with `make engine`",
+        )
+
+    try:
+        lines = await pool.eval_lines(
+            ctx.fen_before, cfg.engine.depth, cfg.engine.multipv
+        )
+    except EngineError as exc:
+        raise HTTPException(status_code=502, detail=f"engine failure: {exc}") from exc
+    prompt = render_explain_prompt(ctx, lines)
+
+    # The API layer's PositionAnalystFn implementation, wrapping the engine
+    # pool — this is where coach meets engine; they never import each other.
+    async def _analyst(fen: str) -> list[EvalLine]:
+        return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
+
+    analyst: PositionAnalystFn = _analyst
+
+    async def stream() -> AsyncIterator[dict[str, str]]:
+        chunks: list[str] = []
+        try:
+            # aclosing: a client disconnect closes this generator, which
+            # stops generation immediately and caches nothing.
+            async with aclosing(provider.explain(prompt, analyst)) as events:
+                async for event in events:
+                    if event.type == "text":
+                        chunks.append(event.text)
+                    yield {"event": event.type, "data": event.model_dump_json()}
+        except CoachProviderError as exc:
+            # Too late for an HTTPException: events are already on the
+            # wire, so the failure becomes an SSE event instead.
+            yield {
+                "event": "error",
+                "data": ExplainError(message=str(exc)).model_dump_json(),
+            }
+            return
+        full_text = "".join(chunks)
+        save_explanation(db, game_id, ply, resolved_agent_id, full_text)
+        yield {"event": "done", "data": ExplainDone(text=full_text).model_dump_json()}
 
     return EventSourceResponse(stream())
 

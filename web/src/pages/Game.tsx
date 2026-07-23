@@ -4,8 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import { Link, useParams } from "react-router-dom";
 import { api, type MoveEval } from "../api.ts";
+import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
 import EvalGraph from "../components/EvalGraph.tsx";
+import ExplainPanel from "../components/ExplainPanel.tsx";
 import LiveEvalPanel from "../components/LiveEvalPanel.tsx";
+import { useExplain } from "../useExplain.ts";
 import { useLiveEval } from "../useLiveEval.ts";
 
 const LIVE_EVAL_KEY = "liveEval";
@@ -37,6 +40,21 @@ export default function Game() {
     queryFn: () => api.game(id),
     refetchInterval: analyzing ? 1000 : false,
   });
+
+  // Same agent roster + persisted choice as Home/Coach (coachAgent.ts) —
+  // explain reuses whichever agent the player already picked there.
+  const agents = useQuery({
+    queryKey: ["coachAgents"],
+    queryFn: api.coachAgents,
+  });
+  const agentId = agents.data
+    ? resolveAgentId(
+        getStoredAgentId(),
+        agents.data.agents,
+        agents.data.default,
+      )
+    : undefined;
+  const { state: explainState, explain } = useExplain();
 
   const fens = useMemo(() => {
     const chess = new Chess();
@@ -181,6 +199,23 @@ export default function Game() {
           {data.analysis.judgment_counts.mistake ?? 0} · depth{" "}
           {data.analysis.depth}
         </p>
+      )}
+
+      {data.analysis && ply >= 1 && (
+        <div className="explain-section">
+          <button
+            type="button"
+            disabled={
+              explainState.status === "streaming" && explainState.ply === ply
+            }
+            onClick={() => explain(data.id, ply, agentId)}
+          >
+            {explainState.status === "streaming" && explainState.ply === ply
+              ? "Explaining…"
+              : "Explain move"}
+          </button>
+          <ExplainPanel state={explainState} />
+        </div>
       )}
     </main>
   );

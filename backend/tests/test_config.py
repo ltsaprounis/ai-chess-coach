@@ -45,6 +45,24 @@ def test_invalid_value_raises_config_error(tmp_path: Path) -> None:
         load_config(path, env=KEY_ENV)
 
 
+def test_multipv_defaults_to_five(tmp_path: Path) -> None:
+    config = load_config(tmp_path / "nope.yaml", env=KEY_ENV)
+    assert config.engine.multipv == 5
+
+
+def test_multipv_yaml_value_is_honored(tmp_path: Path) -> None:
+    path = write(tmp_path, "engine:\n  multipv: 3\n")
+    config = load_config(path, env=KEY_ENV)
+    assert config.engine.multipv == 3
+
+
+@pytest.mark.parametrize("value", [0, 11])
+def test_multipv_out_of_range_raises_config_error(tmp_path: Path, value: int) -> None:
+    path = write(tmp_path, f"engine:\n  multipv: {value}\n")
+    with pytest.raises(ConfigError, match="invalid"):
+        load_config(path, env=KEY_ENV)
+
+
 def test_invalid_yaml_raises_config_error(tmp_path: Path) -> None:
     path = write(tmp_path, "engine: [unclosed\n")
     with pytest.raises(ConfigError, match="not valid YAML"):

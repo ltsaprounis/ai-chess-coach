@@ -22,9 +22,15 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
    move syncs board + graph. Live-engine toggle: while on, each
-   shown position streams `GET /eval` (SSE) into an eval bar with
-   score, depth, and principal variation; the stream is dropped and
-   reopened when the ply changes.
+   shown position streams `GET /eval` (SSE) into a candidate-lines
+   panel — one row per line with its eval, depth, and SAN moves
+   (the server decides how many lines; the UI renders whatever the
+   snapshot carries); the stream is dropped and reopened when the
+   ply changes. On an analyzed game, the selected move offers an
+   "Explain" button (explicitly user-triggered — it spends LLM
+   calls) that streams `GET /games/{id}/explain` into a markdown
+   panel, with tool events shown as progress lines; cached
+   explanations render instantly.
 4. **Dashboard** — the player's stats hub: summary tiles (record,
    win rate by color, current rating per time class, ACPL, blunder
    rate), rating-over-time and monthly-activity charts from

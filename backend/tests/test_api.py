@@ -1,8 +1,8 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import chess
 import pytest
@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import chess_coach.api.app as app_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
+from chess_coach.coach import CoachProviderError, ExplainEvent, PositionAnalystFn
 from chess_coach.config import (
     AppConfig,
     CoachConfig,
@@ -18,10 +19,22 @@ from chess_coach.config import (
     OpeningsConfig,
     StorageConfig,
 )
-from chess_coach.domain import CoachAgent, Game, GameAnalysis
-from chess_coach.engine import EngineOptions, LiveEval, Progress, ProgressCallback
+from chess_coach.domain import CoachAgent, EvalLine, Game, GameAnalysis
+from chess_coach.engine import (
+    EngineError,
+    EngineOptions,
+    LiveEval,
+    Progress,
+    ProgressCallback,
+)
 from chess_coach.ingestion import UnknownUserError
-from chess_coach.storage import open_db, save_analysis, upsert_games
+from chess_coach.storage import (
+    get_explanation,
+    open_db,
+    save_analysis,
+    save_explanation,
+    upsert_games,
+)
 from tests.factories import make_analysis, make_game
 from tests.http import get, post
 
@@ -34,14 +47,33 @@ class StubProvider:
     def __init__(self, advice: str = "Practice rook endgames.") -> None:
         self.advice = advice
         self.prompts: list[str] = []
+        self.explain_calls = 0
+        self.explain_error: CoachProviderError | None = None
 
     async def complete(self, prompt: str) -> str:
         self.prompts.append(prompt)
         return self.advice
 
+    async def explain(
+        self, prompt: str, analyst: PositionAnalystFn
+    ) -> AsyncGenerator[ExplainEvent]:
+        self.explain_calls += 1
+        # Calling the analyst once proves the API layer's engine-seam
+        # wiring reaches this stub, without a real engine.
+        lines = await analyst(chess.STARTING_FEN)
+        yield ExplainEvent(type="tool", text=f"engine: {len(lines)} line(s)")
+        yield ExplainEvent(type="text", text="This move ")
+        if self.explain_error is not None:
+            raise self.explain_error
+        yield ExplainEvent(type="text", text="loses a pawn.")
+
 
 class StubPool:
     """Instant analyses with one progress event per game."""
+
+    def __init__(self) -> None:
+        self.stream_eval_calls: list[tuple[str, int, int]] = []
+        self.eval_lines_error: Exception | None = None
 
     async def analyze_game(
         self,
@@ -54,16 +86,49 @@ class StubPool:
             on_progress(Progress(game_id=game.id, ply=total, total_plies=total))
         return make_analysis(game_id=game.id, depth=opts.depth)
 
-    def stream_eval(self, fen: str, depth: int) -> AsyncIterator[LiveEval]:
+    def stream_eval(
+        self, fen: str, depth: int, multipv: int = 1
+    ) -> AsyncIterator[LiveEval]:
         chess.Board(fen)  # same eager ValueError on a bad FEN as the pool
+        self.stream_eval_calls.append((fen, depth, multipv))
         return self._live_evals(depth)
 
     @staticmethod
     async def _live_evals(depth: int) -> AsyncIterator[LiveEval]:
         # The final event echoes the requested depth so tests can see
         # what the route resolved (default and clamping).
-        yield LiveEval(depth=1, eval_cp=20, eval_mate=None, pv_san=["e4"])
-        yield LiveEval(depth=depth, eval_cp=35, eval_mate=None, pv_san=["e4", "e5"])
+        yield LiveEval(
+            lines=[
+                EvalLine(multipv=1, depth=1, eval_cp=20, eval_mate=None, pv_san=["e4"])
+            ]
+        )
+        yield LiveEval(
+            lines=[
+                EvalLine(
+                    multipv=1,
+                    depth=depth,
+                    eval_cp=35,
+                    eval_mate=None,
+                    pv_san=["e4", "e5"],
+                )
+            ]
+        )
+
+    async def eval_lines(
+        self, fen: str, depth: int, multipv: int = 1
+    ) -> list[EvalLine]:
+        chess.Board(fen)  # same eager ValueError on a bad FEN as the pool
+        if self.eval_lines_error is not None:
+            raise self.eval_lines_error
+        return [
+            EvalLine(
+                multipv=1,
+                depth=depth,
+                eval_cp=-40,
+                eval_mate=None,
+                pv_san=["Nf3", "Nc6"],
+            )
+        ]
 
     async def close(self) -> None:
         pass
@@ -75,15 +140,39 @@ def db_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def stub_registry() -> dict[str, object]:
+    """Instances created by fake_create_pool/fake_create_provider below,
+    so tests can assert on stub state without reaching into ASGI app
+    internals (which pyright strict can't type through `TestClient.app`).
+    """
+    return {}
+
+
+def stub_pool(registry: dict[str, object]) -> StubPool:
+    return cast(StubPool, registry["pool"])
+
+
+def stub_provider(registry: dict[str, object], agent_id: str) -> StubProvider:
+    return cast(StubProvider, registry[f"provider:{agent_id}"])
+
+
+@pytest.fixture
 def client(
-    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_registry: dict[str, object],
 ) -> Iterator[TestClient]:
     async def fake_create_pool(bin_path: Path, workers: int) -> StubPool:
-        return StubPool()
+        pool = StubPool()
+        stub_registry["pool"] = pool
+        return pool
 
     def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
         # Advice names the agent so tests can see who answered.
-        return StubProvider(advice=f"advice from {cfg.id}")
+        provider = StubProvider(advice=f"advice from {cfg.id}")
+        stub_registry[f"provider:{cfg.id}"] = provider
+        return provider
 
     monkeypatch.setattr(app_module, "create_pool", fake_create_pool)
     monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
@@ -430,6 +519,30 @@ def test_eval_clamps_depth(client: TestClient) -> None:
     assert '"depth":40' in response.text
 
 
+def test_eval_passes_an_in_range_multipv_through(
+    client: TestClient, stub_registry: dict[str, object]
+) -> None:
+    response = get(
+        client, "/api/eval", params={"fen": chess.STARTING_FEN, "multipv": "3"}
+    )
+    assert response.status_code == 200
+    assert stub_pool(stub_registry).stream_eval_calls[-1] == (chess.STARTING_FEN, 16, 3)
+
+
+def test_eval_clamps_out_of_range_multipv(
+    client: TestClient, stub_registry: dict[str, object]
+) -> None:
+    response = get(
+        client, "/api/eval", params={"fen": chess.STARTING_FEN, "multipv": "99"}
+    )
+    assert response.status_code == 200
+    assert stub_pool(stub_registry).stream_eval_calls[-1] == (
+        chess.STARTING_FEN,
+        16,
+        10,
+    )
+
+
 def test_eval_400s_on_invalid_fen(client: TestClient) -> None:
     response = get(client, "/api/eval", params={"fen": "not a fen"})
     assert response.status_code == 400
@@ -447,6 +560,110 @@ def test_eval_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> Non
         response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
     assert response.status_code == 503
     assert "make engine" in response.json()["error"]["message"]
+
+
+def test_explain_cache_hit_streams_done_without_calling_the_provider(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    db = open_db(db_path)
+    save_explanation(db, "g-1", 1, "claude", "Cached explanation text.")
+    db.close()
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+    body = response.text
+    assert "event: done" in body
+    assert '"text":"Cached explanation text."' in body
+    assert "event: text" not in body
+    assert "event: tool" not in body
+    assert stub_provider(stub_registry, "claude").explain_calls == 0
+
+
+def test_explain_streams_then_caches_and_a_repeat_is_a_cache_hit(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+    body = response.text
+    # Events arrive in the order the stub yields them: tool, then text.
+    assert body.index("event: tool") < body.index("event: text")
+    assert body.index("event: text") < body.index("event: done")
+    assert '"text":"This move loses a pawn."' in body  # full concatenated text
+
+    provider = stub_provider(stub_registry, "claude")
+    assert provider.explain_calls == 1
+
+    db = open_db(db_path)
+    assert get_explanation(db, "g-1", 1, "claude") == "This move loses a pawn."
+    db.close()
+
+    # A repeat request is now a cache hit: no further LLM call.
+    repeat = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert "event: text" not in repeat.text
+    assert '"text":"This move loses a pawn."' in repeat.text
+    assert provider.explain_calls == 1
+
+
+def test_explain_404s_on_unknown_game(client: TestClient) -> None:
+    response = get(client, "/api/games/nope/explain", params={"ply": "1"})
+    assert response.status_code == 404
+
+
+def test_explain_409s_without_analysis(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")])  # stored but unanalyzed
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 409
+
+
+def test_explain_400s_on_a_ply_out_of_range(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})  # a 2-ply game
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "99"})
+    assert response.status_code == 400
+
+
+def test_explain_400s_on_unknown_agent(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = get(
+        client, "/api/games/g-1/explain", params={"ply": "1", "agent_id": "nope"}
+    )
+    assert response.status_code == 400
+
+
+def test_explain_502s_when_the_engine_fails(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    stub_pool(stub_registry).eval_lines_error = EngineError("engine died")
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 502
+    assert stub_provider(stub_registry, "claude").explain_calls == 0
+
+
+def test_explain_provider_error_mid_stream_is_an_sse_error_and_caches_nothing(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    stub_provider(stub_registry, "claude").explain_error = CoachProviderError(
+        "engine tool failed"
+    )
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+    body = response.text
+    assert "event: error" in body
+    assert '"message":"engine tool failed"' in body
+    assert "event: done" not in body
+
+    db = open_db(db_path)
+    assert get_explanation(db, "g-1", 1, "claude") is None
+    db.close()
 
 
 def test_unknown_user_maps_to_404_envelope(

@@ -6,6 +6,8 @@ engine:
   depth: 16        # Stockfish search depth per position
   workers: 2       # parallel engine processes
   analyze_limit: 100   # max games per "analyze" run (newest first)
+  multipv: 5       # candidate lines for live eval and the coach's
+                   # engine tool (1-10); batch analysis stays single-PV
   # bin_path: engines/stockfish/src/stockfish   # default: submodule build
 
 thresholds:        # centipawn loss per judgment

@@ -1,10 +1,13 @@
-"""Render a PlayerReport into the coaching prompt (docs/06-coach.md).
+"""Render prompts for the coach component (docs/06-coach.md).
 
-The template is deterministic and user-visible (the UI shows it with
-a copy button), so changes here are effectively UI changes too.
+Both `render_prompt` (the full-report coaching prompt) and
+`render_explain_prompt` (the move-explanation prompt) are deterministic
+and user-visible (the UI shows them with a copy button), so changes here
+are effectively UI changes too.
 """
 
-from chess_coach.domain import MATE_SCORE, PlayerReport
+from chess_coach.coach.context import MoveContext
+from chess_coach.domain import MATE_SCORE, EvalLine, PlayerReport
 
 # Given to the LLM as its system prompt — it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -96,3 +99,85 @@ def _critical(report: PlayerReport) -> str:
             f"{n}. `{p.fen}` — played {p.played} ({cost}; engine preferred {p.best})"
         )
     return "\n".join(lines)
+
+
+# How many of a candidate line's moves to show — enough to read the plan,
+# short enough to keep the table scannable.
+_PV_MOVES_SHOWN = 5
+
+_EXPLAIN_INSTRUCTIONS = (
+    "Explain in coaching language why the played move loses to the engine's "
+    "best move above. Use the `analyze_position` tool for follow-ups — for "
+    "example, analyze the position after the move (the second FEN above) to "
+    "name the opponent's refutation. Keep the explanation concise and "
+    "concrete."
+)
+
+
+def render_explain_prompt(ctx: MoveContext, lines: list[EvalLine]) -> str:
+    sections = [
+        _explain_intro(ctx),
+        _explain_positions(ctx),
+        _explain_move(ctx),
+        _explain_lines(lines),
+        _EXPLAIN_INSTRUCTIONS,
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def _explain_intro(ctx: MoveContext) -> str:
+    opening = f" in a {ctx.opening_name} game" if ctx.opening_name else ""
+    return (
+        f"## Move explanation for {ctx.username}\n"
+        f"{ctx.username} was playing {ctx.color}{opening}."
+    )
+
+
+def _explain_positions(ctx: MoveContext) -> str:
+    return (
+        "## Positions (FEN)\n"
+        f"- Before the move: `{ctx.fen_before}`\n"
+        f"- After the move: `{ctx.fen_after}`"
+    )
+
+
+def _explain_move(ctx: MoveContext) -> str:
+    if ctx.cp_loss >= _MATE_SCALE:
+        cost = "a decisive, forced-mate-scale blunder"
+    else:
+        cost = f"lost {ctx.cp_loss} cp"
+    return (
+        f"## The move played (ply {ctx.ply})\n"
+        f"{ctx.username} played **{ctx.san}** ({cost}; judged **{ctx.judgment}**), "
+        f"instead of the engine's preferred **{ctx.best_move}**."
+    )
+
+
+def _explain_lines(lines: list[EvalLine]) -> str:
+    if not lines:
+        return ""
+    rows = [
+        "## Candidate lines (from the position before the move)",
+        "| Rank | Depth | Eval | Line |",
+        "|------|-------|------|------|",
+    ]
+    for line in lines:
+        pv = " ".join(line.pv_san[:_PV_MOVES_SHOWN])
+        if len(line.pv_san) > _PV_MOVES_SHOWN:
+            pv += " …"
+        rows.append(
+            f"| {line.multipv} | {line.depth} "
+            f"| {format_eval(line.eval_cp, line.eval_mate)} | {pv} |"
+        )
+    return "\n".join(rows)
+
+
+def format_eval(eval_cp: int | None, eval_mate: int | None) -> str:
+    """Render one engine score as short, human-readable text (white's POV)."""
+    if eval_mate is not None:
+        if eval_mate > 0:
+            return f"White mates in {eval_mate}"
+        return f"Black mates in {-eval_mate}"
+    if eval_cp is not None:
+        return f"{eval_cp / 100:+.2f}"
+    return "n/a"

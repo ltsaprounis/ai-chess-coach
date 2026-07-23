@@ -19,7 +19,7 @@ The backend is Python end to end; TypeScript appears only in the
 | 3 | Storage   | [03-storage.md](03-storage.md)     | domain; stdlib sqlite3  |
 | 4 | Engine    | [04-engine.md](04-engine.md)       | domain; python-chess    |
 | 5 | Openings  | [05-openings.md](05-openings.md)   | domain; python-chess    |
-| 6 | Coach     | [06-coach.md](06-coach.md)         | domain; claude-agent-sdk|
+| 6 | Coach     | [06-coach.md](06-coach.md)         | domain; claude-agent-sdk, python-chess |
 | 7 | API       | [07-api.md](07-api.md)             | components 1-6; FastAPI |
 | 8 | Frontend  | [08-frontend.md](08-frontend.md)   | backend HTTP API only   |
 
@@ -95,6 +95,11 @@ class MoveEval(BaseModel):
     ply: int; san: str; eval_cp: int | None
     eval_mate: int | None; best_move: str
     cp_loss: int; judgment: Judgment
+
+class EvalLine(BaseModel):   # one MultiPV candidate line; the score
+    multipv: int; depth: int # is the eval assuming the line is played
+    eval_cp: int | None; eval_mate: int | None   # white's POV
+    pv_san: list[str]        # SAN; first entry is the candidate move
 
 class GameAnalysis(BaseModel):
     game_id: str; depth: int; evals: list[MoveEval]

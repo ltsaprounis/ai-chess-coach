@@ -1,4 +1,4 @@
-"""Live single-position eval stream tests (docs/04-engine.md) — stub engine."""
+"""Live MultiPV eval stream/one-shot tests (docs/04-engine.md) — stub engine."""
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -7,6 +7,7 @@ import chess
 import chess.engine
 import pytest
 
+from chess_coach.domain import EvalLine
 from chess_coach.engine import AnalysisPool, LiveEval
 from chess_coach.engine.uci import Engine
 
@@ -15,6 +16,7 @@ def info(
     depth: int | None = None,
     score: chess.engine.PovScore | None = None,
     pv: list[str] | None = None,
+    multipv: int | None = None,
 ) -> chess.engine.InfoDict:
     """A raw engine info line; omitted fields stay absent, as on the wire."""
     out = chess.engine.InfoDict()
@@ -24,6 +26,8 @@ def info(
         out["score"] = score
     if pv is not None:
         out["pv"] = [chess.Move.from_uci(uci) for uci in pv]
+    if multipv is not None:
+        out["multipv"] = multipv
     return out
 
 
@@ -39,12 +43,14 @@ class StubEngine(Engine):
         self.infos = infos
         self.streams_started = 0
         self.streams_open = 0
+        self.requested_multipv: list[int] = []
 
     async def stream_infos(
-        self, board: chess.Board, depth: int
+        self, board: chess.Board, depth: int, multipv: int = 1
     ) -> AsyncGenerator[chess.engine.InfoDict, None]:
         self.streams_started += 1
         self.streams_open += 1
+        self.requested_multipv.append(multipv)
         try:
             for item in self.infos:
                 yield item
@@ -93,28 +99,72 @@ async def test_streams_one_live_eval_per_depth_from_whites_perspective() -> None
 
     evals = await collect(pool.stream_eval(board.fen(), depth=3))
 
-    assert [(e.depth, e.eval_cp, e.eval_mate, e.pv_san) for e in evals] == [
+    assert [
+        (e.lines[0].depth, e.lines[0].eval_cp, e.lines[0].eval_mate, e.lines[0].pv_san)
+        for e in evals
+    ] == [
         (1, 30, None, ["c5"]),
         (2, 40, None, ["e5", "Nf3"]),
         (3, None, 3, []),  # mate for white, cp stays None like MoveEval
     ]
+    assert all(e.lines[0].multipv == 1 for e in evals)
 
 
-async def test_duplicate_and_lower_depths_are_not_reemitted() -> None:
+async def test_multi_line_snapshot_assembles_from_per_line_infos() -> None:
+    # multipv=2: infos for each rank interleave; the snapshot accumulates
+    # the latest known line per rank, sorted by rank.
     stub = StubEngine(
         [
-            info(depth=1, score=cp(10)),
-            info(depth=1, score=cp(15)),  # bound update at same depth
-            info(depth=2, score=cp(20)),
-            info(depth=1, score=cp(5)),  # stale lower depth
-            info(depth=3, score=cp(25)),
+            info(depth=1, score=cp(10), pv=["e2e4"], multipv=1),
+            info(depth=1, score=cp(5), pv=["d2d4"], multipv=2),
+            info(depth=2, score=cp(20), pv=["e2e4", "e7e5"], multipv=1),
+            info(depth=2, score=cp(8), pv=["d2d4", "d7d5"], multipv=2),
         ]
     )
     pool = make_pool(stub)
 
-    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=3))
+    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=2, multipv=2))
 
-    assert [(e.depth, e.eval_cp) for e in evals] == [(1, 10), (2, 20), (3, 25)]
+    assert [
+        [(line.multipv, line.depth, line.eval_cp) for line in e.lines] for e in evals
+    ] == [
+        [(1, 1, 10)],  # rank 2 hasn't arrived yet: snapshot holds one line
+        [(1, 1, 10), (2, 1, 5)],
+        [(1, 2, 20), (2, 1, 5)],
+        [(1, 2, 20), (2, 2, 8)],
+    ]
+    assert stub.requested_multipv == [2]
+
+
+async def test_duplicate_info_emits_no_new_snapshot() -> None:
+    stub = StubEngine(
+        [
+            info(depth=1, score=cp(10), multipv=1),
+            info(depth=1, score=cp(10), multipv=1),  # exact repeat: no change
+            info(depth=2, score=cp(20), multipv=1),
+        ]
+    )
+    pool = make_pool(stub)
+
+    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=2))
+
+    assert [e.lines[0].depth for e in evals] == [1, 2]
+
+
+async def test_changed_info_at_the_same_depth_still_emits() -> None:
+    # A bound update (same depth, refined score) is a real content
+    # change, so it emits even though depth didn't advance.
+    stub = StubEngine(
+        [
+            info(depth=1, score=cp(10)),
+            info(depth=1, score=cp(15)),  # bound update at same depth
+        ]
+    )
+    pool = make_pool(stub)
+
+    evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=1))
+
+    assert [e.lines[0].eval_cp for e in evals] == [10, 15]
 
 
 async def test_pv_san_is_capped_at_ten_moves() -> None:
@@ -125,7 +175,7 @@ async def test_pv_san_is_capped_at_ten_moves() -> None:
     evals = await collect(pool.stream_eval(chess.STARTING_FEN, depth=1))
 
     assert len(evals) == 1
-    assert evals[0].pv_san == ["Nf3", "Nf6", "Ng1", "Ng8"] * 2 + ["Nf3", "Nf6"]
+    assert evals[0].lines[0].pv_san == ["Nf3", "Nf6", "Ng1", "Ng8"] * 2 + ["Nf3", "Nf6"]
 
 
 async def test_early_close_stops_the_search_and_releases_the_worker() -> None:
@@ -134,7 +184,7 @@ async def test_early_close_stops_the_search_and_releases_the_worker() -> None:
 
     stream = pool.stream_eval(chess.STARTING_FEN, depth=5)
     first = await anext(stream)
-    assert first.depth == 1
+    assert first.lines[0].depth == 1
     await stream.aclose()
 
     assert stub.streams_open == 0  # inner info stream was closed too
@@ -144,7 +194,7 @@ async def test_early_close_stops_the_search_and_releases_the_worker() -> None:
     evals = await asyncio.wait_for(
         collect(pool.stream_eval(chess.STARTING_FEN, depth=5)), timeout=1
     )
-    assert [e.depth for e in evals] == [1, 2, 3, 4, 5]
+    assert [e.lines[0].depth for e in evals] == [1, 2, 3, 4, 5]
 
 
 @pytest.mark.parametrize(
@@ -190,4 +240,48 @@ async def test_terminal_positions_yield_nothing_without_engine_work(
     )
 
     assert evals == []
+    assert stub.streams_started == 0
+
+
+async def test_terminal_position_eval_lines_returns_empty_list() -> None:
+    board = chess.Board()
+    for san in ["f3", "e5", "g4", "Qh4#"]:
+        board.push_san(san)
+
+    stub = StubEngine([info(depth=1, score=cp(0))])
+    pool = make_pool(stub)
+
+    lines = await pool.eval_lines(board.fen(), depth=12)
+
+    assert lines == []
+    assert stub.streams_started == 0
+
+
+async def test_eval_lines_returns_the_final_snapshot_sorted_by_rank() -> None:
+    stub = StubEngine(
+        [
+            info(depth=1, score=cp(10), pv=["e2e4"], multipv=1),
+            info(depth=1, score=cp(5), pv=["d2d4"], multipv=2),
+            info(depth=2, score=cp(20), pv=["e2e4", "e7e5"], multipv=1),
+            info(depth=2, score=cp(8), pv=["d2d4", "d7d5"], multipv=2),
+        ]
+    )
+    pool = make_pool(stub)
+
+    lines = await pool.eval_lines(chess.STARTING_FEN, depth=2, multipv=2)
+
+    assert lines == [
+        EvalLine(multipv=1, depth=2, eval_cp=20, eval_mate=None, pv_san=["e4", "e5"]),
+        EvalLine(multipv=2, depth=2, eval_cp=8, eval_mate=None, pv_san=["d4", "d5"]),
+    ]
+    assert stub.requested_multipv == [2]
+
+
+async def test_eval_lines_invalid_fen_raises_synchronously() -> None:
+    stub = StubEngine([])
+    pool = make_pool(stub)
+
+    with pytest.raises(ValueError):
+        await pool.eval_lines("not a fen", depth=12)
+
     assert stub.streams_started == 0

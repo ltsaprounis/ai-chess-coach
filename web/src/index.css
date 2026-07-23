@@ -305,8 +305,66 @@ td {
   color: #898781;
 }
 
+.live-eval-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-eval-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-eval-rank {
+  color: #898781;
+  width: 1.25rem;
+  flex: none;
+}
+
+.live-eval-score {
+  font-weight: 600;
+  width: 4rem;
+  flex: none;
+}
+
+.live-eval-depth {
+  color: #898781;
+  width: 2.5rem;
+  flex: none;
+}
+
+.live-eval-row .live-eval-pv {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .live-eval-note {
   margin: 0;
+  font-size: 0.85rem;
+  color: #898781;
+}
+
+/* On-demand move explanation on the Game page. */
+
+.explain-section {
+  max-width: 48rem;
+  margin: 1rem 0;
+}
+
+.explain-note {
+  font-size: 0.85rem;
+  color: #898781;
+}
+
+.explain-progress {
+  margin: 0.25rem 0;
   font-size: 0.85rem;
   color: #898781;
 }
