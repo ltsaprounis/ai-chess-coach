@@ -42,6 +42,14 @@ boundary rules, and verification gates:
 | api-dev      | `chess_coach.api` (composition) | docs/07-api.md       |
 | frontend-dev | `web/`                          | docs/08-frontend.md  |
 
+One cross-cutting agent sits apart from the table:
+`boundary-reviewer` (model: inherit, read-only) reviews a diff
+against GUIDELINES.md and the component docs — boundaries, typing,
+error/async discipline, tests, docs-contract drift. Run it before
+committing, especially after component agents worked in parallel.
+It only reports; fixes go to the owning component agent or the
+main session.
+
 When to delegate:
 - A task scoped to a single component goes to its agent. Give it a
   self-contained prompt: the goal, affected files, and acceptance
