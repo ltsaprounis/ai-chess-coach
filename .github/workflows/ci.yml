@@ -20,7 +20,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
-      - run: uv run lint-imports
+      - run: uv run lint-imports --cache-dir .cache/import_linter
       - run: uv run pytest
 
   frontend:

@@ -29,7 +29,7 @@ class ServerConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    db_path: Path = Path("coach.sqlite3")
+    db_path: Path = Path("data/coach.sqlite3")  # created on demand
 
 
 class OpeningsConfig(BaseModel):

@@ -10,7 +10,9 @@ engine:
 .PHONY: check
 check:
 	cd backend && uv run ruff check . && uv run ruff format --check . \
-		&& uv run pyright && uv run lint-imports && uv run pytest
+		&& uv run pyright \
+		&& uv run lint-imports --cache-dir .cache/import_linter \
+		&& uv run pytest
 
 .PHONY: dev-api
 dev-api:

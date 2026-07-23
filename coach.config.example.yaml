@@ -24,7 +24,7 @@ server:
   port: 8000
 
 storage:
-  db_path: coach.sqlite3
+  db_path: data/coach.sqlite3   # gitignored; created on demand
 
 # openings:
 #   book_dir: vendor/chess-openings   # default: the repo submodule

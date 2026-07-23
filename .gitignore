@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.import_linter_cache/
+.cache/
 *.egg-info/
 
 # Node
@@ -13,7 +15,9 @@ web/openapi.json
 
 # Local data and secrets
 coach.config.yaml
+data/
 *.sqlite3
+*.sqlite3-*
 *.db
 .env
 

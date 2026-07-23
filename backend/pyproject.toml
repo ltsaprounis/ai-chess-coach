@@ -59,6 +59,8 @@ addopts = "-m 'not engine'"
 asyncio_mode = "auto"
 
 [tool.importlinter]
+# Note: the cache location is a CLI concern — see `make check` and
+# ci.yml, which pass --cache-dir .cache/import_linter.
 root_package = "chess_coach"
 
 [[tool.importlinter.contracts]]
