@@ -37,7 +37,7 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider; optional body `{agent_id}` (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id}` |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
-| GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent). Cached hit: one `done` event with the full text. Miss: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
+| GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent), `refresh` (optional, default false — skip the cache read and regenerate; the result overwrites the cached row). Cached hit: one `done` event with the full text. Miss or refresh: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
 
 Request/response models are pydantic, so FastAPI's OpenAPI schema is
 complete — the frontend generates its TS types from it

@@ -148,6 +148,9 @@ export interface paths {
         /**
          * Explain Move
          * @description SSE coach explanation of one played move; cached per (game, ply, agent).
+         *
+         *     `refresh=True` skips the cache read and regenerates, overwriting the
+         *     cached row with the new result.
          */
         get: operations["explain_move_api_games__game_id__explain_get"];
         put?: never;
@@ -724,6 +727,7 @@ export interface operations {
             query: {
                 ply: number;
                 agent_id?: string | null;
+                refresh?: boolean;
             };
             header?: never;
             path: {

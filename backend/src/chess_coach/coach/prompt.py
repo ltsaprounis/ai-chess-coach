@@ -105,11 +105,19 @@ def _critical(report: PlayerReport) -> str:
 # short enough to keep the table scannable.
 _PV_MOVES_SHOWN = 5
 
+# Style contract (docs/06-coach.md): club-player audience, pawns never
+# centipawns, idea before number, no redundant "?"/"??"-plus-judgment-word
+# annotation. Keep the tool-use and concise-and-concrete instructions.
 _EXPLAIN_INSTRUCTIONS = (
-    "Explain in coaching language why the played move loses to the engine's "
-    "best move above. Use the `analyze_position` tool for follow-ups — for "
-    "example, analyze the position after the move (the second FEN above) to "
-    "name the opponent's refutation. Keep the explanation concise and "
+    "Explain why the played move loses to the engine's best move above, "
+    "for a club player — not a fellow engine. Lead with the idea: the "
+    "threat, the plan, or what the refutation wins; bring in numbers only "
+    'as support. Give every evaluation swing in pawns ("about 4 pawns"), '
+    'never centipawns. Skip engine-style annotation — no "?"/"??" next '
+    "to a move you're also calling a mistake or blunder; say it once, in "
+    "plain language. Use the `analyze_position` tool for follow-ups — for "
+    "example, analyze the position after the move (the second FEN above) "
+    "to name the opponent's refutation. Keep the explanation concise and "
     "concrete."
 )
 
@@ -143,9 +151,9 @@ def _explain_positions(ctx: MoveContext) -> str:
 
 def _explain_move(ctx: MoveContext) -> str:
     if ctx.cp_loss >= _MATE_SCALE:
-        cost = "a decisive, forced-mate-scale blunder"
+        cost = "walked into a forced mate"
     else:
-        cost = f"lost {ctx.cp_loss} cp"
+        cost = f"lost {format_cp_loss(ctx.cp_loss)}"
     return (
         f"## The move played (ply {ctx.ply})\n"
         f"{ctx.username} played **{ctx.san}** ({cost}; judged **{ctx.judgment}**), "
@@ -181,3 +189,14 @@ def format_eval(eval_cp: int | None, eval_mate: int | None) -> str:
     if eval_cp is not None:
         return f"{eval_cp / 100:+.2f}"
     return "n/a"
+
+
+def format_cp_loss(cp_loss: int) -> str:
+    """Render a centipawn-loss magnitude in pawns — never raw centipawns.
+
+    Extends format_eval's pawn treatment to loss magnitudes, so
+    render_explain_prompt never hands the model a bare cp number (e.g.
+    421) it might parrot back as engine jargon instead of writing for a
+    club player.
+    """
+    return f"about {cp_loss / 100:.1f} pawns"

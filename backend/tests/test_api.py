@@ -607,6 +607,60 @@ def test_explain_streams_then_caches_and_a_repeat_is_a_cache_hit(
     assert provider.explain_calls == 1
 
 
+def test_explain_refresh_bypasses_the_cache_and_regenerates(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    db = open_db(db_path)
+    save_explanation(db, "g-1", 1, "claude", "Cached explanation text.")
+    db.close()
+
+    response = get(
+        client, "/api/games/g-1/explain", params={"ply": "1", "refresh": "true"}
+    )
+    assert response.status_code == 200
+    body = response.text
+    # refresh skips the cache read, so the stub actually streams (tool/text
+    # events) instead of returning a single cached `done`.
+    assert body.index("event: tool") < body.index("event: text")
+    assert '"text":"This move loses a pawn."' in body
+
+    provider = stub_provider(stub_registry, "claude")
+    assert provider.explain_calls == 1
+
+    db = open_db(db_path)
+    # save_explanation is an upsert: the stale cached row is now overwritten
+    # by the freshly generated text.
+    assert get_explanation(db, "g-1", 1, "claude") == "This move loses a pawn."
+    db.close()
+
+
+def test_explain_after_a_refresh_a_plain_repeat_is_a_cache_hit_on_the_new_text(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    db = open_db(db_path)
+    save_explanation(db, "g-1", 1, "claude", "Cached explanation text.")
+    db.close()
+
+    refreshed = get(
+        client, "/api/games/g-1/explain", params={"ply": "1", "refresh": "true"}
+    )
+    assert refreshed.status_code == 200
+    provider = stub_provider(stub_registry, "claude")
+    assert provider.explain_calls == 1
+
+    # Without refresh, this is now a cache hit on the new text — no further
+    # provider call.
+    repeat = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert repeat.status_code == 200
+    body = repeat.text
+    assert "event: text" not in body
+    assert "event: tool" not in body
+    assert '"text":"This move loses a pawn."' in body
+    assert provider.explain_calls == 1
+
+
 def test_explain_404s_on_unknown_game(client: TestClient) -> None:
     response = get(client, "/api/games/nope/explain", params={"ply": "1"})
     assert response.status_code == 404

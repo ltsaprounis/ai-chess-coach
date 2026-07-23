@@ -319,8 +319,13 @@ async def explain_move(
     providers: ProvidersDep,
     ply: int,
     agent_id: str | None = None,
+    refresh: bool = False,
 ) -> EventSourceResponse:
-    """SSE coach explanation of one played move; cached per (game, ply, agent)."""
+    """SSE coach explanation of one played move; cached per (game, ply, agent).
+
+    `refresh=True` skips the cache read and regenerates, overwriting the
+    cached row with the new result.
+    """
     resolved_agent_id = cfg.coach.default_agent if agent_id is None else agent_id
     provider = providers.get(resolved_agent_id)
     if provider is None:
@@ -338,7 +343,7 @@ async def explain_move(
             detail="no analysis for this game — analyze this game first",
         )
 
-    cached = get_explanation(db, game_id, ply, resolved_agent_id)
+    cached = None if refresh else get_explanation(db, game_id, ply, resolved_agent_id)
     if cached is not None:
 
         async def cached_stream() -> AsyncIterator[dict[str, str]]:

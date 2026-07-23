@@ -31,7 +31,13 @@ def build_move_context(game: Game, analysis: GameAnalysis,
 # Deterministic template: the position, played vs best move, the
 # seeded candidate lines (a MultiPV snapshot of fen_before), and an
 # instruction to consult the engine tool for follow-ups — e.g. eval
-# fen_after to name the opponent's refutation.
+# fen_after to name the opponent's refutation. The style contract:
+# the audience is a club player, so the instructions demand pawn
+# units ("about 4 pawns"), never raw centipawns; the idea (threats,
+# plans, what the refutation wins) before any number; and no
+# redundant annotation ("?" glyphs AND the word blunder). Eval
+# numbers handed to the model in this template are pre-rendered in
+# pawns for the same reason.
 def render_explain_prompt(ctx: MoveContext,
                           lines: list[EvalLine]) -> str
 

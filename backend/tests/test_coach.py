@@ -377,11 +377,14 @@ def test_render_explain_prompt_is_deterministic_and_complete() -> None:
     assert "testuser was playing white in a Ruy Lopez game." in prompt
     assert f"`{_EXPLAIN_CTX.fen_before}`" in prompt
     assert f"`{_EXPLAIN_CTX.fen_after}`" in prompt
-    assert "played **Nf3** (lost 300 cp; judged **blunder**)" in prompt
+    assert "played **Nf3** (lost about 3.0 pawns; judged **blunder**)" in prompt
     assert "engine's preferred **d4**" in prompt
     assert "| 1 | 18 | +0.35 | d4 exd4 Nxd4 Nf6 Nc3 … |" in prompt  # truncated pv
     assert "| 2 | 18 | +0.10 | Bc4 Nf6 |" in prompt
     assert "analyze_position" in prompt
+    assert "300" not in prompt  # raw centipawns never reach the model
+    assert "club player" in prompt
+    assert "never centipawns" in prompt
 
 
 def test_render_explain_prompt_mate_scale_no_opening_no_lines() -> None:
@@ -392,7 +395,7 @@ def test_render_explain_prompt_mate_scale_no_opening_no_lines() -> None:
     prompt = render_explain_prompt(ctx, [])
 
     assert "testuser was playing black." in prompt
-    assert "forced-mate-scale blunder" in prompt
+    assert "walked into a forced mate; judged **blunder**" in prompt
     assert "10050" not in prompt
     assert "Candidate lines" not in prompt
 
