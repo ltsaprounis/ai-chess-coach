@@ -29,7 +29,9 @@ thresholds:        # centipawn loss per judgment
 #     - id: copilot
 #       label: Copilot
 #       provider: github-copilot
-#       model: gpt-5   # any model your Copilot plan serves
+#       # Any id your Copilot plan serves; rosters drift over time —
+#       # list yours with the SDK's client.list_models().
+#       model: gpt-5.6-sol
 #   default_agent: claude   # default: the first agent's id
 
 server:
