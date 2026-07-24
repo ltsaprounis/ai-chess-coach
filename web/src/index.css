@@ -99,7 +99,7 @@ body {
 }
 
 .app-header-inner {
-  max-width: 64rem;
+  max-width: 88rem;
   margin: 0 auto;
   padding: 0.6rem 1rem;
   display: flex;
@@ -181,7 +181,7 @@ body {
 /* Page + base controls --------------------------------------------- */
 
 .page {
-  max-width: 64rem;
+  max-width: 88rem;
   margin: 0 auto;
   padding: 2rem 1rem;
 }
@@ -446,7 +446,7 @@ td {
 
 .chart-wrap {
   position: relative;
-  max-width: 44rem;
+  max-width: 60rem;
 }
 
 .chart-wrap svg {
