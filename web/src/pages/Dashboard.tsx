@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, score, sortWorstFirst } from "../api.ts";
+import { api, score } from "../api.ts";
 import BarChart from "../components/BarChart.tsx";
 import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
 import Layout from "../components/Layout.tsx";
 import MonthlyActivityChart from "../components/MonthlyActivityChart.tsx";
 import RatingChart from "../components/RatingChart.tsx";
+import { groupByFamily } from "../openings.ts";
 import {
   latestRatings,
   monthlyActivity,
@@ -49,6 +50,7 @@ export default function Dashboard() {
   const { username = "" } = useParams();
   const [windowDays, setWindowDays] = useState<number | null>(null);
   const [pickedClass, setPickedClass] = useState<string | null>(null);
+  const [minGames, setMinGames] = useState(5);
 
   // Cutoff recomputed only when the window changes, so it stays stable
   // across renders (a fresh Date.now() each render would thrash the
@@ -151,6 +153,16 @@ export default function Dashboard() {
           value: analyzed.judgment_counts[judgment] ?? 0,
           color: JUDGMENT_COLORS[judgment],
         }));
+
+  // Collapse the fine ECO variations into families, keep those with a
+  // meaningful sample, and surface the worst-scoring first.
+  const families = useMemo(
+    () =>
+      groupByFamily(openings.data ?? [])
+        .filter((family) => family.games >= minGames)
+        .sort((a, b) => score(a) - score(b) || b.games - a.games),
+    [openings.data, minGames],
+  );
 
   const hasAnyGames = games.isSuccess && (games.data?.length ?? 0) > 0;
   const hasScopedGames = stats.overall.games > 0;
@@ -303,37 +315,68 @@ export default function Dashboard() {
 
       <section>
         <h2>Repertoire — worst first</h2>
-        <p>Sorted worst-scoring first — the openings to work on.</p>
+        <p>
+          Openings grouped into families, worst-scoring first — the ones to work
+          on. Avg CP loss covers the analyzed games only.
+        </p>
+        <div className="filters">
+          <label>
+            Min games{" "}
+            <input
+              type="number"
+              min={1}
+              className="limit-input"
+              aria-label="minimum games per family"
+              value={minGames}
+              onChange={(event) =>
+                setMinGames(Math.max(1, Number(event.target.value) || 1))
+              }
+            />
+          </label>
+          {openings.isSuccess && (
+            <span className="agent-note">
+              {families.length} famil{families.length === 1 ? "y" : "ies"} with{" "}
+              {minGames}+ games
+            </span>
+          )}
+        </div>
 
         {openings.isPending && <p>Loading…</p>}
         {openings.isError && <p role="alert">{openings.error.message}</p>}
         {openings.isSuccess && openings.data.length === 0 && (
           <p>No classified games match these filters.</p>
         )}
-        {openings.isSuccess && openings.data.length > 0 && (
+        {openings.isSuccess &&
+          openings.data.length > 0 &&
+          families.length === 0 && (
+            <p className="panel-empty">
+              No opening family has {minGames}+ games — lower the threshold.
+            </p>
+          )}
+        {families.length > 0 && (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>ECO</th>
-                  <th>Opening</th>
+                  <th>Opening family</th>
                   <th>Games</th>
+                  <th>Analyzed</th>
                   <th>W-L-D</th>
                   <th>Score</th>
                   <th>Avg CP loss</th>
                 </tr>
               </thead>
               <tbody>
-                {sortWorstFirst(openings.data).map((opening) => (
-                  <tr key={`${opening.eco}-${opening.name}`}>
-                    <td>{opening.eco}</td>
-                    <td>{opening.name}</td>
-                    <td>{opening.games}</td>
+                {families.map((family) => (
+                  <tr key={family.family}>
+                    <td>{family.family}</td>
+                    <td>{family.games}</td>
+                    <td>{family.analyzedGames}</td>
                     <td>
-                      {opening.wins}-{opening.losses}-{opening.draws}
+                      {family.wins}-{family.losses}-{family.draws}
                     </td>
-                    <td>{Math.round(score(opening) * 100)}%</td>
-                    <td>{opening.avg_cp_loss ?? "—"}</td>
+                    <td>{Math.round(score(family) * 100)}%</td>
+                    <td>{family.avgCpLoss ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -108,6 +108,7 @@ class OpeningStats(BaseModel):
     wins: int
     losses: int
     draws: int
+    analyzed_games: int  # how many of `games` have engine analysis
     avg_cp_loss: float | None = None  # None until games are analyzed
 
 

@@ -116,7 +116,7 @@ class PlayerReport(BaseModel):
     username: str; games_analyzed: int; overall_acpl: float
     acpl_by_phase: dict[Phase, float]
     judgment_counts: dict[Judgment, int]
-    openings: list[OpeningStats]          # games/W/L/D/avg_cp_loss
+    openings: list[OpeningStats]          # games/analyzed_games/W/L/D/avg_cp_loss
     critical_positions: list[CriticalPosition]  # fen/played/best/...
 ```
 

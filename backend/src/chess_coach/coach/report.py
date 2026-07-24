@@ -60,6 +60,7 @@ def _opening_stats(games: list[AnalyzedGame]) -> list[OpeningStats]:
             wins=sum(g.result == "win" for g in members),
             losses=sum(g.result == "loss" for g in members),
             draws=sum(g.result == "draw" for g in members),
+            analyzed_games=len(members),  # report is built from analyzed games
             avg_cp_loss=_mean([g.analysis.overall_acpl for g in members]),
         )
         for (eco, name), members in grouped.items()

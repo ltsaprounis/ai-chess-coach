@@ -447,6 +447,8 @@ export interface components {
             losses: number;
             /** Draws */
             draws: number;
+            /** Analyzed Games */
+            analyzed_games: number;
             /** Avg Cp Loss */
             avg_cp_loss?: number | null;
         };

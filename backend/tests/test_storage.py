@@ -161,6 +161,7 @@ def test_opening_stats_aggregates_records_most_played_first(db: Db) -> None:
         ("D06", 1, 1, 0, 0),
     ]
     assert all(s.avg_cp_loss is None for s in stats)
+    assert all(s.analyzed_games == 0 for s in stats)
 
 
 def test_opening_stats_time_window(db: Db) -> None:
@@ -224,6 +225,7 @@ def test_time_class_filter(db: Db) -> None:
     ]
     (stat,) = opening_stats(db, "testuser", time_class="blitz")
     assert stat.games == 1
+    assert stat.analyzed_games == 1
 
 
 def test_games_missing_opening(db: Db) -> None:

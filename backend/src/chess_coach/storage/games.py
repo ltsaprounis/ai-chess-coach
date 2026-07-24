@@ -261,6 +261,7 @@ def opening_stats(
                SUM(g.result = 'win') AS wins,
                SUM(g.result = 'loss') AS losses,
                SUM(g.result = 'draw') AS draws,
+               COUNT(a.game_id) AS analyzed_games,
                AVG(a.overall_acpl) AS avg_cp_loss
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE {" AND ".join(clauses)}
@@ -277,6 +278,7 @@ def opening_stats(
             wins=row["wins"],
             losses=row["losses"],
             draws=row["draws"],
+            analyzed_games=row["analyzed_games"],
             avg_cp_loss=(
                 None if row["avg_cp_loss"] is None else round(row["avg_cp_loss"], 1)
             ),

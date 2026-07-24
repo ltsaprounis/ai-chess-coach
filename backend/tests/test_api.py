@@ -324,6 +324,7 @@ def test_openings_endpoint_aggregates_records(
         ("D06", 1, 0, 0, 1),
     ]
     assert all(s["avg_cp_loss"] is None for s in stats)
+    assert all(s["analyzed_games"] == 0 for s in stats)
 
 
 def wait_until_analyzed(client: TestClient, username: str, expected: int) -> None:
@@ -370,6 +371,7 @@ def test_analyze_fills_opening_avg_cp_loss(
 
     stats: Any = get(client, "/api/players/testuser/openings").json()
     assert stats[0]["avg_cp_loss"] == 2.5
+    assert stats[0]["analyzed_games"] == 1
 
 
 def test_analyze_limits_to_newest_and_reports_remaining(

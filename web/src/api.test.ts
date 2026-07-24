@@ -34,6 +34,7 @@ function stats(partial: Partial<OpeningStats> & { eco: string }): OpeningStats {
     wins: 0,
     losses: 0,
     draws: 0,
+    analyzed_games: 0,
     avg_cp_loss: null,
     ...partial,
   };

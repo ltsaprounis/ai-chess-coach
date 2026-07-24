@@ -84,6 +84,7 @@ def test_build_report_aggregates_player_stats() -> None:
     # Only the classified game contributes to the repertoire.
     assert [(s.eco, s.games, s.wins) for s in report.openings] == [("C60", 1, 1)]
     assert report.openings[0].avg_cp_loss == 2.5
+    assert report.openings[0].analyzed_games == 1
 
 
 def test_openings_sorted_worst_first() -> None:
