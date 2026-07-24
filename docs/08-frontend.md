@@ -14,10 +14,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    links to the games list. Coach-agent selector fed by
    `GET /coach/agents`; the choice persists in localStorage and the
    Coach page sends it as `agent_id`.
-2. **Games** — table from `GET /players/{u}/games` with opening,
-   result, time-class, and analyzed-state filters; "Analyze all"
-   button posting to `/analyze`, progress bar fed by the SSE
-   endpoint.
+2. **Games** — a sortable, paged table over the whole archive
+   (`api.allGames`, the paged fetch shared with the Dashboard cache):
+   result / time-class / analyzed-state filters and an opponent search
+   applied client-side, click-to-sort column headers, and prev/next
+   paging. A separate analyze bar (kept out of the filter row) posts to
+   `/analyze` — "Analyze latest N" or "Analyze selected" via row
+   checkboxes — with the progress bar fed by the SSE endpoint.
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a

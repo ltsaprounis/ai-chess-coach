@@ -497,6 +497,71 @@ td {
   width: 5rem;
 }
 
+/* Games page: filters summary, analyze bar, sortable headers, paging. */
+
+.games-summary {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0.75rem;
+}
+
+.analyze-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.analyze-bar-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.th-sort {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  white-space: nowrap;
+}
+
+.th-sort:hover:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+}
+
+th[aria-sort="ascending"] .th-sort,
+th[aria-sort="descending"] .th-sort {
+  color: var(--text);
+}
+
+.sort-arrow {
+  font-size: 0.7em;
+  width: 0.7em;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.85rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
 /* Coach-agent selector (Home + Coach pages). */
 
 .agent-row {

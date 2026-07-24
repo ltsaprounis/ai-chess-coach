@@ -77,7 +77,9 @@ export default function Game() {
   useEffect(() => {
     if (analyzing && game.data?.analysis) {
       setAnalyzing(false);
-      queryClient.invalidateQueries({ queryKey: ["games"] });
+      void queryClient.invalidateQueries({ queryKey: ["allGames"] });
+      void queryClient.invalidateQueries({ queryKey: ["openings"] });
+      void queryClient.invalidateQueries({ queryKey: ["report"] });
     }
   }, [analyzing, game.data, queryClient]);
 

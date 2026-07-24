@@ -1,22 +1,135 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type GameFilters, type GameSummary } from "../api.ts";
+import { api, type GameSummary, score } from "../api.ts";
 import Layout from "../components/Layout.tsx";
+import { tally } from "../stats.ts";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
+
+const PAGE_SIZE = 25;
+
+type SortKey =
+  | "end_time"
+  | "color"
+  | "opponent"
+  | "result"
+  | "time_class"
+  | "opening"
+  | "accuracy"
+  | "analyzed";
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "end_time", label: "Date" },
+  { key: "color", label: "Color" },
+  { key: "opponent", label: "Opponent" },
+  { key: "result", label: "Result" },
+  { key: "time_class", label: "Time" },
+  { key: "opening", label: "Opening" },
+  { key: "accuracy", label: "Accuracy" },
+  { key: "analyzed", label: "Analyzed" },
+];
+
+// The sort key falls back to end_time for ties, so both branches stay
+// total orders (string vs numeric compared in kind).
+function sortValue(game: GameSummary, key: SortKey): string | number {
+  switch (key) {
+    case "end_time":
+      return game.end_time;
+    case "color":
+      return game.color;
+    case "opponent":
+      return game.opponent.toLowerCase();
+    case "result":
+      return game.result;
+    case "time_class":
+      return game.time_class;
+    case "opening":
+      return game.opening?.name ?? "";
+    case "accuracy":
+      return game.accuracy ?? -1;
+    case "analyzed":
+      return game.analyzed ? 1 : 0;
+  }
+}
+
+// Numeric columns read best high-to-low first; text columns A-to-Z.
+const DEFAULT_DESC: ReadonlySet<SortKey> = new Set([
+  "end_time",
+  "accuracy",
+  "analyzed",
+]);
 
 export default function Games() {
   const { username = "" } = useParams();
-  const [filters, setFilters] = useState<GameFilters>({});
+  const queryClient = useQueryClient();
+
+  const [result, setResult] = useState("");
+  const [timeClass, setTimeClass] = useState("");
+  const [analyzedFilter, setAnalyzedFilter] = useState("");
+  const [opponent, setOpponent] = useState("");
+
+  const [sortKey, setSortKey] = useState<SortKey>("end_time");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(0);
+
   const [analyzing, setAnalyzing] = useState(false);
   const [limit, setLimit] = useState(100);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const queryClient = useQueryClient();
 
+  // The whole archive, shared with the dashboard's cache; filtering,
+  // sorting, and paging all happen client-side over it.
   const games = useQuery({
-    queryKey: ["games", username, filters],
-    queryFn: () => api.games(username, filters),
+    queryKey: ["allGames", username],
+    queryFn: () => api.allGames(username),
   });
+
+  const filtered = useMemo(() => {
+    const needle = opponent.trim().toLowerCase();
+    return (games.data ?? []).filter(
+      (game) =>
+        (result === "" || game.result === result) &&
+        (timeClass === "" || game.time_class === timeClass) &&
+        (analyzedFilter === "" || String(game.analyzed) === analyzedFilter) &&
+        (needle === "" || game.opponent.toLowerCase().includes(needle)),
+    );
+  }, [games.data, result, timeClass, analyzedFilter, opponent]);
+
+  const sorted = useMemo(() => {
+    const rows = [...filtered];
+    rows.sort((a, b) => {
+      const va = sortValue(a, sortKey);
+      const vb = sortValue(b, sortKey);
+      const cmp =
+        typeof va === "number" && typeof vb === "number"
+          ? va - vb
+          : String(va).localeCompare(String(vb));
+      const primary = sortDir === "asc" ? cmp : -cmp;
+      return primary !== 0 ? primary : b.end_time - a.end_time;
+    });
+    return rows;
+  }, [filtered, sortKey, sortDir]);
+
+  const record = useMemo(() => tally(filtered), [filtered]);
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const start = clampedPage * PAGE_SIZE;
+  const pageGames = sorted.slice(start, start + PAGE_SIZE);
+
+  // Any filter or sort change returns to the first page.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on filter/sort change
+  useEffect(() => {
+    setPage(0);
+  }, [result, timeClass, analyzedFilter, opponent, sortKey, sortDir]);
+
+  const onSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(DEFAULT_DESC.has(key) ? "desc" : "asc");
+    }
+  };
 
   const analyze = useMutation({
     mutationFn: () =>
@@ -24,8 +137,8 @@ export default function Games() {
         username,
         selected.size > 0 ? { gameIds: [...selected] } : { limit },
       ),
-    onSuccess: (result) => {
-      if (result.queued > 0) {
+    onSuccess: (outcome) => {
+      if (outcome.queued > 0) {
         setAnalyzing(true);
       }
       setSelected(new Set());
@@ -43,14 +156,15 @@ export default function Games() {
       return next;
     });
 
-  const visibleIds = games.data?.map((game) => game.id) ?? [];
-  const allVisibleSelected =
-    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const pageIds = pageGames.map((game) => game.id);
+  const allPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
 
   const progress = useAnalysisProgress(username, analyzing, () => {
     setAnalyzing(false);
-    void queryClient.invalidateQueries({ queryKey: ["games"] });
+    void queryClient.invalidateQueries({ queryKey: ["allGames"] });
     void queryClient.invalidateQueries({ queryKey: ["openings"] });
+    void queryClient.invalidateQueries({ queryKey: ["report"] });
   });
 
   return (
@@ -60,8 +174,8 @@ export default function Games() {
       <div className="filters">
         <select
           aria-label="result"
-          value={filters.result ?? ""}
-          onChange={(e) => setFilters({ ...filters, result: e.target.value })}
+          value={result}
+          onChange={(event) => setResult(event.target.value)}
         >
           <option value="">any result</option>
           <option value="win">wins</option>
@@ -70,10 +184,8 @@ export default function Games() {
         </select>
         <select
           aria-label="time class"
-          value={filters.time_class ?? ""}
-          onChange={(e) =>
-            setFilters({ ...filters, time_class: e.target.value })
-          }
+          value={timeClass}
+          onChange={(event) => setTimeClass(event.target.value)}
         >
           <option value="">any time class</option>
           <option value="bullet">bullet</option>
@@ -81,19 +193,53 @@ export default function Games() {
           <option value="rapid">rapid</option>
           <option value="daily">daily</option>
         </select>
+        <select
+          aria-label="analyzed"
+          value={analyzedFilter}
+          onChange={(event) => setAnalyzedFilter(event.target.value)}
+        >
+          <option value="">any analysis</option>
+          <option value="true">analyzed</option>
+          <option value="false">not analyzed</option>
+        </select>
         <input
-          type="number"
-          min={1}
-          aria-label="games to analyze"
-          className="limit-input"
-          value={limit}
-          disabled={selected.size > 0}
-          onChange={(event) =>
-            setLimit(Math.max(1, Number(event.target.value) || 1))
-          }
+          type="search"
+          aria-label="search opponent"
+          placeholder="opponent…"
+          value={opponent}
+          onChange={(event) => setOpponent(event.target.value)}
         />
+      </div>
+
+      {games.isSuccess && (
+        <p className="games-summary">
+          {sorted.length} game{sorted.length === 1 ? "" : "s"} · {record.wins}-
+          {record.losses}-{record.draws}
+          {sorted.length > 0
+            ? ` · ${Math.round(score(record) * 100)}% score`
+            : ""}
+        </p>
+      )}
+
+      <div className="analyze-bar">
+        <span className="analyze-bar-label">Analyze</span>
+        <label>
+          latest{" "}
+          <input
+            type="number"
+            min={1}
+            aria-label="games to analyze"
+            className="limit-input"
+            value={limit}
+            disabled={selected.size > 0}
+            onChange={(event) =>
+              setLimit(Math.max(1, Number(event.target.value) || 1))
+            }
+          />
+        </label>
         <button
           type="button"
+          className="btn-primary"
           disabled={analyzing || analyze.isPending}
           onClick={() => analyze.mutate()}
         >
@@ -131,66 +277,121 @@ export default function Games() {
 
       {games.isPending && <p>Loading…</p>}
       {games.isError && <p role="alert">{games.error.message}</p>}
-      {games.isSuccess && games.data.length === 0 && (
+      {games.isSuccess && (games.data?.length ?? 0) === 0 && (
         <p>No games stored yet.</p>
       )}
-      {games.isSuccess && games.data.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    aria-label="select all listed games"
-                    checked={allVisibleSelected}
-                    onChange={(event) =>
-                      setSelected(
-                        event.target.checked ? new Set(visibleIds) : new Set(),
-                      )
-                    }
-                  />
-                </th>
-                <th>Date</th>
-                <th>Color</th>
-                <th>Opponent</th>
-                <th>Result</th>
-                <th>Time</th>
-                <th>Opening</th>
-                <th>Accuracy</th>
-                <th>Analyzed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {games.data.map((game: GameSummary) => (
-                <tr key={game.id}>
-                  <td>
+      {games.isSuccess &&
+        sorted.length === 0 &&
+        (games.data?.length ?? 0) > 0 && (
+          <p className="panel-empty">No games match these filters.</p>
+        )}
+      {sorted.length > 0 && (
+        <>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>
                     <input
                       type="checkbox"
-                      aria-label={`select game against ${game.opponent}`}
-                      checked={selected.has(game.id)}
-                      onChange={() => toggle(game.id)}
+                      aria-label="select all games on this page"
+                      checked={allPageSelected}
+                      onChange={(event) =>
+                        setSelected((previous) => {
+                          const next = new Set(previous);
+                          for (const id of pageIds) {
+                            if (event.target.checked) {
+                              next.add(id);
+                            } else {
+                              next.delete(id);
+                            }
+                          }
+                          return next;
+                        })
+                      }
                     />
-                  </td>
-                  <td>
-                    <Link to={`/games/${game.id}`}>
-                      {new Date(game.end_time * 1000).toLocaleDateString()}
-                    </Link>
-                  </td>
-                  <td>{game.color}</td>
-                  <td>
-                    {game.opponent} ({game.opponent_rating})
-                  </td>
-                  <td className={`result-${game.result}`}>{game.result}</td>
-                  <td>{game.time_class}</td>
-                  <td>{game.opening?.name ?? "—"}</td>
-                  <td>{game.accuracy ?? "—"}</td>
-                  <td>{game.analyzed ? "✓" : "—"}</td>
+                  </th>
+                  {COLUMNS.map((col) => (
+                    <th
+                      key={col.key}
+                      aria-sort={
+                        sortKey === col.key
+                          ? sortDir === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button
+                        type="button"
+                        className="th-sort"
+                        onClick={() => onSort(col.key)}
+                      >
+                        {col.label}
+                        <span className="sort-arrow">
+                          {sortKey === col.key
+                            ? sortDir === "asc"
+                              ? "▲"
+                              : "▼"
+                            : ""}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageGames.map((game: GameSummary) => (
+                  <tr key={game.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`select game against ${game.opponent}`}
+                        checked={selected.has(game.id)}
+                        onChange={() => toggle(game.id)}
+                      />
+                    </td>
+                    <td>
+                      <Link to={`/games/${game.id}`}>
+                        {new Date(game.end_time * 1000).toLocaleDateString()}
+                      </Link>
+                    </td>
+                    <td>{game.color}</td>
+                    <td>
+                      {game.opponent} ({game.opponent_rating})
+                    </td>
+                    <td className={`result-${game.result}`}>{game.result}</td>
+                    <td>{game.time_class}</td>
+                    <td>{game.opening?.name ?? "—"}</td>
+                    <td>{game.accuracy ?? "—"}</td>
+                    <td>{game.analyzed ? "✓" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pagination">
+            <button
+              type="button"
+              disabled={clampedPage === 0}
+              onClick={() => setPage(clampedPage - 1)}
+            >
+              ‹ Prev
+            </button>
+            <span>
+              {start + 1}–{Math.min(sorted.length, start + PAGE_SIZE)} of{" "}
+              {sorted.length}
+            </span>
+            <button
+              type="button"
+              disabled={clampedPage >= pageCount - 1}
+              onClick={() => setPage(clampedPage + 1)}
+            >
+              Next ›
+            </button>
+          </div>
+        </>
       )}
     </Layout>
   );
