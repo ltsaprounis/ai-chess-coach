@@ -52,7 +52,9 @@ def test_missing_book_dir_raises() -> None:
         load_opening_book(TESTDATA / "no-such-book")
 
 
-@pytest.mark.skipif(not REAL_BOOK.exists(), reason="submodule not checked out")
+@pytest.mark.skipif(
+    not (REAL_BOOK / "a.tsv").exists(), reason="submodule not checked out"
+)
 def test_real_lichess_book_loads_and_classifies() -> None:
     book = load_opening_book(REAL_BOOK)
     assert len(book) > 3000
