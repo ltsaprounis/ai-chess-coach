@@ -156,11 +156,6 @@ body {
   background: var(--accent);
 }
 
-.player-select {
-  font-weight: 600;
-  max-width: 14rem;
-}
-
 .app-settings-link {
   margin-left: auto;
   display: inline-flex;
