@@ -97,6 +97,18 @@ export function explainReducer(
 }
 
 /**
+ * Progress lines to display alongside the panel: visible while a
+ * request is in flight or failed (mid-stream errors keep their tool
+ * trail on screen for diagnosis), hidden once the explanation is
+ * `done` so they don't linger under the finished markdown.
+ */
+export function visibleProgress(state: ExplainState): ProgressLine[] {
+  return state.status === "streaming" || state.status === "error"
+    ? state.progress
+    : [];
+}
+
+/**
  * Chess-style label for the ply being explained: white plies read
  * "14.f3", black plies "14...Rxh2" — titles the coach panel and
  * names the move without exposing raw ply numbers to the user.

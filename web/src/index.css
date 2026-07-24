@@ -78,9 +78,15 @@ td {
   align-items: center;
 }
 
-.moves-panel {
+/* Right column of .game-layout: takes the remaining row width (same
+   basis the moves panel used when it was the row's second item),
+   stacking Coach above Moves. */
+.side-column {
   flex: 1 1 14rem;
   min-width: 12rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .moves-panel h2 {
@@ -271,7 +277,7 @@ td {
   color: #898781;
 }
 
-/* Game page layout: ACPL summary strip, engine/coach panel cards. */
+/* Game page layout: ACPL summary strip, board/coach row, moves below. */
 
 .acpl-strip {
   display: flex;
@@ -284,12 +290,11 @@ td {
   font-size: 0.9rem;
 }
 
-.panels-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.5rem;
+/* Wraps EvalGraph (already width:100% internally) so the graph spans
+   the full page width, same as .acpl-strip above it. */
+.eval-graph-strip {
+  width: 100%;
   margin: 1rem 0;
-  align-items: flex-start;
 }
 
 .panel {
@@ -307,6 +312,24 @@ td {
 .panel-empty {
   font-size: 0.9rem;
   color: #898781;
+}
+
+/* The engine and coach panels are stacked inside column flex
+   containers (.board-column, .side-column), not a row, so they must
+   not inherit .panel's row-flex sizing — that would treat 22rem as a
+   height basis instead. */
+.board-column .panel,
+.side-column .panel {
+  flex: none;
+}
+
+/* Coach panel sits above the moves panel in the right column; only
+   its explanation area scrolls (roughly the board's height) so a
+   long explanation never grows the page — the title and Explain
+   button stay put. */
+.coach-panel .explain-panel {
+  max-height: 32rem;
+  overflow-y: auto;
 }
 
 /* Live engine eval on the Game page: toggle, bar, score, PV. */

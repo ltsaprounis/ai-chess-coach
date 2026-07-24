@@ -4,6 +4,7 @@ import {
   explainReducer,
   formatMoveLabel,
   initialExplainState,
+  visibleProgress,
 } from "./explain";
 
 function apply(
@@ -140,6 +141,50 @@ describe("explainReducer", () => {
       text: "",
       error: null,
     });
+  });
+});
+
+describe("visibleProgress", () => {
+  const progress = [{ id: 0, text: "engine: analyzing fen1" }];
+
+  it("shows progress lines while streaming", () => {
+    const state = apply([
+      { type: "start", ply: 3 },
+      {
+        type: "event",
+        event: { type: "tool", text: "engine: analyzing fen1" },
+      },
+    ]);
+    expect(visibleProgress(state)).toEqual(progress);
+  });
+
+  it("keeps progress lines visible after a mid-stream error", () => {
+    const state = apply([
+      { type: "start", ply: 3 },
+      {
+        type: "event",
+        event: { type: "tool", text: "engine: analyzing fen1" },
+      },
+      { type: "error", message: "provider timed out" },
+    ]);
+    expect(visibleProgress(state)).toEqual(progress);
+  });
+
+  it("hides progress lines once the explanation is done", () => {
+    const state = apply([
+      { type: "start", ply: 3 },
+      {
+        type: "event",
+        event: { type: "tool", text: "engine: analyzing fen1" },
+      },
+      { type: "done", payload: { text: "full markdown" } },
+    ]);
+    expect(state.progress).toEqual(progress);
+    expect(visibleProgress(state)).toEqual([]);
+  });
+
+  it("is empty before the first request", () => {
+    expect(visibleProgress(initialExplainState)).toEqual([]);
   });
 });
 

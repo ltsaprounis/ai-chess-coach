@@ -7,6 +7,13 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "--project", "backend", "uvicorn", "--factory", "chess_coach.api:create_app", "--port", "8000"],
       "port": 8000
+    },
+    {
+      "name": "web",
+      "_comment": "Vite dev server; proxies /api to the api config on 8000, so start both.",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "web", "dev"],
+      "port": 5173
     }
   ]
 }

@@ -1,5 +1,9 @@
 import Markdown from "react-markdown";
-import { type ExplainState, formatMoveLabel } from "../explain.ts";
+import {
+  type ExplainState,
+  formatMoveLabel,
+  visibleProgress,
+} from "../explain.ts";
 
 type Props = {
   state: ExplainState;
@@ -16,6 +20,10 @@ type Props = {
  * cached/generated markdown once `done`. Regenerate only appears once
  * a cached or freshly-completed explanation is on screen — clicking
  * it re-issues the same user-triggered request with `refresh: true`.
+ * Progress lines (tool-call summaries) show while streaming or after
+ * a mid-stream error, and disappear once the explanation is `done`
+ * (see `visibleProgress`) so they don't linger under the finished
+ * markdown.
  */
 export default function ExplainPanel({ state, sanMoves, onRegenerate }: Props) {
   if (state.status === "idle") {
@@ -43,7 +51,7 @@ export default function ExplainPanel({ state, sanMoves, onRegenerate }: Props) {
           </button>
         )}
       </div>
-      {state.progress.map((line) => (
+      {visibleProgress(state).map((line) => (
         <p key={line.id} className="explain-progress">
           {line.text}
         </p>
