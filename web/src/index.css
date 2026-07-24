@@ -521,6 +521,13 @@ td {
 
 /* Games page: filters summary, analyze bar, sortable headers, paging. */
 
+.games-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
 .games-summary {
   font-size: 0.9rem;
   color: var(--muted);

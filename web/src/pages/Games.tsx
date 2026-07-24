@@ -94,6 +94,18 @@ export default function Games() {
     queryFn: () => api.allGames(username),
   });
 
+  // Pull new games for this player from chess.com (incremental from the
+  // latest stored game), then refresh everything derived from them.
+  const sync = useMutation({
+    mutationFn: () => api.sync(username),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["allGames"] });
+      void queryClient.invalidateQueries({ queryKey: ["openings"] });
+      void queryClient.invalidateQueries({ queryKey: ["report"] });
+      void queryClient.invalidateQueries({ queryKey: ["players"] });
+    },
+  });
+
   const filtered = useMemo(() => {
     const needle = opponent.trim().toLowerCase();
     return (games.data ?? []).filter(
@@ -174,6 +186,26 @@ export default function Games() {
   return (
     <Layout username={username}>
       <h1>{username}'s games</h1>
+
+      <div className="games-toolbar">
+        <button
+          type="button"
+          onClick={() => sync.mutate()}
+          disabled={sync.isPending}
+        >
+          {sync.isPending ? "Syncing…" : "⟳ Sync new games"}
+        </button>
+        {sync.isSuccess && (
+          <span className="agent-note">
+            {sync.data.games_synced === 0
+              ? "Already up to date"
+              : `Synced ${sync.data.games_synced} new game${
+                  sync.data.games_synced === 1 ? "" : "s"
+                }`}
+          </span>
+        )}
+        {sync.isError && <span role="alert">{sync.error.message}</span>}
+      </div>
 
       <div className="filters">
         <select
