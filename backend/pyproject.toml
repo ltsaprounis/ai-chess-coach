@@ -2,9 +2,14 @@
 name = "chess-coach"
 version = "0.1.0"
 description = "chess.com game analysis with Stockfish and LLM coaching"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "claude-agent-sdk>=0.1",
+    # GPLv3+ and imported directly, so it makes the backend a combined
+    # work under the GPL. Latent — only an issue if we DISTRIBUTE the
+    # backend (then GPL it or replace this). Hosted-only is fine: it's
+    # GPL, not AGPL. (Stockfish runs as a subprocess, so it's separate.)
     "chess>=1.11",
     "fastapi>=0.115",
     "github-copilot-sdk>=1.0.8",
