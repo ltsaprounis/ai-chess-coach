@@ -323,12 +323,12 @@ td {
   flex: none;
 }
 
-/* Coach panel sits above the moves panel in the right column; only
-   its explanation area scrolls (roughly the board's height) so a
-   long explanation never grows the page — the title and Explain
-   button stay put. */
-.coach-panel .explain-panel {
-  max-height: 32rem;
+/* Coach panel sits above the moves panel in the right column, at a
+   fixed height (roughly the board's) so it reads as the board's
+   partner and its size never jumps between the empty state and a
+   long explanation — the panel itself scrolls when advice overflows. */
+.coach-panel {
+  height: 32rem;
   overflow-y: auto;
 }
 
