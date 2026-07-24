@@ -54,9 +54,12 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    rate), rating-over-time and monthly-activity charts from
    `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
    judgment charts from `GET /players/{u}/report`, and the
-   worst-first repertoire table from `GET /players/{u}/openings`
-   (collapsed client-side into opening families with a min-games
-   threshold, showing analyzed coverage — see `openings.ts`).
+   sortable worst-first repertoire table from
+   `GET /players/{u}/openings` (collapsed client-side into opening
+   families with a min-games threshold, showing analyzed coverage — see
+   `openings.ts`); a family links through to the Games page filtered to
+   it. Both the Games and repertoire tables use the shared
+   `useTableSort` hook + `SortableTh` header for click-to-sort columns.
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
    (per class, defaulting to the most-played so stats are never mixed
    across controls) filters scope the whole page: games-derived stats

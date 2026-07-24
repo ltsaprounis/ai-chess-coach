@@ -573,6 +573,33 @@ th[aria-sort="descending"] .th-sort {
   color: var(--muted);
 }
 
+/* An active drill-through filter (e.g. opening family) with a clear. */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.chip-clear {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 0.9rem;
+}
+
+.chip-clear:hover:not(:disabled) {
+  color: var(--loss);
+  border-color: transparent;
+}
+
 /* Coach-agent selector (Home + Coach pages). */
 
 .agent-row {

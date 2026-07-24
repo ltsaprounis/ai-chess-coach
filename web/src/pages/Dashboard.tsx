@@ -7,7 +7,8 @@ import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
 import Layout from "../components/Layout.tsx";
 import MonthlyActivityChart from "../components/MonthlyActivityChart.tsx";
 import RatingChart from "../components/RatingChart.tsx";
-import { groupByFamily } from "../openings.ts";
+import SortableTh from "../components/SortableTh.tsx";
+import { groupByFamily, type OpeningFamily } from "../openings.ts";
 import {
   latestRatings,
   monthlyActivity,
@@ -16,6 +17,7 @@ import {
   tally,
   tallyByColor,
 } from "../stats.ts";
+import { compareValues, useTableSort } from "../useTableSort.ts";
 
 const PHASES = ["opening", "middlegame", "endgame"] as const;
 const JUDGMENTS = ["best", "good", "inaccuracy", "mistake", "blunder"] as const;
@@ -31,6 +33,27 @@ const WINDOWS = [
 
 const DAY_SECONDS = 86_400;
 const ALL_CLASSES = "all";
+
+type RepSortKey = "family" | "games" | "analyzed" | "winRate" | "cpLoss";
+
+// Numeric repertoire columns read best high-to-low first.
+const REP_DESC: ReadonlySet<RepSortKey> = new Set(["games", "analyzed"]);
+
+function repSortValue(family: OpeningFamily, key: RepSortKey): string | number {
+  switch (key) {
+    case "family":
+      return family.family.toLowerCase();
+    case "games":
+      return family.games;
+    case "analyzed":
+      return family.analyzedGames;
+    case "winRate":
+      return score(family);
+    case "cpLoss":
+      // No analysis sorts to the bottom of a low-to-high (ascending) sort.
+      return family.avgCpLoss ?? Number.POSITIVE_INFINITY;
+  }
+}
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
@@ -155,14 +178,31 @@ export default function Dashboard() {
         }));
 
   // Collapse the fine ECO variations into families, keep those with a
-  // meaningful sample, and surface the worst-scoring first.
-  const families = useMemo(
-    () =>
-      groupByFamily(openings.data ?? [])
-        .filter((family) => family.games >= minGames)
-        .sort((a, b) => score(a) - score(b) || b.games - a.games),
-    [openings.data, minGames],
-  );
+  // meaningful sample, and sort by the chosen column (worst win rate
+  // first by default), ties broken by more games (more signal).
+  const rep = useTableSort<RepSortKey>("winRate", "asc", REP_DESC);
+  const families = useMemo(() => {
+    const grouped = groupByFamily(openings.data ?? []).filter(
+      (family) => family.games >= minGames,
+    );
+    grouped.sort((a, b) => {
+      const cmp = compareValues(
+        repSortValue(a, rep.sortKey),
+        repSortValue(b, rep.sortKey),
+      );
+      const primary = rep.sortDir === "asc" ? cmp : -cmp;
+      return primary !== 0 ? primary : b.games - a.games;
+    });
+    return grouped;
+  }, [openings.data, minGames, rep.sortKey, rep.sortDir]);
+
+  const familyLink = (name: string): string => {
+    const params = new URLSearchParams({ family: name });
+    if (classParam !== undefined) {
+      params.set("time_class", classParam);
+    }
+    return `/players/${username}/games?${params.toString()}`;
+  };
 
   const hasAnyGames = games.isSuccess && (games.data?.length ?? 0) > 0;
   const hasScopedGames = stats.overall.games > 0;
@@ -358,18 +398,52 @@ export default function Dashboard() {
             <table>
               <thead>
                 <tr>
-                  <th>Opening family</th>
-                  <th>Games</th>
-                  <th>Analyzed</th>
+                  <SortableTh
+                    column="family"
+                    label="Opening family"
+                    sortKey={rep.sortKey}
+                    sortDir={rep.sortDir}
+                    onSort={rep.onSort}
+                  />
+                  <SortableTh
+                    column="games"
+                    label="Games"
+                    sortKey={rep.sortKey}
+                    sortDir={rep.sortDir}
+                    onSort={rep.onSort}
+                  />
+                  <SortableTh
+                    column="analyzed"
+                    label="Analyzed"
+                    sortKey={rep.sortKey}
+                    sortDir={rep.sortDir}
+                    onSort={rep.onSort}
+                  />
                   <th>W-L-D</th>
-                  <th>Score</th>
-                  <th>Avg CP loss</th>
+                  <SortableTh
+                    column="winRate"
+                    label="Win rate"
+                    sortKey={rep.sortKey}
+                    sortDir={rep.sortDir}
+                    onSort={rep.onSort}
+                  />
+                  <SortableTh
+                    column="cpLoss"
+                    label="Avg CP loss"
+                    sortKey={rep.sortKey}
+                    sortDir={rep.sortDir}
+                    onSort={rep.onSort}
+                  />
                 </tr>
               </thead>
               <tbody>
                 {families.map((family) => (
                   <tr key={family.family}>
-                    <td>{family.family}</td>
+                    <td>
+                      <Link to={familyLink(family.family)}>
+                        {family.family}
+                      </Link>
+                    </td>
                     <td>{family.games}</td>
                     <td>{family.analyzedGames}</td>
                     <td>

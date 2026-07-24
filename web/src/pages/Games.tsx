@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type GameSummary, score } from "../api.ts";
 import Layout from "../components/Layout.tsx";
+import SortableTh from "../components/SortableTh.tsx";
+import { openingFamily } from "../openings.ts";
 import { tally } from "../stats.ts";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
+import { compareValues, useTableSort } from "../useTableSort.ts";
 
 const PAGE_SIZE = 25;
 
@@ -29,8 +32,6 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "analyzed", label: "Analyzed" },
 ];
 
-// The sort key falls back to end_time for ties, so both branches stay
-// total orders (string vs numeric compared in kind).
 function sortValue(game: GameSummary, key: SortKey): string | number {
   switch (key) {
     case "end_time":
@@ -61,15 +62,25 @@ const DEFAULT_DESC: ReadonlySet<SortKey> = new Set([
 
 export default function Games() {
   const { username = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
+  // `family` (and an initial `time_class`) can arrive from a repertoire
+  // drill-through on the dashboard.
+  const family = searchParams.get("family") ?? "";
+
   const [result, setResult] = useState("");
-  const [timeClass, setTimeClass] = useState("");
+  const [timeClass, setTimeClass] = useState(
+    () => searchParams.get("time_class") ?? "",
+  );
   const [analyzedFilter, setAnalyzedFilter] = useState("");
   const [opponent, setOpponent] = useState("");
 
-  const [sortKey, setSortKey] = useState<SortKey>("end_time");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { sortKey, sortDir, onSort } = useTableSort<SortKey>(
+    "end_time",
+    "desc",
+    DEFAULT_DESC,
+  );
   const [page, setPage] = useState(0);
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -90,19 +101,15 @@ export default function Games() {
         (result === "" || game.result === result) &&
         (timeClass === "" || game.time_class === timeClass) &&
         (analyzedFilter === "" || String(game.analyzed) === analyzedFilter) &&
+        (family === "" || openingFamily(game.opening?.name ?? "") === family) &&
         (needle === "" || game.opponent.toLowerCase().includes(needle)),
     );
-  }, [games.data, result, timeClass, analyzedFilter, opponent]);
+  }, [games.data, result, timeClass, analyzedFilter, family, opponent]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
     rows.sort((a, b) => {
-      const va = sortValue(a, sortKey);
-      const vb = sortValue(b, sortKey);
-      const cmp =
-        typeof va === "number" && typeof vb === "number"
-          ? va - vb
-          : String(va).localeCompare(String(vb));
+      const cmp = compareValues(sortValue(a, sortKey), sortValue(b, sortKey));
       const primary = sortDir === "asc" ? cmp : -cmp;
       return primary !== 0 ? primary : b.end_time - a.end_time;
     });
@@ -120,16 +127,7 @@ export default function Games() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on filter/sort change
   useEffect(() => {
     setPage(0);
-  }, [result, timeClass, analyzedFilter, opponent, sortKey, sortDir]);
-
-  const onSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(DEFAULT_DESC.has(key) ? "desc" : "asc");
-    }
-  };
+  }, [result, timeClass, analyzedFilter, family, opponent, sortKey, sortDir]);
 
   const analyze = useMutation({
     mutationFn: () =>
@@ -166,6 +164,12 @@ export default function Games() {
     void queryClient.invalidateQueries({ queryKey: ["openings"] });
     void queryClient.invalidateQueries({ queryKey: ["report"] });
   });
+
+  const clearFamily = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("family");
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <Layout username={username}>
@@ -211,12 +215,28 @@ export default function Games() {
         />
       </div>
 
+      {family !== "" && (
+        <p className="games-summary">
+          <span className="filter-chip">
+            Opening: <strong>{family}</strong>
+            <button
+              type="button"
+              className="chip-clear"
+              aria-label="clear opening filter"
+              onClick={clearFamily}
+            >
+              ✕
+            </button>
+          </span>
+        </p>
+      )}
+
       {games.isSuccess && (
         <p className="games-summary">
           {sorted.length} game{sorted.length === 1 ? "" : "s"} · {record.wins}-
           {record.losses}-{record.draws}
           {sorted.length > 0
-            ? ` · ${Math.round(score(record) * 100)}% score`
+            ? ` · ${Math.round(score(record) * 100)}% win rate`
             : ""}
         </p>
       )}
@@ -312,31 +332,14 @@ export default function Games() {
                     />
                   </th>
                   {COLUMNS.map((col) => (
-                    <th
+                    <SortableTh
                       key={col.key}
-                      aria-sort={
-                        sortKey === col.key
-                          ? sortDir === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      <button
-                        type="button"
-                        className="th-sort"
-                        onClick={() => onSort(col.key)}
-                      >
-                        {col.label}
-                        <span className="sort-arrow">
-                          {sortKey === col.key
-                            ? sortDir === "asc"
-                              ? "▲"
-                              : "▼"
-                            : ""}
-                        </span>
-                      </button>
-                    </th>
+                      column={col.key}
+                      label={col.label}
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={onSort}
+                    />
                   ))}
                 </tr>
               </thead>
