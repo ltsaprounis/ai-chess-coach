@@ -16,15 +16,20 @@ thresholds:        # centipawn loss per judgment
   blunder: 200
 
 # coach:            # roster of selectable coaches shown in the UI
-#   # Providers: claude-agent-sdk ships today and rides your Claude
-#   # Code login (no API key needed); anthropic (needs
-#   # ANTHROPIC_API_KEY) and azure-foundry are planned.
+#   # Providers: claude-agent-sdk rides your Claude Code login and
+#   # github-copilot rides your GitHub Copilot CLI login (no API
+#   # keys needed); anthropic (needs ANTHROPIC_API_KEY) and
+#   # azure-foundry are planned.
 #   agents:
 #     - id: claude
 #       label: Claude
 #       provider: claude-agent-sdk
 #       model: claude-opus-4-8
 #       max_tokens: 4096
+#     - id: copilot
+#       label: Copilot
+#       provider: github-copilot
+#       model: gpt-5   # any model your Copilot plan serves
 #   default_agent: claude   # default: the first agent's id
 
 server:

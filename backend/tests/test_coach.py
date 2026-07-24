@@ -1,6 +1,9 @@
 """Coach component tests (docs/06-coach.md)."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
+from typing import cast
+from uuid import uuid4
 
 import pytest
 from claude_agent_sdk import (
@@ -10,12 +13,22 @@ from claude_agent_sdk import (
     TextBlock,
     ToolUseBlock,
 )
+from copilot import ToolSet
+from copilot.session_events import (
+    AssistantMessageData,
+    SessionErrorData,
+    SessionEvent,
+    SessionEventType,
+    SessionIdleData,
+)
+from copilot.tools import Tool, ToolInvocation, ToolResult
 
 import chess_coach.coach.providers as providers_module
 from chess_coach.coach import (
     ClaudeAgentSdkProvider,
     CoachProvider,
     CoachProviderError,
+    CopilotSdkProvider,
     ExplainEvent,
     MoveContext,
     build_move_context,
@@ -265,8 +278,11 @@ async def test_agent_sdk_provider_wraps_failures(
 
 
 def test_unimplemented_providers_raise_clearly() -> None:
-    with pytest.raises(CoachProviderError, match="not implemented"):
+    with pytest.raises(CoachProviderError, match="not implemented") as excinfo:
         create_provider(LlmConfig(provider="anthropic"))
+    # Both shipping providers are suggested now that github-copilot joined
+    # claude-agent-sdk.
+    assert "'claude-agent-sdk' or 'github-copilot'" in str(excinfo.value)
 
 
 def test_provider_satisfies_protocol() -> None:
@@ -578,3 +594,391 @@ async def test_agent_sdk_provider_explain_early_close_closes_the_sdk_stream(
     assert first == ExplainEvent(type="text", text="First thought.")
     await events.aclose()
     assert sdk_stream_closed
+
+
+# --- CopilotSdkProvider -----------------------------------------------------
+#
+# copilot.CopilotClient/CopilotSession are callback-based (session.on(...)
+# dispatches SessionEvents synchronously), unlike the Claude Agent SDK's
+# async-generator query(). These fakes replay a scripted step list against
+# the same on()/send() surface: "text" dispatches an AssistantMessageData
+# event, "tool_call" invokes the registered analyze_position tool handler
+# directly (standing in for the CLI runtime deciding to call it), "error"
+# dispatches a SessionErrorData event, and "idle" dispatches SessionIdleData.
+
+
+class _FakeCopilotSession:
+    def __init__(
+        self,
+        script: list[tuple[str, str]],
+        tools: list[Tool] | None,
+        captured: dict[str, object],
+    ) -> None:
+        self._script = script
+        self._tools = {t.name: t for t in (tools or [])}
+        self._handlers: list[Callable[[SessionEvent], None]] = []
+        self._captured = captured
+
+    def on(self, handler: Callable[[SessionEvent], None]) -> Callable[[], None]:
+        self._handlers.append(handler)
+
+        def unsubscribe() -> None:
+            if handler in self._handlers:
+                self._handlers.remove(handler)
+
+        return unsubscribe
+
+    async def send(self, prompt: str, **_: object) -> str:
+        self._captured["prompt"] = prompt
+        tool_results: list[ToolResult] = []
+        for kind, value in self._script:
+            if kind == "text":
+                self._dispatch(
+                    AssistantMessageData(content=value, message_id="m"),
+                    SessionEventType.ASSISTANT_MESSAGE,
+                )
+            elif kind == "tool_call":
+                tool_obj = self._tools["analyze_position"]
+                assert tool_obj.handler is not None
+                # ToolHandler's declared return type is ToolResult |
+                # Awaitable[ToolResult]; the provider always registers an
+                # async handler, so this narrowing is safe.
+                handler = cast(
+                    "Callable[[ToolInvocation], Awaitable[ToolResult]]",
+                    tool_obj.handler,
+                )
+                result = await handler(
+                    ToolInvocation(
+                        tool_name="analyze_position", arguments={"fen": value}
+                    )
+                )
+                tool_results.append(result)
+            elif kind == "error":
+                self._dispatch(
+                    SessionErrorData(error_type="model_error", message=value),
+                    SessionEventType.SESSION_ERROR,
+                )
+            elif kind == "idle":
+                self._dispatch(SessionIdleData(), SessionEventType.SESSION_IDLE)
+        self._captured["tool_results"] = tool_results
+        return "message-id"
+
+    def _dispatch(self, data: object, event_type: SessionEventType) -> None:
+        event = SessionEvent(
+            data=data,  # type: ignore[arg-type]  -- fake narrows by construction
+            id=uuid4(),
+            timestamp=datetime.now(UTC),
+            type=event_type,
+        )
+        for handler in list(self._handlers):
+            handler(event)
+
+    async def __aenter__(self) -> "_FakeCopilotSession":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        self._captured["session_disconnected"] = True
+
+
+class _FakeCopilotClient:
+    def __init__(
+        self,
+        script: list[tuple[str, str]],
+        captured: dict[str, object],
+        *,
+        fail_on_enter: Exception | None = None,
+    ) -> None:
+        self._script = script
+        self._captured = captured
+        self._fail_on_enter = fail_on_enter
+
+    async def __aenter__(self) -> "_FakeCopilotClient":
+        if self._fail_on_enter is not None:
+            raise self._fail_on_enter
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        self._captured["client_stopped"] = True
+
+    async def create_session(
+        self,
+        *,
+        model: str | None = None,
+        system_message: object | None = None,
+        available_tools: object | None = None,
+        tools: list[Tool] | None = None,
+        **_: object,
+    ) -> _FakeCopilotSession:
+        self._captured["model"] = model
+        self._captured["system_message"] = system_message
+        self._captured["available_tools"] = available_tools
+        return _FakeCopilotSession(self._script, tools, self._captured)
+
+
+def _fake_copilot_client(
+    script: list[tuple[str, str]],
+    captured: dict[str, object],
+    *,
+    fail_on_enter: Exception | None = None,
+) -> Callable[[], _FakeCopilotClient]:
+    def factory(*_: object, **__: object) -> _FakeCopilotClient:
+        return _FakeCopilotClient(script, captured, fail_on_enter=fail_on_enter)
+
+    return factory
+
+
+async def test_copilot_provider_complete_collects_text_across_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [("text", "Work on your "), ("text", "endgames."), ("idle", "")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    advice = await provider.complete("coach me")
+
+    assert advice == "Work on your endgames."
+    assert captured["prompt"] == "coach me"
+    system_message = captured["system_message"]
+    assert isinstance(system_message, dict)
+    assert system_message["mode"] == "replace"
+    assert "chess coach" in system_message["content"]
+    # A one-shot completion gets no tools at all.
+    available_tools = captured["available_tools"]
+    assert isinstance(available_tools, ToolSet)
+    assert available_tools.to_list() == []
+
+
+async def test_copilot_provider_complete_surfaces_error_detail_from_session_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [("error", "Not logged in · Please run /login")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="Not logged in"):
+        await provider.complete("coach me")
+
+
+async def test_copilot_provider_complete_wraps_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        providers_module,
+        "CopilotClient",
+        _fake_copilot_client(
+            [], captured, fail_on_enter=FileNotFoundError("copilot runtime missing")
+        ),
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="installed and logged in"):
+        await provider.complete("coach me")
+
+
+async def test_copilot_provider_complete_raises_on_empty_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [("idle", "")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="returned no text"):
+        await provider.complete("coach me")
+
+
+async def test_copilot_provider_explain_streams_tool_and_text_events_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [
+        ("text", "Let's look at this position."),
+        ("tool_call", "fen-after"),
+        ("text", "Black wins the exchange next."),
+        ("idle", ""),
+    ]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    events = [
+        event async for event in provider.explain("explain this move", stub_analyst)
+    ]
+
+    assert events == [
+        ExplainEvent(type="text", text="Let's look at this position."),
+        ExplainEvent(type="tool", text="engine: analyzing fen-after"),
+        ExplainEvent(type="text", text="Black wins the exchange next."),
+    ]
+    assert captured["prompt"] == "explain this move"
+    # Only the engine tool is admitted — no shell/file/web built-ins.
+    available_tools = captured["available_tools"]
+    assert isinstance(available_tools, ToolSet)
+    assert available_tools.to_list() == ["custom:analyze_position"]
+
+
+async def test_copilot_provider_explain_surfaces_error_detail_from_session_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [("error", "Not logged in · Please run /login")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="Not logged in"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_copilot_provider_explain_wraps_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        providers_module,
+        "CopilotClient",
+        _fake_copilot_client(
+            [], captured, fail_on_enter=FileNotFoundError("copilot runtime missing")
+        ),
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="installed and logged in"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_copilot_provider_explain_raises_on_empty_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [("idle", "")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="returned no text"):
+        async for _ in provider.explain("explain this move", stub_analyst):
+            pass
+
+
+async def test_copilot_provider_explain_caps_engine_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unlike ClaudeAgentSdkProvider's SDK-enforced max_turns == 8 hard stop
+    # (see test_agent_sdk_provider_explain_streams_text_and_tool_events),
+    # the Copilot SDK has no built-in turn limit, so the provider counts
+    # engine-tool calls itself: every call past the budget — the one grace
+    # round and any runaway call after it — gets steered to wrap up instead
+    # of reaching the engine. See
+    # test_copilot_provider_explain_runaway_tool_calls_end_the_stream for
+    # the hard-stop behavior once the grace round is also exhausted.
+    max_engine_calls = 8
+    captured: dict[str, object] = {}
+    over_budget = 3
+    script = [("tool_call", f"fen-{n}") for n in range(max_engine_calls + over_budget)]
+    script.append(("text", "Here's what I found."))
+    script.append(("idle", ""))
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    events = [
+        event async for event in provider.explain("explain this move", stub_analyst)
+    ]
+
+    tool_events = [e for e in events if e.type == "tool"]
+    assert len(tool_events) == max_engine_calls
+
+    # _FakeCopilotSession.send stores a list[ToolResult]; captured erases
+    # that to plain object for its other (str, bool) entries.
+    tool_results = cast("list[ToolResult]", captured["tool_results"])
+    assert len(tool_results) == max_engine_calls + over_budget
+    # Calls past the budget don't reach the engine — they get steered to
+    # wrap up instead.
+    for result in tool_results[max_engine_calls:]:
+        assert isinstance(result, ToolResult)
+        assert result.result_type == "success"
+        assert "budget" in result.text_result_for_llm
+
+
+async def test_copilot_provider_explain_runaway_tool_calls_end_the_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # After the one grace round past the budget, a further engine-tool call
+    # is a runaway: the provider must cut the stream off — the generator
+    # ends and the session gets disconnected — rather than let a looping
+    # model keep calling the engine forever.
+    max_engine_calls = 8
+    captured: dict[str, object] = {}
+    script = [
+        ("text", "Let's check a few lines."),
+        *[("tool_call", f"fen-{n}") for n in range(max_engine_calls)],  # in budget
+        ("tool_call", "fen-grace"),  # budget + 1: the one grace round
+        ("tool_call", "fen-runaway"),  # past the grace round: hard stop
+        ("text", "Should never be yielded."),
+        ("idle", ""),
+    ]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    events = [
+        event async for event in provider.explain("explain this move", stub_analyst)
+    ]
+
+    # The stream ends right after the in-budget tool events: the grace
+    # round produces no event, and the runaway call's drain sentinel cuts
+    # the loop off before the trailing text/idle steps are ever reached.
+    assert events[0] == ExplainEvent(type="text", text="Let's check a few lines.")
+    tool_events = [e for e in events if e.type == "tool"]
+    assert len(tool_events) == max_engine_calls
+    assert events[-1] == tool_events[-1]
+
+    # Teardown still ran even though nothing called aclose() explicitly —
+    # the generator's own `async with` blocks disconnected on completion.
+    assert captured["session_disconnected"] is True
+    assert captured["client_stopped"] is True
+
+
+async def test_copilot_provider_explain_early_close_disconnects_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    script = [
+        ("text", "First thought."),
+        ("text", "Never consumed."),
+        ("idle", ""),
+    ]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    events = provider.explain("explain this move", stub_analyst)
+    first = await anext(events)
+    assert first == ExplainEvent(type="text", text="First thought.")
+    await events.aclose()
+
+    assert captured["session_disconnected"] is True
+    assert captured["client_stopped"] is True
+
+
+def test_copilot_provider_satisfies_protocol() -> None:
+    provider: CoachProvider = create_provider(LlmConfig(provider="github-copilot"))
+    assert isinstance(provider, CopilotSdkProvider)

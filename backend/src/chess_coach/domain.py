@@ -15,7 +15,9 @@ Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
 Judgment = Literal["best", "good", "inaccuracy", "mistake", "blunder"]
 Phase = Literal["opening", "middlegame", "endgame"]
-LlmProvider = Literal["claude-agent-sdk", "anthropic", "azure-foundry"]
+LlmProvider = Literal[
+    "claude-agent-sdk", "github-copilot", "anthropic", "azure-foundry"
+]
 
 
 class Thresholds(BaseModel):

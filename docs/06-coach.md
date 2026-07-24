@@ -89,6 +89,26 @@ training advice.
   anywhere**; requires the `claude` CLI installed and logged in.
   Errors (CLI missing, run failure, empty output) surface as
   `CoachProviderError`.
+- **`CopilotSdkProvider`** (`github-copilot`): the official
+  `github-copilot-sdk` package, which bundles and drives the Copilot
+  CLI runtime. Authentication and billing ride the local GitHub
+  Copilot CLI login (premium requests against the user's Copilot
+  seat) — like the Claude provider, **no API key anywhere**. The
+  session replaces the Copilot coding persona with the coach system
+  prompt. `complete` is one session + one prompt, collecting
+  assistant text until the session idles. `explain` registers the
+  injected `PositionAnalystFn` as a custom `analyze_position` tool
+  on the session — built-in Copilot tools (shell, file edits, web)
+  are not permitted; only the engine tool may run — and yields a
+  `text` event per assistant message and a `tool` event per engine
+  call. The SDK has no built-in turn limit, so the provider enforces
+  its own budget: engine calls beyond `_EXPLAIN_MAX_TURNS` get one
+  wrap-up round (a tool result telling the model to finish with what
+  it has), and any engine call after that grace round cuts the run
+  off — the generator ends and the session is torn down, rather than
+  letting a looping model run indefinitely. Errors (runtime missing,
+  not logged in, run failure, empty output) surface as
+  `CoachProviderError`.
 - **Planned — `anthropic`** (the API SDK; needs `ANTHROPIC_API_KEY`)
   and **`azure-foundry`** (the Azure AI Foundry demo, via the
   Anthropic SDK's `AnthropicFoundry` client). Each is one new class
@@ -98,6 +118,7 @@ training advice.
 ## Dependencies
 
 - `chess_coach.domain`; `claude-agent-sdk` for the v1 provider;
+  `github-copilot-sdk` for the github-copilot provider;
   python-chess (replaying moves to FEN for critical positions).
 - Consumed by the [API layer](07-api.md), which assembles the
   input from [storage](03-storage.md) and injects each configured

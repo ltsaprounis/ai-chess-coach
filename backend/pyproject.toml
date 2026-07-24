@@ -7,6 +7,7 @@ dependencies = [
     "claude-agent-sdk>=0.1",
     "chess>=1.11",
     "fastapi>=0.115",
+    "github-copilot-sdk>=1.0.8",
     "httpx>=0.28",
     "pydantic>=2.10",
     "pyyaml>=6.0",

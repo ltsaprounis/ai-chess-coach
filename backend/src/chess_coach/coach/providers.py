@@ -1,5 +1,6 @@
 """LLM providers behind the CoachProvider seam (docs/06-coach.md)."""
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
@@ -17,6 +18,14 @@ from claude_agent_sdk import (
     query,
     tool,
 )
+from copilot import CopilotClient, SystemMessageConfig, ToolSet
+from copilot.session_events import (
+    AssistantMessageData,
+    SessionErrorData,
+    SessionEvent,
+    SessionIdleData,
+)
+from copilot.tools import Tool, ToolInvocation, ToolResult
 from pydantic import BaseModel
 
 from chess_coach.coach.prompt import SYSTEM_PROMPT, format_eval
@@ -29,7 +38,12 @@ logger = logging.getLogger(__name__)
 PositionAnalystFn = Callable[[str], Awaitable[list[EvalLine]]]
 
 # Bounds the agentic explain() loop: enough turns for a couple of follow-up
-# engine calls plus the final write-up, without letting it run away.
+# engine calls plus the final write-up, without letting it run away. The two
+# providers enforce this differently: ClaudeAgentSdkProvider passes it as
+# max_turns, an SDK-enforced hard stop on the whole run. The Copilot SDK has
+# no such option, so CopilotSdkProvider counts engine-tool calls itself and
+# gives one grace round past the budget (a nudge to wrap up) before cutting
+# the run off outright — see CopilotSdkProvider.explain.
 _EXPLAIN_MAX_TURNS = 8
 
 # The in-process MCP server exposing the engine seam as a tool. The model
@@ -182,6 +196,215 @@ class ClaudeAgentSdkProvider:
             yield ExplainEvent(type="text", text=fallback_text)
 
 
+# JSON schema for the low-level copilot.tools.Tool — the Copilot SDK has no
+# equivalent of the Agent SDK's `{"fen": str}` shorthand.
+_ANALYZE_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "fen": {"type": "string", "description": "FEN of the position to analyze."}
+    },
+    "required": ["fen"],
+}
+
+# What analyze_position returns instead of calling the engine again once the
+# budget is spent — both for the one-time grace round and for every runaway
+# call after it, steering the model to wrap up rather than looping.
+_EXPLAIN_BUDGET_EXHAUSTED = (
+    "Engine analysis budget for this explanation is exhausted — finish your "
+    "answer with the analysis already gathered."
+)
+
+
+class CopilotSdkProvider:
+    """One-shot completion through the local GitHub Copilot CLI login.
+
+    No API key anywhere: authentication and billing ride the user's
+    Copilot seat. Requires the Copilot CLI runtime to be installed
+    (`python -m copilot download-runtime`) and logged in
+    (`copilot login`).
+    """
+
+    def __init__(self, model: str, system_prompt: str | None = None) -> None:
+        self._model = model
+        self._system_prompt = system_prompt
+
+    async def complete(self, prompt: str) -> str:
+        chunks: list[str] = []
+        error: CoachProviderError | None = None
+        idle = asyncio.Event()
+
+        def handle_event(event: SessionEvent) -> None:
+            nonlocal error
+            match event.data:
+                case AssistantMessageData() as data:
+                    if data.content:
+                        chunks.append(data.content)
+                case SessionErrorData() as data:
+                    error = CoachProviderError(
+                        f"github-copilot-sdk run failed: {data.message}"
+                    )
+                    idle.set()
+                case SessionIdleData():
+                    idle.set()
+                case _:  # every other session-event type is irrelevant here
+                    pass
+
+        try:
+            async with CopilotClient() as client:
+                session = await client.create_session(
+                    model=self._model,
+                    system_message=_system_message(self._system_prompt),
+                    # A one-shot coaching completion needs no tools at all —
+                    # same reasoning as explain()'s built-in-tool lockdown.
+                    available_tools=ToolSet(),
+                )
+                async with session:
+                    unsubscribe = session.on(handle_event)
+                    try:
+                        await session.send(prompt)
+                        await idle.wait()
+                    finally:
+                        unsubscribe()
+        except CoachProviderError:
+            raise
+        except Exception as exc:  # runtime missing, process death, transport
+            raise CoachProviderError(
+                f"github-copilot-sdk failed: {exc} — is the Copilot CLI "
+                "runtime installed and logged in? (python -m copilot "
+                "download-runtime, then copilot login via the CLI)"
+            ) from exc
+
+        if error is not None:
+            raise error
+
+        text = "".join(chunks).strip()
+        if not text:
+            raise CoachProviderError("github-copilot-sdk returned no text")
+        return text
+
+    async def explain(
+        self, prompt: str, analyst: PositionAnalystFn
+    ) -> AsyncGenerator[ExplainEvent]:
+        # Bridges the SDK's callback-based session.on() into the pull-based
+        # generator the CoachProvider protocol requires. None is the
+        # sentinel for "session went idle, stop draining"; an Exception
+        # value is a session.error event to raise once dequeued, so it
+        # surfaces at the right point in the yield sequence.
+        queue: asyncio.Queue[ExplainEvent | Exception | None] = asyncio.Queue()
+        produced_text = False
+        tool_calls = 0
+
+        def handle_event(event: SessionEvent) -> None:
+            nonlocal produced_text
+            match event.data:
+                case AssistantMessageData() as data:
+                    if data.content:
+                        produced_text = True
+                        queue.put_nowait(ExplainEvent(type="text", text=data.content))
+                case SessionErrorData() as data:
+                    queue.put_nowait(
+                        CoachProviderError(
+                            f"github-copilot-sdk run failed: {data.message}"
+                        )
+                    )
+                    queue.put_nowait(None)
+                case SessionIdleData():
+                    queue.put_nowait(None)
+                case _:  # every other session-event type is irrelevant here
+                    pass
+
+        async def handle_analyze(invocation: ToolInvocation) -> ToolResult:
+            nonlocal tool_calls
+            tool_calls += 1
+            # ToolInvocation.arguments is typed Any by the SDK (it's decoded
+            # straight off the wire); our schema pins it to {"fen": string}.
+            args = cast("dict[str, Any]", invocation.arguments or {})
+            fen = str(args.get("fen", ""))
+            if tool_calls == _EXPLAIN_MAX_TURNS + 1:
+                # One grace round: nudge the model to wrap up instead of
+                # cutting it off the instant it goes over budget.
+                return ToolResult(
+                    text_result_for_llm=_EXPLAIN_BUDGET_EXHAUSTED, result_type="success"
+                )
+            if tool_calls > _EXPLAIN_MAX_TURNS + 1:
+                # The model used its grace round and called again anyway —
+                # a runaway. Enqueue the drain sentinel so explain()'s while
+                # loop ends the generator; the `async with` teardown then
+                # disconnects the session and cancels the run instead of
+                # letting it loop forever. Text already yielded stands.
+                queue.put_nowait(None)
+                return ToolResult(
+                    text_result_for_llm=_EXPLAIN_BUDGET_EXHAUSTED, result_type="success"
+                )
+            queue.put_nowait(ExplainEvent(type="tool", text=_analyze_summary(fen)))
+            lines = await analyst(fen)
+            return ToolResult(
+                text_result_for_llm=_render_lines(lines), result_type="success"
+            )
+
+        analyze_tool = Tool(
+            name=_ANALYZE_TOOL_NAME,
+            description=_ANALYZE_TOOL_DESCRIPTION,
+            parameters=_ANALYZE_TOOL_SCHEMA,
+            handler=handle_analyze,
+            # No permission prompt for our own tool — it is the only tool
+            # available_tools admits below, so nothing else can run.
+            skip_permission=True,
+        )
+
+        try:
+            async with CopilotClient() as client:
+                session = await client.create_session(
+                    model=self._model,
+                    system_message=_system_message(self._system_prompt),
+                    tools=[analyze_tool],
+                    # Built-in Copilot tools (shell, file edits, web) must
+                    # not run: restrict the catalog to just our engine tool
+                    # rather than relying on permission prompts to block them.
+                    available_tools=ToolSet().add_custom(_ANALYZE_TOOL_NAME),
+                )
+                async with session:
+                    unsubscribe = session.on(handle_event)
+                    try:
+                        await session.send(prompt)
+                        while (item := await queue.get()) is not None:
+                            if isinstance(item, Exception):
+                                raise item
+                            yield item
+                    finally:
+                        unsubscribe()
+        except CoachProviderError:
+            raise
+        except Exception as exc:  # runtime missing, process death, transport
+            raise CoachProviderError(
+                f"github-copilot-sdk failed: {exc} — is the Copilot CLI "
+                "runtime installed and logged in? (python -m copilot "
+                "download-runtime, then copilot login via the CLI)"
+            ) from exc
+
+        if not produced_text:
+            raise CoachProviderError("github-copilot-sdk returned no text")
+
+
+def _system_message(content: str | None) -> SystemMessageConfig | None:
+    if content is None:
+        return None
+    # "replace" fully swaps in the coach persona, same as
+    # ClaudeAgentSdkProvider's system_prompt — note its docstring warns this
+    # also removes the CLI's own guardrails, which is why explain() locks
+    # the tool catalog down independently via available_tools rather than
+    # relying on any tool-calling guidance the replaced prompt might have
+    # carried. If replace ever proves to break the tool flow in practice,
+    # "append" is the documented fallback.
+    return {"mode": "replace", "content": content}
+
+
+def _analyze_summary(fen: str) -> str:
+    if fen:
+        return f"engine: analyzing {fen}"
+    return "engine: analyzing position"
+
+
 def _build_analyze_tool(analyst: PositionAnalystFn) -> SdkMcpTool[Any]:
     @tool(_ANALYZE_TOOL_NAME, _ANALYZE_TOOL_DESCRIPTION, {"fen": str})
     async def analyze_position(args: dict[str, Any]) -> dict[str, Any]:
@@ -211,13 +434,15 @@ def _render_lines(lines: list[EvalLine]) -> str:
 
 
 def create_provider(cfg: LlmConfig, api_key: str | None = None) -> CoachProvider:
-    """Factory over the seam; only claude-agent-sdk ships today.
+    """Factory over the seam; claude-agent-sdk and github-copilot ship today.
 
     `api_key` is reserved for the anthropic / azure-foundry providers.
     """
     if cfg.provider == "claude-agent-sdk":
         return ClaudeAgentSdkProvider(model=cfg.model, system_prompt=SYSTEM_PROMPT)
+    if cfg.provider == "github-copilot":
+        return CopilotSdkProvider(model=cfg.model, system_prompt=SYSTEM_PROMPT)
     raise CoachProviderError(
         f"llm provider {cfg.provider!r} is not implemented yet — "
-        "set llm.provider to 'claude-agent-sdk'"
+        "set llm.provider to 'claude-agent-sdk' or 'github-copilot'"
     )
