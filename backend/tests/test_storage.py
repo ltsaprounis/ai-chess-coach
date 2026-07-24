@@ -174,8 +174,10 @@ def test_opening_stats_time_window(db: Db) -> None:
     for game_id in ("old", "recent"):
         set_opening(db, game_id, RUY_LOPEZ)
 
-    def record(**window: int) -> tuple[int, int, int]:
-        (stat,) = opening_stats(db, "testuser", **window)
+    def record(
+        *, since: int | None = None, until: int | None = None
+    ) -> tuple[int, int, int]:
+        (stat,) = opening_stats(db, "testuser", since=since, until=until)
         return stat.games, stat.wins, stat.losses
 
     assert record(since=150) == (1, 0, 1)  # only the recent loss
@@ -192,14 +194,36 @@ def test_list_analyzed_games_time_window(db: Db) -> None:
     save_analysis(db, make_analysis(game_id="old"))
     save_analysis(db, make_analysis(game_id="recent"))
 
-    def ids(**window: int) -> list[str]:
-        return [g.id for g in list_analyzed_games(db, "testuser", **window)]
+    def ids(*, since: int | None = None, until: int | None = None) -> list[str]:
+        return [
+            g.id for g in list_analyzed_games(db, "testuser", since=since, until=until)
+        ]
 
     assert ids() == ["recent", "old"]  # newest first
     assert ids(since=150) == ["recent"]
     assert ids(until=150) == ["old"]
     assert ids(since=200) == ["recent"]  # since is inclusive
     assert ids(until=200) == ["old"]  # until is exclusive
+
+
+def test_time_class_filter(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="rapid", time_class="rapid"),
+            make_game(id="blitz", time_class="blitz"),
+        ],
+    )
+    save_analysis(db, make_analysis(game_id="rapid"))
+    save_analysis(db, make_analysis(game_id="blitz"))
+    for game_id in ("rapid", "blitz"):
+        set_opening(db, game_id, RUY_LOPEZ)
+
+    assert [g.id for g in list_analyzed_games(db, "testuser", time_class="rapid")] == [
+        "rapid"
+    ]
+    (stat,) = opening_stats(db, "testuser", time_class="blitz")
+    assert stat.games == 1
 
 
 def test_games_missing_opening(db: Db) -> None:

@@ -32,10 +32,14 @@ export type GameFilters = {
   offset?: number;
 };
 
-/** Epoch-second window for report/openings (since inclusive, until exclusive). */
-export type TimeWindow = {
+/**
+ * Optional scoping for report/openings: an epoch-second window (since
+ * inclusive, until exclusive) and/or a single time control.
+ */
+export type StatsQuery = {
   since?: number;
   until?: number;
+  time_class?: string;
 };
 
 /** Page size for the dashboard's fetch-everything helper. */
@@ -110,22 +114,22 @@ export const api = {
   },
   openings: async (
     username: string,
-    window: TimeWindow = {},
+    query: StatsQuery = {},
   ): Promise<OpeningStats[]> =>
     json(
       await fetch(
-        `/api/players/${encodeURIComponent(username)}/openings${queryString(window)}`,
+        `/api/players/${encodeURIComponent(username)}/openings${queryString(query)}`,
       ),
     ),
   game: async (gameId: string): Promise<GameDetail> =>
     json(await fetch(`/api/games/${encodeURIComponent(gameId)}`)),
   report: async (
     username: string,
-    window: TimeWindow = {},
+    query: StatsQuery = {},
   ): Promise<PlayerReport> =>
     json(
       await fetch(
-        `/api/players/${encodeURIComponent(username)}/report${queryString(window)}`,
+        `/api/players/${encodeURIComponent(username)}/report${queryString(query)}`,
       ),
     ),
   coach: async (username: string, agentId?: string): Promise<CoachResponse> =>

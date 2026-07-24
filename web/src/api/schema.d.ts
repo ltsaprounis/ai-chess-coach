@@ -35,7 +35,8 @@ export interface paths {
          * Player Openings
          * @description Per-opening record over classified games, most-played first.
          *
-         *     `since`/`until` (epoch seconds) restrict to a time window.
+         *     `since`/`until` (epoch seconds) restrict to a time window;
+         *     `time_class` restricts to one time control.
          */
         get: operations["player_openings_api_players__username__openings_get"];
         put?: never;
@@ -194,7 +195,8 @@ export interface paths {
          * Player Report
          * @description Aggregated stats over the player's analyzed games.
          *
-         *     `since`/`until` (epoch seconds) restrict to a time window.
+         *     `since`/`until` (epoch seconds) restrict to a time window;
+         *     `time_class` restricts to one time control.
          */
         get: operations["player_report_api_players__username__report_get"];
         put?: never;
@@ -532,6 +534,7 @@ export interface operations {
             query?: {
                 since?: number | null;
                 until?: number | null;
+                time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
             };
             header?: never;
             path: {
@@ -789,6 +792,7 @@ export interface operations {
             query?: {
                 since?: number | null;
                 until?: number | null;
+                time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
             };
             header?: never;
             path: {

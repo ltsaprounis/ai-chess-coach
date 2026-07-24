@@ -29,6 +29,7 @@ const WINDOWS = [
 ] as const;
 
 const DAY_SECONDS = 86_400;
+const ALL_CLASSES = "all";
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
@@ -46,8 +47,8 @@ function Tile({ value, label }: { value: string | number; label: string }) {
 
 export default function Dashboard() {
   const { username = "" } = useParams();
-  const [pickedClass, setPickedClass] = useState<string | null>(null);
   const [windowDays, setWindowDays] = useState<number | null>(null);
+  const [pickedClass, setPickedClass] = useState<string | null>(null);
 
   // Cutoff recomputed only when the window changes, so it stays stable
   // across renders (a fresh Date.now() each render would thrash the
@@ -64,44 +65,65 @@ export default function Dashboard() {
     queryKey: ["allGames", username],
     queryFn: () => api.allGames(username),
   });
-  const openings = useQuery({
-    queryKey: ["openings", username, windowDays],
-    queryFn: () => api.openings(username, since === undefined ? {} : { since }),
-  });
-  const report = useQuery({
-    queryKey: ["report", username, windowDays],
-    queryFn: () => api.report(username, since === undefined ? {} : { since }),
-  });
 
   // The whole games archive is fetched once; the window is applied
-  // client-side to the games-derived stats (report + openings are
-  // scoped on the server, keyed on windowDays above).
-  const windowedGames = useMemo(() => {
+  // client-side, then the time control on top of it.
+  const windowByTime = useMemo(() => {
     const all = games.data ?? [];
     return since === undefined
       ? all
       : all.filter((game) => game.end_time >= since);
   }, [games.data, since]);
 
-  const stats = useMemo(
-    () => ({
-      overall: tally(windowedGames),
-      byColor: tallyByColor(windowedGames),
-      ratings: latestRatings(windowedGames),
-      months: monthlyActivity(windowedGames),
-    }),
-    [windowedGames],
+  // Time controls present in the window, most-played first.
+  const classOptions = useMemo(
+    () => latestRatings(windowByTime),
+    [windowByTime],
   );
 
-  // Default the rating chart to the most-played class.
-  const selectedClass =
-    stats.ratings.find((entry) => entry.timeClass === pickedClass)?.timeClass ??
-    stats.ratings[0]?.timeClass ??
-    null;
+  // Resolve the selected control: explicit "all", a control that's
+  // present, else the most-played one — so the default view mixes
+  // controls only when the user asks for it.
+  const timeClass =
+    pickedClass === ALL_CLASSES
+      ? ALL_CLASSES
+      : (classOptions.find((entry) => entry.timeClass === pickedClass)
+          ?.timeClass ??
+        classOptions[0]?.timeClass ??
+        ALL_CLASSES);
+  const classParam = timeClass === ALL_CLASSES ? undefined : timeClass;
+
+  const openings = useQuery({
+    queryKey: ["openings", username, windowDays, timeClass],
+    queryFn: () => api.openings(username, { since, time_class: classParam }),
+  });
+  const report = useQuery({
+    queryKey: ["report", username, windowDays, timeClass],
+    queryFn: () => api.report(username, { since, time_class: classParam }),
+  });
+
+  const scopedGames = useMemo(
+    () =>
+      classParam === undefined
+        ? windowByTime
+        : windowByTime.filter((game) => game.time_class === classParam),
+    [windowByTime, classParam],
+  );
+
+  const stats = useMemo(
+    () => ({
+      overall: tally(scopedGames),
+      byColor: tallyByColor(scopedGames),
+      ratings: latestRatings(scopedGames),
+      months: monthlyActivity(scopedGames),
+    }),
+    [scopedGames],
+  );
+
   const series = useMemo(
     () =>
-      selectedClass === null ? [] : ratingSeries(windowedGames, selectedClass),
-    [windowedGames, selectedClass],
+      classParam === undefined ? [] : ratingSeries(scopedGames, classParam),
+    [scopedGames, classParam],
   );
 
   const analyzed =
@@ -131,8 +153,7 @@ export default function Dashboard() {
         }));
 
   const hasAnyGames = games.isSuccess && (games.data?.length ?? 0) > 0;
-  const hasWindowGames = stats.overall.games > 0;
-  const scoped = windowDays !== null;
+  const hasScopedGames = stats.overall.games > 0;
 
   return (
     <Layout username={username}>
@@ -167,20 +188,35 @@ export default function Dashboard() {
               ))}
             </select>
           </label>
+          <label>
+            Time control{" "}
+            <select
+              aria-label="time control"
+              value={timeClass}
+              onChange={(event) => setPickedClass(event.target.value)}
+            >
+              <option value={ALL_CLASSES}>All classes</option>
+              {classOptions.map((entry) => (
+                <option key={entry.timeClass} value={entry.timeClass}>
+                  {entry.timeClass} ({entry.games})
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="agent-note">
             {stats.overall.games} game{stats.overall.games === 1 ? "" : "s"}
-            {scoped ? " in this window" : ""}
+            {classParam !== undefined ? ` · ${classParam}` : " · all classes"}
           </span>
         </div>
       )}
 
-      {hasAnyGames && !hasWindowGames && (
+      {hasAnyGames && !hasScopedGames && (
         <p className="panel-empty">
-          No games in this window — widen the time window above.
+          No games match these filters — widen the window or time control.
         </p>
       )}
 
-      {hasWindowGames && (
+      {hasScopedGames && (
         <section className="tiles">
           <Tile value={stats.overall.games} label="games" />
           <Tile
@@ -221,37 +257,24 @@ export default function Dashboard() {
         </section>
       )}
 
-      {hasWindowGames && selectedClass !== null && (
+      {hasScopedGames && classParam !== undefined && series.length > 0 && (
         <section>
           <h2>Rating over time</h2>
-          <div className="filters">
-            <select
-              aria-label="time class"
-              value={selectedClass}
-              onChange={(event) => setPickedClass(event.target.value)}
-            >
-              {stats.ratings.map((entry) => (
-                <option key={entry.timeClass} value={entry.timeClass}>
-                  {entry.timeClass} ({entry.games} games)
-                </option>
-              ))}
-            </select>
-          </div>
           <RatingChart
             points={series}
-            label={`${selectedClass} rating over time`}
+            label={`${classParam} rating over time`}
           />
         </section>
       )}
 
-      {hasWindowGames && (
+      {hasScopedGames && (
         <section>
           <h2>Monthly activity</h2>
           <MonthlyActivityChart data={stats.months} />
         </section>
       )}
 
-      {hasWindowGames && (
+      {hasScopedGames && (
         <section>
           <h2>Analysis</h2>
           {analyzed !== null ? (
@@ -285,11 +308,7 @@ export default function Dashboard() {
         {openings.isPending && <p>Loading…</p>}
         {openings.isError && <p role="alert">{openings.error.message}</p>}
         {openings.isSuccess && openings.data.length === 0 && (
-          <p>
-            {scoped
-              ? "No classified games in this window."
-              : "No classified games yet — sync this player first."}
-          </p>
+          <p>No classified games match these filters.</p>
         )}
         {openings.isSuccess && openings.data.length > 0 && (
           <div className="table-wrap">

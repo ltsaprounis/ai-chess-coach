@@ -118,12 +118,16 @@ def player_openings(
     db: DbDep,
     since: int | None = None,
     until: int | None = None,
+    time_class: TimeClass | None = None,
 ) -> list[OpeningStats]:
     """Per-opening record over classified games, most-played first.
 
-    `since`/`until` (epoch seconds) restrict to a time window.
+    `since`/`until` (epoch seconds) restrict to a time window;
+    `time_class` restricts to one time control.
     """
-    return opening_stats(db, username.lower(), since=since, until=until)
+    return opening_stats(
+        db, username.lower(), since=since, until=until, time_class=time_class
+    )
 
 
 @router.get("/players/{username}/games")
@@ -457,13 +461,18 @@ def player_report(
     db: DbDep,
     since: int | None = None,
     until: int | None = None,
+    time_class: TimeClass | None = None,
 ) -> PlayerReport:
     """Aggregated stats over the player's analyzed games.
 
-    `since`/`until` (epoch seconds) restrict to a time window.
+    `since`/`until` (epoch seconds) restrict to a time window;
+    `time_class` restricts to one time control.
     """
     user = username.lower()
-    return build_report(user, list_analyzed_games(db, user, since=since, until=until))
+    return build_report(
+        user,
+        list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
+    )
 
 
 @router.post("/players/{username}/coach")

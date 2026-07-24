@@ -177,11 +177,13 @@ def list_analyzed_games(
     *,
     since: int | None = None,
     until: int | None = None,
+    time_class: TimeClass | None = None,
 ) -> list[AnalyzedGame]:
     """Games with analyses (plus openings) — the coach report input.
 
     `since`/`until` (epoch seconds; `since` inclusive, `until`
-    exclusive) restrict to a time window; both default to full history.
+    exclusive) restrict to a time window; `time_class` restricts to one
+    time control. All default to the full history.
     """
     clauses = ["g.username = ?"]
     params: list[object] = [username]
@@ -191,6 +193,9 @@ def list_analyzed_games(
     if until is not None:
         clauses.append("g.end_time < ?")
         params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
     rows = db.execute(
         f"""
         SELECT g.*, a.depth AS a_depth, a.evals AS a_evals,
@@ -229,11 +234,13 @@ def opening_stats(
     *,
     since: int | None = None,
     until: int | None = None,
+    time_class: TimeClass | None = None,
 ) -> list[OpeningStats]:
     """Per-opening record over classified games, most-played first.
 
     `since`/`until` (epoch seconds; `since` inclusive, `until`
-    exclusive) restrict to a time window; both default to full history.
+    exclusive) restrict to a time window; `time_class` restricts to one
+    time control. All default to the full history.
     avg_cp_loss stays None until engine analysis exists.
     """
     clauses = ["g.username = ?", "g.opening_eco IS NOT NULL"]
@@ -244,6 +251,9 @@ def opening_stats(
     if until is not None:
         clauses.append("g.end_time < ?")
         params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
     rows = db.execute(
         f"""
         SELECT g.opening_eco AS eco, g.opening_name AS name,

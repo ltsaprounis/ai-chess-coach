@@ -29,11 +29,11 @@ injected into routes via FastAPI dependencies.
 |--------|----------------------------------------|---------------------|
 | POST   | `/api/players/{u}/sync`                | Run ingestion from `latest_game_time`; upsert + classify openings; return counts |
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging) |
-| GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window |
+| GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
-| GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window |
+| GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider; optional body `{agent_id}` (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id}` |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |

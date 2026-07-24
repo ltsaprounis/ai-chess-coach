@@ -466,6 +466,12 @@ def test_report_and_openings_respect_time_window(
     openings: Any = get(client, "/api/players/testuser/openings", params=since).json()
     assert [(o["eco"], o["games"], o["losses"]) for o in openings] == [("C60", 1, 1)]
 
+    # Both seeded games are rapid, so a blitz filter empties the report.
+    blitz: Any = get(
+        client, "/api/players/testuser/report", params={"time_class": "blitz"}
+    ).json()
+    assert blitz["games_analyzed"] == 0
+
 
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
     body: Any = get(client, "/api/coach/agents").json()

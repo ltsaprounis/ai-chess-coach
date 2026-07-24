@@ -54,10 +54,14 @@ def games_needing_analysis(db, username: str, depth: int,
 def count_games_needing_analysis(db, username: str, depth: int) -> int
 def games_missing_opening(db: Db, username: str) -> list[Game]
 def list_analyzed_games(db, username: str, *, since: int | None = None,
-                        until: int | None = None) -> list[AnalyzedGame]
+                        until: int | None = None,
+                        time_class: TimeClass | None = None
+                        ) -> list[AnalyzedGame]
 def opening_stats(db, username: str, *, since: int | None = None,
-                  until: int | None = None) -> list[OpeningStats]
+                  until: int | None = None,
+                  time_class: TimeClass | None = None) -> list[OpeningStats]
 #   since/until: epoch-second window (since inclusive, until exclusive)
+#   time_class: restrict to one time control
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
 # Analysis repo
