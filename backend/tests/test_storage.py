@@ -18,6 +18,7 @@ from chess_coach.storage import (
     list_analyses,
     list_analyzed_games,
     list_games,
+    list_players,
     open_db,
     opening_stats,
     save_analysis,
@@ -75,6 +76,22 @@ def test_filters(db: Db) -> None:
     assert ids(GameFilters(analyzed=False)) == ["g-win"]
     assert ids(GameFilters(limit=1)) == ["g-loss"]  # newest first
     assert ids(GameFilters(limit=1, offset=1)) == ["g-win"]
+
+
+def test_list_players(db: Db) -> None:
+    assert list_players(db) == []
+    upsert_games(
+        db,
+        [
+            make_game(id="a1", username="alice", end_time=10),
+            make_game(id="a2", username="alice", end_time=20),
+            make_game(id="b1", username="bob", end_time=15),
+        ],
+    )
+    assert [(p.username, p.games, p.last_played) for p in list_players(db)] == [
+        ("alice", 2, 20),  # most games first
+        ("bob", 1, 15),
+    ]
 
 
 def test_latest_game_time(db: Db) -> None:

@@ -224,6 +224,24 @@ def test_games_list_with_filters(client: TestClient, db_path: Path) -> None:
     assert wins[0]["analyzed"] is True
 
 
+def test_players_endpoint_lists_saved_players(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="a1", username="alice", end_time=10),
+            make_game(id="a2", username="alice", end_time=20),
+            make_game(id="b1", username="bob", end_time=15),
+        ],
+    )
+    players: Any = get(client, "/api/players").json()
+    assert [(p["username"], p["games"], p["last_played"]) for p in players] == [
+        ("alice", 2, 20),
+        ("bob", 1, 15),
+    ]
+
+
 def test_game_detail_includes_analysis(client: TestClient, db_path: Path) -> None:
     seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
 

@@ -13,6 +13,7 @@ from chess_coach.domain import (
     GameSummary,
     Opening,
     OpeningStats,
+    PlayerSummary,
     Result,
     TimeClass,
 )
@@ -130,6 +131,26 @@ def get_game(db: Db, game_id: str) -> GameDetail | None:
             "analysis": _analysis_from_row(row),
         }
     )
+
+
+def list_players(db: Db) -> list[PlayerSummary]:
+    """Stored players, most games first — the saved-players picker."""
+    rows = db.execute(
+        """
+        SELECT username, COUNT(*) AS games, MAX(end_time) AS last_played
+        FROM games
+        GROUP BY username
+        ORDER BY games DESC, username
+        """
+    ).fetchall()
+    return [
+        PlayerSummary(
+            username=row["username"],
+            games=row["games"],
+            last_played=row["last_played"],
+        )
+        for row in rows
+    ]
 
 
 def latest_game_time(db: Db, username: str) -> int | None:

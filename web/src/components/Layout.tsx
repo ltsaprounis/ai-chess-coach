@@ -1,22 +1,55 @@
-import type { ReactNode } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { type ReactNode, useEffect } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { api } from "../api.ts";
+import { getStoredPlayer, setStoredPlayer } from "../currentPlayer.ts";
 
 type Props = {
-  /** The player in context; omitted on the home page (no player yet). */
+  /** The player in context; omitted on "/" and the Settings page, where
+   *  the header falls back to the last-viewed player. */
   username?: string;
   children: ReactNode;
 };
+
+type Section = "games" | "dashboard" | "coach";
+
+/** The player section we're on, so switching players keeps the section. */
+function sectionFromPath(pathname: string): Section {
+  const match = pathname.match(/\/players\/[^/]+\/(games|dashboard|coach)/);
+  return (match?.[1] as Section | undefined) ?? "dashboard";
+}
 
 const navClass = ({ isActive }: { isActive: boolean }): string =>
   isActive ? "app-nav-link active" : "app-nav-link";
 
 /**
- * App shell: a sticky header with the brand, the player-scoped section
- * tabs, and a player switcher, above the routed page content. Every
- * page renders through this — it replaces the per-page inline link nav.
- * When `username` is absent (home) only the brand shows.
+ * App shell: a sticky header with the brand, a saved-players switcher,
+ * the always-available section tabs (pointing at the current player),
+ * and a Settings link. Every page renders through this.
  */
 export default function Layout({ username, children }: Props) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Remember the player we're viewing so the switcher and "/" default
+  // to them across pages that don't carry a username (Settings).
+  useEffect(() => {
+    if (username) {
+      setStoredPlayer(username);
+    }
+  }, [username]);
+
+  const currentPlayer = username ?? getStoredPlayer() ?? "";
+  const section = sectionFromPath(location.pathname);
+  const players = useQuery({ queryKey: ["players"], queryFn: api.players });
+  const saved = players.data ?? [];
+  const knownCurrent = saved.some((p) => p.username === currentPlayer);
+
+  const switchPlayer = (value: string): void => {
+    setStoredPlayer(value);
+    navigate(`/players/${value}/${section}`);
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -28,30 +61,51 @@ export default function Layout({ username, children }: Props) {
             <span className="brand-name">AI Chess Coach</span>
           </Link>
 
-          {username !== undefined && username !== "" && (
+          {currentPlayer !== "" && (
             <>
+              {saved.length > 0 && (
+                <select
+                  className="player-select"
+                  aria-label="player"
+                  value={currentPlayer}
+                  onChange={(event) => switchPlayer(event.target.value)}
+                >
+                  {!knownCurrent && (
+                    <option value={currentPlayer}>{currentPlayer}</option>
+                  )}
+                  {saved.map((player) => (
+                    <option key={player.username} value={player.username}>
+                      {player.username} ({player.games})
+                    </option>
+                  ))}
+                </select>
+              )}
               <nav className="app-nav" aria-label="Player sections">
-                <NavLink to={`/players/${username}/games`} className={navClass}>
+                <NavLink
+                  to={`/players/${currentPlayer}/games`}
+                  className={navClass}
+                >
                   Games
                 </NavLink>
                 <NavLink
-                  to={`/players/${username}/dashboard`}
+                  to={`/players/${currentPlayer}/dashboard`}
                   className={navClass}
                 >
                   Dashboard
                 </NavLink>
-                <NavLink to={`/players/${username}/coach`} className={navClass}>
+                <NavLink
+                  to={`/players/${currentPlayer}/coach`}
+                  className={navClass}
+                >
                   Coach
                 </NavLink>
               </nav>
-              <div className="app-header-player">
-                <span className="app-player-name">{username}</span>
-                <Link to="/" className="app-change-player">
-                  Change
-                </Link>
-              </div>
             </>
           )}
+
+          <NavLink to="/settings" className="app-settings-link">
+            ⚙ Settings
+          </NavLink>
         </div>
       </header>
 

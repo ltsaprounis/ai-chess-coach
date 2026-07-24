@@ -29,6 +29,7 @@ from chess_coach.domain import (
     LlmProvider,
     OpeningStats,
     PlayerReport,
+    PlayerSummary,
     Result,
     TimeClass,
 )
@@ -46,6 +47,7 @@ from chess_coach.storage import (
     latest_game_time,
     list_analyzed_games,
     list_games,
+    list_players,
     opening_stats,
     save_analysis,
     save_explanation,
@@ -110,6 +112,12 @@ async def sync_player(username: str, db: DbDep, book: BookDep) -> SyncResult:
         if opening is not None:
             set_opening(db, game.id, opening)
     return SyncResult(games_synced=synced)
+
+
+@router.get("/players")
+def list_all_players(db: DbDep) -> list[PlayerSummary]:
+    """Every stored player, most games first — the saved-players picker."""
+    return list_players(db)
 
 
 @router.get("/players/{username}/openings")

@@ -28,6 +28,7 @@ injected into routes via FastAPI dependencies.
 | Method | Path                                   | Behavior            |
 |--------|----------------------------------------|---------------------|
 | POST   | `/api/players/{u}/sync`                | Run ingestion from `latest_game_time`; upsert + classify openings; return counts |
+| GET    | `/api/players`                         | Stored players (`{username, games, last_played}`), most games first — the saved-players picker |
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging) |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |

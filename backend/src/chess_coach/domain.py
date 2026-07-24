@@ -112,6 +112,14 @@ class OpeningStats(BaseModel):
     avg_cp_loss: float | None = None  # None until games are analyzed
 
 
+class PlayerSummary(BaseModel):
+    """A stored player, for the saved-players picker."""
+
+    username: str
+    games: int
+    last_played: int  # epoch seconds of the most recent stored game
+
+
 class CriticalPosition(BaseModel):
     fen: str
     played: str

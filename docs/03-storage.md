@@ -48,6 +48,7 @@ def upsert_games(db: Db, games: list[Game]) -> None
 def list_games(db: Db, username: str,
                filters: GameFilters) -> list[GameSummary]
 def get_game(db: Db, game_id: str) -> GameDetail | None
+def list_players(db: Db) -> list[PlayerSummary]  # saved-players picker
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int,
                            limit: int | None = None) -> list[Game]

@@ -1,38 +1,32 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api.ts";
-import {
-  getStoredAgentId,
-  resolveAgentId,
-  setStoredAgentId,
-} from "../coachAgent.ts";
+import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
 import Layout from "../components/Layout.tsx";
 
 export default function Coach() {
   const { username = "" } = useParams();
   const [copied, setCopied] = useState(false);
-  const [agentChoice, setAgentChoice] = useState(getStoredAgentId);
 
-  // Quiet while loading or failed — coaching works without the
-  // roster: no agent_id sent means the server picks its default.
+  // Which agent to use comes from Settings (localStorage). Quiet while
+  // the roster loads or fails — no agent_id sent means server default.
   const agents = useQuery({
     queryKey: ["coachAgents"],
     queryFn: api.coachAgents,
   });
   const activeAgentId = agents.data
-    ? resolveAgentId(agentChoice, agents.data.agents, agents.data.default)
+    ? resolveAgentId(
+        getStoredAgentId(),
+        agents.data.agents,
+        agents.data.default,
+      )
     : null;
 
   const coach = useMutation({
     mutationFn: () => api.coach(username, activeAgentId ?? undefined),
   });
-
-  const chooseAgent = (id: string) => {
-    setStoredAgentId(id);
-    setAgentChoice(id);
-  };
 
   const agentLabel = (id: string) =>
     agents.data?.agents.find((agent) => agent.id === id)?.label ?? id;
@@ -49,25 +43,14 @@ export default function Coach() {
     <Layout username={username}>
       <h1>Coach {username}</h1>
       <p>
-        Builds a report from the analyzed games and asks the selected agent for
+        Builds a report from the analyzed games and asks your coach agent for
         prioritized training advice.
       </p>
 
-      {agents.isSuccess && (
-        <p className="agent-row">
-          <label>
-            Agent{" "}
-            <select
-              value={activeAgentId ?? agents.data.default}
-              onChange={(event) => chooseAgent(event.target.value)}
-            >
-              {agents.data.agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.label} ({agent.model})
-                </option>
-              ))}
-            </select>
-          </label>
+      {activeAgentId !== null && (
+        <p className="agent-note">
+          Using {agentLabel(activeAgentId)} — change in{" "}
+          <Link to="/settings">Settings</Link>.
         </p>
       )}
 

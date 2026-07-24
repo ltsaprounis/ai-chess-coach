@@ -24,6 +24,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List All Players
+         * @description Every stored player, most games first — the saved-players picker.
+         */
+        get: operations["list_all_players_api_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{username}/openings": {
         parameters: {
             query?: never;
@@ -473,6 +493,18 @@ export interface components {
             /** Critical Positions */
             critical_positions: components["schemas"]["CriticalPosition"][];
         };
+        /**
+         * PlayerSummary
+         * @description A stored player, for the saved-players picker.
+         */
+        PlayerSummary: {
+            /** Username */
+            username: string;
+            /** Games */
+            games: number;
+            /** Last Played */
+            last_played: number;
+        };
         /** SyncResult */
         SyncResult: {
             /** Games Synced */
@@ -527,6 +559,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_all_players_api_players_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerSummary"][];
                 };
             };
         };

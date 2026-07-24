@@ -10,10 +10,10 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 
 ## Pages
 
-1. **Home** — username input; triggers `POST /sync`, shows counts,
-   links to the games list. Coach-agent selector fed by
-   `GET /coach/agents`; the choice persists in localStorage and the
-   Coach page sends it as `agent_id`.
+1. **Home** (`/`) — a redirect to the last-viewed player's dashboard
+   (the player is remembered in localStorage; falls back to the
+   most-played stored player from `GET /api/players`). With no stored
+   players it shows onboarding: an add-a-player form (`POST /sync`).
 2. **Games** — a sortable, paged table over the whole archive
    (`api.allGames`, the paged fetch shared with the Dashboard cache):
    result / time-class / analyzed-state filters and an opponent search
@@ -66,22 +66,27 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    are filtered client-side, while report and openings are re-fetched
    with the `since` window and `time_class`. Charts are custom SVG
    components — no chart library.
-5. **Coach** — `POST /coach` with the selected `agent_id`; renders
-   the advice (markdown) and the generated prompt with a copy
-   button (the manual-use fallback); shows/lets you switch the
-   active agent.
+5. **Coach** — `POST /coach` with the agent chosen in Settings;
+   renders the advice (markdown) and the generated prompt with a copy
+   button (the manual-use fallback).
+6. **Settings** (`/settings`) — manages the two things a player
+   configures: the saved players (list from `GET /api/players` + an
+   add-a-player form) and the coach LLM (`AgentSelect`, persisted in
+   localStorage and read by Coach + the in-game Explain button).
 
 ## Stack and structure
 
 - Vite + React + TypeScript; TanStack Query for data fetching and
   cache invalidation (sync/analyze invalidate games + report).
-- React Router for the five pages; a small typed API client module
+- React Router for the six pages; a small typed API client module
   (`web/src/api.ts`) wraps the generated types and is the only place
   URLs appear.
 - A shared `Layout` (`web/src/components/Layout.tsx`) wraps every page
-  with the app header — brand, player-scoped section tabs (Games /
-  Dashboard / Coach), and a player switcher — so navigation lives in
-  one place instead of per-page links.
+  with the app header — brand, a saved-players switcher (from
+  `GET /api/players`), the always-available section tabs (Games /
+  Dashboard / Coach, pointing at the current player, remembered in
+  localStorage via `currentPlayer.ts`), and a Settings link — so
+  navigation lives in one place instead of per-page links.
 - Colors are CSS custom properties defined once in `index.css`
   (light + dark via `prefers-color-scheme`); the SVG charts read the
   same tokens through `components/chartTheme.ts`.
