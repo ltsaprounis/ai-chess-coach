@@ -1,6 +1,8 @@
 # AI Chess Coach — Documentation Index
 
-[PROPOSAL.md](PROPOSAL.md) is the high-level pitch. Each component below
+[PROPOSAL.md](PROPOSAL.md) is the high-level pitch;
+[NEW-FEATURE-PROPOSAL.md](NEW-FEATURE-PROPOSAL.md) holds the
+prioritized candidates for what to build next. Each component below
 has its own build plan. Components are decoupled: the API layer is the
 only module that composes them, and everything else communicates through
 the shared domain types and plain function interfaces.
