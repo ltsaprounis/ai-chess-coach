@@ -171,18 +171,36 @@ def count_games_needing_analysis(db: Db, username: str, depth: int) -> int:
     return int(row["n"])
 
 
-def list_analyzed_games(db: Db, username: str) -> list[AnalyzedGame]:
-    """Games with analyses (plus openings) — the coach report input."""
+def list_analyzed_games(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+) -> list[AnalyzedGame]:
+    """Games with analyses (plus openings) — the coach report input.
+
+    `since`/`until` (epoch seconds; `since` inclusive, `until`
+    exclusive) restrict to a time window; both default to full history.
+    """
+    clauses = ["g.username = ?"]
+    params: list[object] = [username]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
     rows = db.execute(
-        """
+        f"""
         SELECT g.*, a.depth AS a_depth, a.evals AS a_evals,
                a.overall_acpl AS a_overall,
                a.acpl_by_phase AS a_acpl, a.judgment_counts AS a_counts
         FROM games AS g JOIN analyses AS a ON a.game_id = g.id
-        WHERE g.username = ?
+        WHERE {" AND ".join(clauses)}
         ORDER BY g.end_time DESC
         """,
-        (username,),
+        params,
     ).fetchall()
     return [
         AnalyzedGame.model_validate(
@@ -205,13 +223,29 @@ def games_missing_opening(db: Db, username: str) -> list[Game]:
     return [Game.model_validate(_game_fields(row)) for row in rows]
 
 
-def opening_stats(db: Db, username: str) -> list[OpeningStats]:
+def opening_stats(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+) -> list[OpeningStats]:
     """Per-opening record over classified games, most-played first.
 
-    avg_cp_loss stays None until engine analysis exists (milestone 4).
+    `since`/`until` (epoch seconds; `since` inclusive, `until`
+    exclusive) restrict to a time window; both default to full history.
+    avg_cp_loss stays None until engine analysis exists.
     """
+    clauses = ["g.username = ?", "g.opening_eco IS NOT NULL"]
+    params: list[object] = [username]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
     rows = db.execute(
-        """
+        f"""
         SELECT g.opening_eco AS eco, g.opening_name AS name,
                COUNT(*) AS games,
                SUM(g.result = 'win') AS wins,
@@ -219,11 +253,11 @@ def opening_stats(db: Db, username: str) -> list[OpeningStats]:
                SUM(g.result = 'draw') AS draws,
                AVG(a.overall_acpl) AS avg_cp_loss
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
-        WHERE g.username = ? AND g.opening_eco IS NOT NULL
+        WHERE {" AND ".join(clauses)}
         GROUP BY g.opening_eco, g.opening_name
         ORDER BY games DESC, eco
         """,
-        (username,),
+        params,
     ).fetchall()
     return [
         OpeningStats(

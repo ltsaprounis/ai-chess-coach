@@ -113,9 +113,17 @@ async def sync_player(username: str, db: DbDep, book: BookDep) -> SyncResult:
 
 
 @router.get("/players/{username}/openings")
-def player_openings(username: str, db: DbDep) -> list[OpeningStats]:
-    """Per-opening record over classified games, most-played first."""
-    return opening_stats(db, username.lower())
+def player_openings(
+    username: str,
+    db: DbDep,
+    since: int | None = None,
+    until: int | None = None,
+) -> list[OpeningStats]:
+    """Per-opening record over classified games, most-played first.
+
+    `since`/`until` (epoch seconds) restrict to a time window.
+    """
+    return opening_stats(db, username.lower(), since=since, until=until)
 
 
 @router.get("/players/{username}/games")
@@ -444,10 +452,18 @@ class CoachResponse(BaseModel):
 
 
 @router.get("/players/{username}/report")
-def player_report(username: str, db: DbDep) -> PlayerReport:
-    """Aggregated stats over the player's analyzed games."""
+def player_report(
+    username: str,
+    db: DbDep,
+    since: int | None = None,
+    until: int | None = None,
+) -> PlayerReport:
+    """Aggregated stats over the player's analyzed games.
+
+    `since`/`until` (epoch seconds) restrict to a time window.
+    """
     user = username.lower()
-    return build_report(user, list_analyzed_games(db, user))
+    return build_report(user, list_analyzed_games(db, user, since=since, until=until))
 
 
 @router.post("/players/{username}/coach")

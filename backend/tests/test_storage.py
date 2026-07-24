@@ -16,6 +16,7 @@ from chess_coach.storage import (
     get_game,
     latest_game_time,
     list_analyses,
+    list_analyzed_games,
     list_games,
     open_db,
     opening_stats,
@@ -160,6 +161,45 @@ def test_opening_stats_aggregates_records_most_played_first(db: Db) -> None:
         ("D06", 1, 1, 0, 0),
     ]
     assert all(s.avg_cp_loss is None for s in stats)
+
+
+def test_opening_stats_time_window(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="old", result="win", end_time=100),
+            make_game(id="recent", result="loss", end_time=200),
+        ],
+    )
+    for game_id in ("old", "recent"):
+        set_opening(db, game_id, RUY_LOPEZ)
+
+    def record(**window: int) -> tuple[int, int, int]:
+        (stat,) = opening_stats(db, "testuser", **window)
+        return stat.games, stat.wins, stat.losses
+
+    assert record(since=150) == (1, 0, 1)  # only the recent loss
+    assert record(until=150) == (1, 1, 0)  # only the old win
+    assert record(since=200) == (1, 0, 1)  # since is inclusive
+    assert record(until=200) == (1, 1, 0)  # until is exclusive
+
+
+def test_list_analyzed_games_time_window(db: Db) -> None:
+    upsert_games(
+        db,
+        [make_game(id="old", end_time=100), make_game(id="recent", end_time=200)],
+    )
+    save_analysis(db, make_analysis(game_id="old"))
+    save_analysis(db, make_analysis(game_id="recent"))
+
+    def ids(**window: int) -> list[str]:
+        return [g.id for g in list_analyzed_games(db, "testuser", **window)]
+
+    assert ids() == ["recent", "old"]  # newest first
+    assert ids(since=150) == ["recent"]
+    assert ids(until=150) == ["old"]
+    assert ids(since=200) == ["recent"]  # since is inclusive
+    assert ids(until=200) == ["old"]  # until is exclusive
 
 
 def test_games_missing_opening(db: Db) -> None:

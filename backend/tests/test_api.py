@@ -441,6 +441,32 @@ def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> 
     assert report["overall_acpl"] == 2.5
 
 
+def test_report_and_openings_respect_time_window(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ruy_moves = ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    seed(
+        db_path,
+        [
+            make_game(id="old", end_time=100, result="win", san_moves=ruy_moves),
+            make_game(id="recent", end_time=200, result="loss", san_moves=ruy_moves),
+        ],
+        analyzed={"old", "recent"},
+    )
+    monkeypatch.setattr(routes, "sync_games", fake_sync_yielding())
+    post(client, "/api/players/testuser/sync")  # classify the openings
+
+    full: Any = get(client, "/api/players/testuser/report").json()
+    assert full["games_analyzed"] == 2
+
+    since = {"since": "150"}  # excludes the old game (end_time 100)
+    windowed: Any = get(client, "/api/players/testuser/report", params=since).json()
+    assert windowed["games_analyzed"] == 1
+
+    openings: Any = get(client, "/api/players/testuser/openings", params=since).json()
+    assert [(o["eco"], o["games"], o["losses"]) for o in openings] == [("C60", 1, 1)]
+
+
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
     body: Any = get(client, "/api/coach/agents").json()
     assert body["default"] == "claude"

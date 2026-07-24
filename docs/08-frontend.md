@@ -48,7 +48,10 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
    judgment charts from `GET /players/{u}/report`, and the
    worst-first repertoire table from `GET /players/{u}/openings`.
-   Charts are custom SVG components — no chart library.
+   A time-window control (all-time / 30d / 90d / 6mo / 1yr) scopes the
+   whole page: games-derived stats are filtered client-side, while
+   report and openings are re-fetched with the `since` epoch-second
+   window. Charts are custom SVG components — no chart library.
 5. **Coach** — `POST /coach` with the selected `agent_id`; renders
    the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback); shows/lets you switch the

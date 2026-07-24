@@ -32,6 +32,12 @@ export type GameFilters = {
   offset?: number;
 };
 
+/** Epoch-second window for report/openings (since inclusive, until exclusive). */
+export type TimeWindow = {
+  since?: number;
+  until?: number;
+};
+
 /** Page size for the dashboard's fetch-everything helper. */
 const ALL_GAMES_PAGE = 500;
 /** Hard cap so a huge archive cannot hammer the API from one page load. */
@@ -102,12 +108,26 @@ export const api = {
     }
     return all;
   },
-  openings: async (username: string): Promise<OpeningStats[]> =>
-    json(await fetch(`/api/players/${encodeURIComponent(username)}/openings`)),
+  openings: async (
+    username: string,
+    window: TimeWindow = {},
+  ): Promise<OpeningStats[]> =>
+    json(
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/openings${queryString(window)}`,
+      ),
+    ),
   game: async (gameId: string): Promise<GameDetail> =>
     json(await fetch(`/api/games/${encodeURIComponent(gameId)}`)),
-  report: async (username: string): Promise<PlayerReport> =>
-    json(await fetch(`/api/players/${encodeURIComponent(username)}/report`)),
+  report: async (
+    username: string,
+    window: TimeWindow = {},
+  ): Promise<PlayerReport> =>
+    json(
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/report${queryString(window)}`,
+      ),
+    ),
   coach: async (username: string, agentId?: string): Promise<CoachResponse> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/coach`, {

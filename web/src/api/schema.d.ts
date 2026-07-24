@@ -34,6 +34,8 @@ export interface paths {
         /**
          * Player Openings
          * @description Per-opening record over classified games, most-played first.
+         *
+         *     `since`/`until` (epoch seconds) restrict to a time window.
          */
         get: operations["player_openings_api_players__username__openings_get"];
         put?: never;
@@ -191,6 +193,8 @@ export interface paths {
         /**
          * Player Report
          * @description Aggregated stats over the player's analyzed games.
+         *
+         *     `since`/`until` (epoch seconds) restrict to a time window.
          */
         get: operations["player_report_api_players__username__report_get"];
         put?: never;
@@ -252,7 +256,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "claude-agent-sdk" | "anthropic" | "azure-foundry";
+            provider: "claude-agent-sdk" | "github-copilot" | "anthropic" | "azure-foundry";
             /** Model */
             model: string;
         };
@@ -525,7 +529,10 @@ export interface operations {
     };
     player_openings_api_players__username__openings_get: {
         parameters: {
-            query?: never;
+            query?: {
+                since?: number | null;
+                until?: number | null;
+            };
             header?: never;
             path: {
                 username: string;
@@ -779,7 +786,10 @@ export interface operations {
     };
     player_report_api_players__username__report_get: {
         parameters: {
-            query?: never;
+            query?: {
+                since?: number | null;
+                until?: number | null;
+            };
             header?: never;
             path: {
                 username: string;
