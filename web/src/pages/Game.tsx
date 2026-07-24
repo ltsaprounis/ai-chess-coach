@@ -14,6 +14,24 @@ import { useLiveEval } from "../useLiveEval.ts";
 
 const LIVE_EVAL_KEY = "liveEval";
 
+// Board overlays for an analyzed game: the last move's squares are
+// shaded by its judgment, and a green arrow marks the engine's best
+// move at positions where the move actually played was a slip.
+const BEST_MOVE_COLOR = "#1a9d54";
+const SLIP_JUDGMENTS: ReadonlySet<string> = new Set([
+  "inaccuracy",
+  "mistake",
+  "blunder",
+]);
+const LAST_MOVE_COLORS: Record<string, string> = {
+  best: "color-mix(in srgb, var(--j-best) 40%, transparent)",
+  good: "color-mix(in srgb, var(--j-best) 30%, transparent)",
+  inaccuracy: "color-mix(in srgb, var(--j-inaccuracy) 45%, transparent)",
+  mistake: "color-mix(in srgb, var(--j-mistake) 48%, transparent)",
+  blunder: "color-mix(in srgb, var(--j-blunder) 52%, transparent)",
+  none: "color-mix(in srgb, #eab308 40%, transparent)",
+};
+
 function readLiveToggle(): boolean {
   try {
     return localStorage.getItem(LIVE_EVAL_KEY) === "1";
@@ -57,14 +75,16 @@ export default function Game() {
     : undefined;
   const { state: explainState, explain } = useExplain();
 
-  const fens = useMemo(() => {
+  const { fens, moveSquares } = useMemo(() => {
     const chess = new Chess();
-    const list = [chess.fen()];
+    const fenList = [chess.fen()];
+    const squares: { from: string; to: string }[] = [];
     for (const san of game.data?.san_moves ?? []) {
-      chess.move(san);
-      list.push(chess.fen());
+      const move = chess.move(san);
+      squares.push({ from: move.from, to: move.to });
+      fenList.push(chess.fen());
     }
-    return list;
+    return { fens: fenList, moveSquares: squares };
   }, [game.data]);
 
   const [live, setLive] = useState(readLiveToggle);
@@ -82,6 +102,39 @@ export default function Game() {
       void queryClient.invalidateQueries({ queryKey: ["report"] });
     }
   }, [analyzing, game.data, queryClient]);
+
+  // Shade the move that produced the shown position by its judgment.
+  const squareStyles = useMemo(() => {
+    const square = ply >= 1 ? moveSquares[ply - 1] : undefined;
+    if (square === undefined) {
+      return {};
+    }
+    const judgment = game.data?.analysis?.evals?.[ply - 1]?.judgment;
+    const color = LAST_MOVE_COLORS[judgment ?? "none"];
+    return {
+      [square.from]: { backgroundColor: color },
+      [square.to]: { backgroundColor: color },
+    };
+  }, [ply, moveSquares, game.data]);
+
+  // Arrow the engine's best move when the move played from here slipped.
+  const arrows = useMemo(() => {
+    const next = game.data?.analysis?.evals?.[ply];
+    if (next === undefined || !SLIP_JUDGMENTS.has(next.judgment)) {
+      return [];
+    }
+    const uci = next.best_move;
+    if (uci.length < 4) {
+      return [];
+    }
+    return [
+      {
+        startSquare: uci.slice(0, 2),
+        endSquare: uci.slice(2, 4),
+        color: BEST_MOVE_COLOR,
+      },
+    ];
+  }, [ply, game.data]);
 
   if (game.isPending) {
     return <Layout>Loading…</Layout>;
@@ -147,6 +200,8 @@ export default function Game() {
               boardOrientation: data.color,
               allowDragging: false,
               animationDurationInMs: 150,
+              squareStyles,
+              arrows,
             }}
           />
           <div className="board-controls">
@@ -166,6 +221,13 @@ export default function Game() {
               ply {ply}/{fens.length - 1}
             </span>
           </div>
+          {evals && (
+            <p className="board-note">
+              Last move shaded by quality; a{" "}
+              <span className="board-note-arrow">green arrow</span> shows the
+              engine's best move where the next move slipped.
+            </p>
+          )}
           {!evals && (
             <button
               type="button"

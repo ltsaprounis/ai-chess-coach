@@ -307,6 +307,17 @@ td {
   align-items: center;
 }
 
+.board-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.board-note-arrow {
+  color: #1a9d54;
+  font-weight: 600;
+}
+
 /* Right column of .game-layout: takes the remaining row width (same
    basis the moves panel used when it was the row's second item),
    stacking Coach above Moves. */

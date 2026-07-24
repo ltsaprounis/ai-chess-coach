@@ -24,7 +24,11 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
-   move syncs board + graph. An unanalyzed game shows an "Analyze
+   move syncs board + graph. On an analyzed game the board overlays
+   the analysis: the last move's squares are shaded by its judgment,
+   and a green best-move arrow (from the stored `best_move`) appears at
+   positions where the move actually played was an inaccuracy, mistake,
+   or blunder. An unanalyzed game shows an "Analyze
    this game" button posting `/analyze` for that single game and
    polls `GET /games/{id}` until the results land; an analyzed game
    shows a summary strip (overall ACPL, blunder and mistake counts,
