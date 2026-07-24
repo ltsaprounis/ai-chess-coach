@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type GameFilters, type GameSummary } from "../api.ts";
+import Layout from "../components/Layout.tsx";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
 
 export default function Games() {
@@ -53,14 +54,7 @@ export default function Games() {
   });
 
   return (
-    <main className="page">
-      <p>
-        <Link to="/">← change player</Link>
-        {" · "}
-        <Link to={`/players/${username}/dashboard`}>dashboard</Link>
-        {" · "}
-        <Link to={`/players/${username}/coach`}>coach</Link>
-      </p>
+    <Layout username={username}>
       <h1>{username}'s games</h1>
 
       <div className="filters">
@@ -141,61 +135,63 @@ export default function Games() {
         <p>No games stored yet.</p>
       )}
       {games.isSuccess && games.data.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input
-                  type="checkbox"
-                  aria-label="select all listed games"
-                  checked={allVisibleSelected}
-                  onChange={(event) =>
-                    setSelected(
-                      event.target.checked ? new Set(visibleIds) : new Set(),
-                    )
-                  }
-                />
-              </th>
-              <th>Date</th>
-              <th>Color</th>
-              <th>Opponent</th>
-              <th>Result</th>
-              <th>Time</th>
-              <th>Opening</th>
-              <th>Accuracy</th>
-              <th>Analyzed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {games.data.map((game: GameSummary) => (
-              <tr key={game.id}>
-                <td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
                   <input
                     type="checkbox"
-                    aria-label={`select game against ${game.opponent}`}
-                    checked={selected.has(game.id)}
-                    onChange={() => toggle(game.id)}
+                    aria-label="select all listed games"
+                    checked={allVisibleSelected}
+                    onChange={(event) =>
+                      setSelected(
+                        event.target.checked ? new Set(visibleIds) : new Set(),
+                      )
+                    }
                   />
-                </td>
-                <td>
-                  <Link to={`/games/${game.id}`}>
-                    {new Date(game.end_time * 1000).toLocaleDateString()}
-                  </Link>
-                </td>
-                <td>{game.color}</td>
-                <td>
-                  {game.opponent} ({game.opponent_rating})
-                </td>
-                <td className={`result-${game.result}`}>{game.result}</td>
-                <td>{game.time_class}</td>
-                <td>{game.opening?.name ?? "—"}</td>
-                <td>{game.accuracy ?? "—"}</td>
-                <td>{game.analyzed ? "✓" : "—"}</td>
+                </th>
+                <th>Date</th>
+                <th>Color</th>
+                <th>Opponent</th>
+                <th>Result</th>
+                <th>Time</th>
+                <th>Opening</th>
+                <th>Accuracy</th>
+                <th>Analyzed</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {games.data.map((game: GameSummary) => (
+                <tr key={game.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`select game against ${game.opponent}`}
+                      checked={selected.has(game.id)}
+                      onChange={() => toggle(game.id)}
+                    />
+                  </td>
+                  <td>
+                    <Link to={`/games/${game.id}`}>
+                      {new Date(game.end_time * 1000).toLocaleDateString()}
+                    </Link>
+                  </td>
+                  <td>{game.color}</td>
+                  <td>
+                    {game.opponent} ({game.opponent_rating})
+                  </td>
+                  <td className={`result-${game.result}`}>{game.result}</td>
+                  <td>{game.time_class}</td>
+                  <td>{game.opening?.name ?? "—"}</td>
+                  <td>{game.accuracy ?? "—"}</td>
+                  <td>{game.analyzed ? "✓" : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </main>
+    </Layout>
   );
 }

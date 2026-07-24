@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, score, sortWorstFirst } from "../api.ts";
 import BarChart from "../components/BarChart.tsx";
 import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
+import Layout from "../components/Layout.tsx";
 import MonthlyActivityChart from "../components/MonthlyActivityChart.tsx";
 import RatingChart from "../components/RatingChart.tsx";
 import {
@@ -101,14 +102,7 @@ export default function Dashboard() {
   const hasGames = stats.overall.games > 0;
 
   return (
-    <main className="page">
-      <p>
-        <Link to="/">← change player</Link>
-        {" · "}
-        <Link to={`/players/${username}/games`}>games</Link>
-        {" · "}
-        <Link to={`/players/${username}/coach`}>coach</Link>
-      </p>
+    <Layout username={username}>
       <h1>{username}'s dashboard</h1>
 
       {games.isPending && <p>Loading games…</p>}
@@ -228,34 +222,36 @@ export default function Dashboard() {
           <p>No classified games yet — sync this player first.</p>
         )}
         {openings.isSuccess && openings.data.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>ECO</th>
-                <th>Opening</th>
-                <th>Games</th>
-                <th>W-L-D</th>
-                <th>Score</th>
-                <th>Avg CP loss</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortWorstFirst(openings.data).map((opening) => (
-                <tr key={`${opening.eco}-${opening.name}`}>
-                  <td>{opening.eco}</td>
-                  <td>{opening.name}</td>
-                  <td>{opening.games}</td>
-                  <td>
-                    {opening.wins}-{opening.losses}-{opening.draws}
-                  </td>
-                  <td>{Math.round(score(opening) * 100)}%</td>
-                  <td>{opening.avg_cp_loss ?? "—"}</td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ECO</th>
+                  <th>Opening</th>
+                  <th>Games</th>
+                  <th>W-L-D</th>
+                  <th>Score</th>
+                  <th>Avg CP loss</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sortWorstFirst(openings.data).map((opening) => (
+                  <tr key={`${opening.eco}-${opening.name}`}>
+                    <td>{opening.eco}</td>
+                    <td>{opening.name}</td>
+                    <td>{opening.games}</td>
+                    <td>
+                      {opening.wins}-{opening.losses}-{opening.draws}
+                    </td>
+                    <td>{Math.round(score(opening) * 100)}%</td>
+                    <td>{opening.avg_cp_loss ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
-    </main>
+    </Layout>
   );
 }

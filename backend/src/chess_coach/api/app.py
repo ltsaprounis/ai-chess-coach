@@ -76,8 +76,12 @@ async def _spa(path: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Not Found")
     candidate = (_WEB_DIST / path).resolve()
     if path and candidate.is_relative_to(_WEB_DIST) and candidate.is_file():
+        # Built assets are content-hashed, so let the browser cache them.
         return FileResponse(candidate)
-    return FileResponse(_WEB_DIST / "index.html")
+    # index.html is the one unhashed entry point: must-revalidate so a
+    # fresh build (new asset hashes) is picked up on a normal reload
+    # instead of a stale cached shell.
+    return FileResponse(_WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 async def _unknown_user(_: Request, exc: Exception) -> JSONResponse:

@@ -22,6 +22,15 @@ dev-api:
 		uv run uvicorn --factory chess_coach.api:create_app \
 			--reload --port $$PORT
 
+# One command to test the whole app: build the frontend into web/dist,
+# then run the API — which serves that build (UI + /api) on a single
+# port (no Vite proxy). Re-run to pick up frontend changes. For a live
+# HMR loop instead, run `pnpm --dir web dev` alongside `make dev-api`.
+.PHONY: serve
+serve:
+	cd web && pnpm build
+	$(MAKE) dev-api
+
 .PHONY: gen-api
 gen-api:
 	cd backend && uv run python -c "import json; \

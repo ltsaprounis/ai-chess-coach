@@ -61,6 +61,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 - React Router for the five pages; a small typed API client module
   (`web/src/api.ts`) wraps the generated types and is the only place
   URLs appear.
+- A shared `Layout` (`web/src/components/Layout.tsx`) wraps every page
+  with the app header — brand, player-scoped section tabs (Games /
+  Dashboard / Coach), and a player switcher — so navigation lives in
+  one place instead of per-page links.
+- Colors are CSS custom properties defined once in `index.css`
+  (light + dark via `prefers-color-scheme`); the SVG charts read the
+  same tokens through `components/chartTheme.ts`.
 - `chess.js` stays a frontend-only dependency for board replay; the
   backend uses python-chess independently.
 - Dev: Vite proxies `/api` to the FastAPI port; prod: FastAPI serves

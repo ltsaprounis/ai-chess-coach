@@ -2,11 +2,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import { useEffect, useMemo, useState } from "react";
 import { Chessboard } from "react-chessboard";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api, type MoveEval } from "../api.ts";
 import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
 import EvalGraph from "../components/EvalGraph.tsx";
 import ExplainPanel from "../components/ExplainPanel.tsx";
+import Layout from "../components/Layout.tsx";
 import LiveEvalPanel from "../components/LiveEvalPanel.tsx";
 import { useExplain } from "../useExplain.ts";
 import { useLiveEval } from "../useLiveEval.ts";
@@ -81,13 +82,13 @@ export default function Game() {
   }, [analyzing, game.data, queryClient]);
 
   if (game.isPending) {
-    return <main className="page">Loading…</main>;
+    return <Layout>Loading…</Layout>;
   }
   if (game.isError) {
     return (
-      <main className="page">
+      <Layout>
         <p role="alert">{game.error.message}</p>
-      </main>
+      </Layout>
     );
   }
 
@@ -99,12 +100,7 @@ export default function Game() {
     explainState.status === "streaming" && explainState.ply === ply;
 
   return (
-    <main className="page">
-      <p>
-        <Link to={`/players/${data.username}/games`}>← games</Link>
-        {" · "}
-        <Link to={`/players/${data.username}/dashboard`}>dashboard</Link>
-      </p>
+    <Layout username={data.username}>
       <h1>
         {data.username} ({data.color}) vs {data.opponent} — {data.result}
       </h1>
@@ -272,6 +268,6 @@ export default function Game() {
           </section>
         </div>
       </div>
-    </main>
+    </Layout>
   );
 }

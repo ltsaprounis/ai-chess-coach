@@ -1,13 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import {
   getStoredAgentId,
   resolveAgentId,
   setStoredAgentId,
 } from "../coachAgent.ts";
+import Layout from "../components/Layout.tsx";
 
 export default function Coach() {
   const { username = "" } = useParams();
@@ -45,12 +46,7 @@ export default function Coach() {
   };
 
   return (
-    <main className="page">
-      <p>
-        <Link to={`/players/${username}/games`}>← games</Link>
-        {" · "}
-        <Link to={`/players/${username}/dashboard`}>dashboard</Link>
-      </p>
+    <Layout username={username}>
       <h1>Coach {username}</h1>
       <p>
         Builds a report from the analyzed games and asks the selected agent for
@@ -107,6 +103,6 @@ export default function Coach() {
           </details>
         </>
       )}
-    </main>
+    </Layout>
   );
 }

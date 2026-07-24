@@ -7,6 +7,7 @@ import {
   resolveAgentId,
   setStoredAgentId,
 } from "../coachAgent.ts";
+import Layout from "../components/Layout.tsx";
 
 export default function Home() {
   const [username, setUsername] = useState("");
@@ -28,9 +29,12 @@ export default function Home() {
   };
 
   return (
-    <main className="page">
-      <h1>AI Chess Coach</h1>
-      <p>Enter a chess.com username to fetch their games.</p>
+    <Layout>
+      <h1>Analyze your chess.com games</h1>
+      <p>
+        Enter a chess.com username to pull their games, run engine analysis, and
+        get coaching advice.
+      </p>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -72,6 +76,6 @@ export default function Home() {
         </p>
       )}
       {sync.isError && <p role="alert">{sync.error.message}</p>}
-    </main>
+    </Layout>
   );
 }

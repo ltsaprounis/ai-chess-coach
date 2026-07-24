@@ -39,18 +39,28 @@ cd ai-chess-coach
 
 make engine                              # build Stockfish from the submodule
 cd backend && uv sync && cd ..           # backend deps
-cd web && pnpm install && pnpm build && cd ..   # frontend deps + build
+cd web && pnpm install && cd ..          # frontend deps
 ```
 
-Then run the app and open **http://localhost:8000**:
+Then run the app — two ways:
+
+**Whole app on one port** (simplest — good for trying it out):
 
 ```bash
-make dev-api    # serves the API and the built frontend on one port
+make serve   # builds the frontend, then serves UI + API on one port
 ```
 
-Working on the frontend? Run `cd web && pnpm dev` alongside `make
-dev-api` and use **http://localhost:5173** for hot reload; otherwise
-re-run `pnpm build` to pick up UI changes.
+Open **http://localhost:8000**; re-run to pick up frontend changes.
+
+**Frontend dev with hot reload** — run the API and the Vite dev
+server side by side (two terminals):
+
+```bash
+make dev-api          # API on :8000; leave it running
+pnpm --dir web dev    # UI on :5173 (HMR), proxies /api to :8000
+```
+
+Open **http://localhost:5173**.
 
 ## Coaching (LLM providers)
 

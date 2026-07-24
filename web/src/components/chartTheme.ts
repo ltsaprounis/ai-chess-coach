@@ -1,26 +1,28 @@
 // Shared palette and scale helpers for the custom SVG charts
-// (docs/08-frontend.md) — every chart color is defined here once.
+// (docs/08-frontend.md). Colors resolve to the app's CSS theme tokens
+// (index.css) as `var(--token)` strings — valid SVG fill/stroke values
+// — so the charts follow light/dark theming with no per-chart logic.
 
-/** Result series — the app's existing result colors (index.css). */
-export const WIN_COLOR = "#15803d";
-export const LOSS_COLOR = "#b91c1c";
-export const DRAW_COLOR = "#898781";
+/** Result series — the app's result tokens (index.css). */
+export const WIN_COLOR = "var(--win)";
+export const LOSS_COLOR = "var(--loss)";
+export const DRAW_COLOR = "var(--draw)";
 
 /** Primary single-series color: rating line, ACPL bars. */
-export const PRIMARY_COLOR = "#2a78d6";
+export const PRIMARY_COLOR = "var(--accent)";
 
 /** Axis text and labels. */
-export const MUTED_COLOR = "#898781";
+export const MUTED_COLOR = "var(--muted)";
 /** Hairline gridlines. */
-export const GRID_COLOR = "#e1e0d9";
+export const GRID_COLOR = "var(--chart-grid)";
 
-/** Judgment scale — reuses the app's move-badge tints (index.css). */
+/** Judgment scale — reuses the app's move-badge tokens (index.css). */
 export const JUDGMENT_COLORS = {
-  best: WIN_COLOR,
-  good: DRAW_COLOR,
-  inaccuracy: "#eab308",
-  mistake: "#f97316",
-  blunder: "#dc2626",
+  best: "var(--j-best)",
+  good: "var(--j-good)",
+  inaccuracy: "var(--j-inaccuracy)",
+  mistake: "var(--j-mistake)",
+  blunder: "var(--j-blunder)",
 } as const;
 
 export type Scale = { lo: number; hi: number; ticks: number[] };
