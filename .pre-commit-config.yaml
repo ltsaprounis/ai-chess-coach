@@ -13,7 +13,12 @@ repos:
         types: [python]
       - id: pyright
         name: pyright
-        entry: uv run --project backend pyright
+        # Must run with backend/ as the working directory (like `make
+        # check`): --project only selects the venv, so from the repo
+        # root pyright never finds backend/pyproject.toml's scope and
+        # scans the whole tree — including the Stockfish submodule's
+        # test scripts, which fail strict mode.
+        entry: bash -c 'cd backend && uv run pyright'
         language: system
         types: [python]
         pass_filenames: false
