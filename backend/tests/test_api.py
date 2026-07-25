@@ -233,6 +233,32 @@ def test_games_list_with_filters(client: TestClient, db_path: Path) -> None:
     assert wins[0]["analyzed"] is True
 
 
+def test_games_list_row_is_the_slim_game_summary_shape(
+    client: TestClient, db_path: Path
+) -> None:
+    """Pins the list row to `GameSummary`: fails if `pgn`/`san_moves`
+    reappear on a list row, or if `first_plies` disappears."""
+    seed(db_path, [make_game(id="g-1")])
+
+    listed: Any = get(client, "/api/players/testuser/games").json()
+    assert set(listed[0].keys()) == {
+        "id",
+        "color",
+        "time_class",
+        "result",
+        "end_time",
+        "opponent",
+        "player_rating",
+        "opponent_rating",
+        "accuracy",
+        "termination",
+        "first_plies",
+        "opening",
+        "analyzed",
+    }
+    assert isinstance(listed[0]["first_plies"], list)
+
+
 def test_players_endpoint_lists_saved_players(
     client: TestClient, db_path: Path
 ) -> None:
@@ -291,6 +317,48 @@ def test_sync_stores_games_and_reports_count(
 
     listed: Any = get(client, "/api/players/testuser/games").json()
     assert [g["id"] for g in listed] == ["g-new-2", "g-new-1"]
+
+
+def test_sync_full_passes_since_none_even_with_stored_games(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1", end_time=50)])
+    seen_since: list[int | None] = []
+
+    def fake_sync(username: str, since: int | None = None) -> AsyncIterator[list[Game]]:
+        seen_since.append(since)
+
+        async def batches() -> AsyncIterator[list[Game]]:
+            yield []
+
+        return batches()
+
+    monkeypatch.setattr(routes, "sync_games", fake_sync)
+
+    response = post(client, "/api/players/testuser/sync?full=true")
+    assert response.status_code == 200
+    assert seen_since == [None]
+
+
+def test_sync_without_full_passes_the_latest_stored_time(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1", end_time=50)])
+    seen_since: list[int | None] = []
+
+    def fake_sync(username: str, since: int | None = None) -> AsyncIterator[list[Game]]:
+        seen_since.append(since)
+
+        async def batches() -> AsyncIterator[list[Game]]:
+            yield []
+
+        return batches()
+
+    monkeypatch.setattr(routes, "sync_games", fake_sync)
+
+    response = post(client, "/api/players/testuser/sync")
+    assert response.status_code == 200
+    assert seen_since == [50]
 
 
 SyncFn = Callable[[str, int | None], AsyncIterator[list[Game]]]
@@ -519,7 +587,7 @@ def test_report_and_openings_respect_time_window(
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
     body: Any = get(client, "/api/coach/agents").json()
     assert body["default"] == "claude"
-    # Exact match also proves max_tokens is not exposed.
+    # Exact match pins the exposed fields to exactly these four.
     assert body["agents"] == [
         {
             "id": "claude",

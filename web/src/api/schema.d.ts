@@ -16,6 +16,12 @@ export interface paths {
         /**
          * Sync Player
          * @description Fetch new games from chess.com, store and classify them.
+         *
+         *     `full=True` re-fetches the entire archive instead of just the games
+         *     since the last sync — the upsert makes this idempotent — to backfill
+         *     columns added after games were stored (currently `termination`); a
+         *     normal sync never re-fetches a stored game, so only a full re-sync
+         *     can pick up such a column for existing rows.
          */
         post: operations["sync_player_api_players__username__sync_post"];
         delete?: never;
@@ -464,23 +470,28 @@ export interface components {
             opening?: components["schemas"]["Opening"] | null;
             analysis?: components["schemas"]["GameAnalysis"] | null;
         };
-        /** GameSummary */
+        /**
+         * GameSummary
+         * @description One row of the games list — everything the list views render,
+         *     nothing they don't.
+         *
+         *     Deliberately not a `Game`: the full record ships `pgn` (~2.3 KB a
+         *     row) and every SAN move, which no list view renders, and at
+         *     thousands of rows that weight is what forced the frontend to cap
+         *     its fetch-everything helper — truncating the Dashboard's stats.
+         *     `first_plies` is the first 6 SAN plies: the exact prefix the
+         *     repertoire drill-through needs to derive the player's three-move
+         *     system client-side. It is not the game record; that stays on
+         *     `GameDetail`.
+         */
         GameSummary: {
             /** Id */
             id: string;
-            /** Username */
-            username: string;
             /**
              * Color
              * @enum {string}
              */
             color: "white" | "black";
-            /** Pgn */
-            pgn: string;
-            /** San Moves */
-            san_moves: string[];
-            /** Time Control */
-            time_control: string;
             /**
              * Time Class
              * @enum {string}
@@ -503,6 +514,8 @@ export interface components {
             accuracy?: number | null;
             /** Termination */
             termination?: string | null;
+            /** First Plies */
+            first_plies: string[];
             opening?: components["schemas"]["Opening"] | null;
             /**
              * Analyzed
@@ -794,7 +807,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     sync_player_api_players__username__sync_post: {
         parameters: {
-            query?: never;
+            query?: {
+                full?: boolean;
+            };
             header?: never;
             path: {
                 username: string;

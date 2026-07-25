@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  api,
   explainUrl,
   type OpeningStats,
   queryString,
@@ -63,6 +64,114 @@ describe("explainUrl", () => {
     expect(explainUrl("demo-059", 28, "coach-a", true)).toBe(
       "/api/games/demo-059/explain?ply=28&agent_id=coach-a&refresh=true",
     );
+  });
+});
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** A page of `size` dummy rows — `allGames` only cares about length. */
+function page(size: number): unknown[] {
+  return Array.from({ length: size }, (_, i) => ({ id: `g${i}` }));
+}
+
+describe("api.sync", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("omits the full param by default, keeping the plain incremental URL", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ games_synced: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sync("alice");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/sync",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("omits the full param when explicitly false", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ games_synced: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sync("alice", { full: false });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/sync",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("adds full=true only when requesting a full re-sync", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ games_synced: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sync("alice", { full: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/sync?full=true",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
+describe("api.allGames", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stops after a single short page without paging further", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(page(3)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const games = await api.allGames("alice");
+
+    expect(games).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps paging while pages come back full, stopping on the first short one", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(page(1000)))
+      .mockResolvedValueOnce(jsonResponse(page(1000)))
+      .mockResolvedValueOnce(jsonResponse(page(500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const games = await api.allGames("alice");
+
+    expect(games).toHaveLength(2500);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops and warns at the pathological-loop guard if pages never come back short", async () => {
+    // A fresh Response per call — a Response body can only be read once,
+    // and this mock is invoked far more than the other cases here.
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => jsonResponse(page(1000)));
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const games = await api.allGames("alice");
+
+    // 50,000 is the guard, not a cap anyone should meet — this only
+    // fires when every page keeps coming back full forever.
+    expect(games).toHaveLength(50_000);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });
 

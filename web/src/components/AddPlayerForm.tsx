@@ -12,7 +12,7 @@ export default function AddPlayerForm() {
   const queryClient = useQueryClient();
 
   const sync = useMutation({
-    mutationFn: api.sync,
+    mutationFn: (user: string) => api.sync(user),
     onSuccess: (_result, user) => {
       setStoredPlayer(user);
       void queryClient.invalidateQueries({ queryKey: ["players"] });

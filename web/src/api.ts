@@ -61,9 +61,14 @@ export type CoachOptions = StatsQuery & {
 };
 
 /** Page size for the dashboard's fetch-everything helper. */
-const ALL_GAMES_PAGE = 500;
-/** Hard cap so a huge archive cannot hammer the API from one page load. */
-const ALL_GAMES_CAP = 2000;
+const ALL_GAMES_PAGE = 1000;
+/**
+ * Pathological-loop guard, not a cap: `allGames` stops naturally on a
+ * short page, so no real archive should ever reach this many games in
+ * one fetch. If it does, something's wrong (an API bug returning full
+ * pages forever) — warn instead of looping forever.
+ */
+const ALL_GAMES_GUARD = 50_000;
 
 export function queryString(
   params: Record<string, string | number | boolean | undefined>,
@@ -100,11 +105,24 @@ export function sortWorstFirst(openings: OpeningStats[]): OpeningStats[] {
 }
 
 export const api = {
-  sync: async (username: string): Promise<SyncResult> =>
+  /**
+   * `full: true` re-fetches the entire archive instead of just the
+   * games since the last sync, to backfill columns (currently
+   * `termination`) added after the games were stored — a normal sync
+   * never re-fetches a stored game. Omitting `full` keeps the plain
+   * incremental URL unchanged.
+   */
+  sync: async (
+    username: string,
+    options: { full?: boolean } = {},
+  ): Promise<SyncResult> =>
     json(
-      await fetch(`/api/players/${encodeURIComponent(username)}/sync`, {
-        method: "POST",
-      }),
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/sync${queryString({
+          full: options.full || undefined,
+        })}`,
+        { method: "POST" },
+      ),
     ),
   games: async (
     username: string,
@@ -115,19 +133,22 @@ export const api = {
         `/api/players/${encodeURIComponent(username)}/games${queryString(filters)}`,
       ),
     ),
-  /** Every stored game, paged; stops on a short page or at the cap. */
+  /** Every stored game, paged; stops on a short page. */
   allGames: async (username: string): Promise<GameSummary[]> => {
     const all: GameSummary[] = [];
-    for (let offset = 0; offset < ALL_GAMES_CAP; offset += ALL_GAMES_PAGE) {
+    for (let offset = 0; offset < ALL_GAMES_GUARD; offset += ALL_GAMES_PAGE) {
       const page = await api.games(username, {
         limit: ALL_GAMES_PAGE,
         offset,
       });
       all.push(...page);
       if (page.length < ALL_GAMES_PAGE) {
-        break;
+        return all;
       }
     }
+    console.warn(
+      `allGames: stopped after ${all.length} games — the pathological-loop guard was hit (${ALL_GAMES_GUARD}). This should never happen for a real archive; the API may be returning full pages endlessly.`,
+    );
     return all;
   },
   openings: async (

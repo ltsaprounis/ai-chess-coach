@@ -64,7 +64,21 @@ def test_upsert_and_list_round_trip(db: Db) -> None:
     assert [g.id for g in games] == ["g-new", "g-old"]  # newest first
     assert games[0].analyzed is False
     assert games[0].opening is None
-    assert games[0].san_moves == ["e4", "e5"]
+    assert games[0].first_plies == ["e4", "e5"]  # shorter than 6, kept whole
+
+
+def test_list_games_first_plies_is_capped_at_six_and_matches_the_prefix(
+    db: Db,
+) -> None:
+    """`first_plies` is the exact prefix `playerSystem()` needs client-
+    side — at most 6 SAN plies, and never anything but the game's own
+    opening moves in order (docs/03-storage.md, "GameSummary")."""
+    long_moves = ["d4", "Nf6", "c4", "e6", "Nc3", "Bb4", "e3", "O-O", "Bd3", "d5"]
+    upsert_games(db, [make_game(san_moves=long_moves)])
+
+    (summary,) = list_games(db, "testuser", GameFilters())
+    assert summary.first_plies == long_moves[:6]
+    assert len(summary.first_plies) == 6
 
 
 def test_upsert_is_idempotent_and_refreshes_accuracy(db: Db) -> None:

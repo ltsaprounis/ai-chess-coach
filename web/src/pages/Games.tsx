@@ -100,10 +100,13 @@ export default function Games() {
     queryFn: () => api.allGames(username),
   });
 
-  // Pull new games for this player from chess.com (incremental from the
-  // latest stored game), then refresh everything derived from them.
+  // Pull new games for this player from chess.com — incremental from the
+  // latest stored game by default, or `full: true` to re-fetch the whole
+  // archive and backfill columns (e.g. termination) added after older
+  // games were stored — then refresh everything derived from them.
   const sync = useMutation({
-    mutationFn: () => api.sync(username),
+    mutationFn: (options: { full?: boolean } = {}) =>
+      api.sync(username, options),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["allGames"] });
       void queryClient.invalidateQueries({ queryKey: ["openings"] });
@@ -111,6 +114,8 @@ export default function Games() {
       void queryClient.invalidateQueries({ queryKey: ["players"] });
     },
   });
+  const fullSyncPending = sync.isPending && sync.variables?.full === true;
+  const normalSyncPending = sync.isPending && !fullSyncPending;
 
   const filtered = useMemo(() => {
     const needle = opponent.trim().toLowerCase();
@@ -132,7 +137,7 @@ export default function Games() {
         const matches =
           familySystem !== ""
             ? game.color === familyColor &&
-              playerSystem(game.san_moves, game.color) === familySystem
+              playerSystem(game.first_plies, game.color) === familySystem
             : openingFamily(game.opening?.name ?? "") === family;
         if (!matches) {
           return false;
@@ -235,18 +240,31 @@ export default function Games() {
       <div className="games-toolbar">
         <button
           type="button"
-          onClick={() => sync.mutate()}
+          onClick={() => sync.mutate({})}
           disabled={sync.isPending}
         >
-          {sync.isPending ? "Syncing…" : "⟳ Sync new games"}
+          {normalSyncPending ? "Syncing…" : "⟳ Sync new games"}
+        </button>
+        <button
+          type="button"
+          className="btn-low-emphasis"
+          title="Re-fetches the whole archive from chess.com to backfill how games ended for games stored before that was recorded. Slow on a large archive."
+          onClick={() => sync.mutate({ full: true })}
+          disabled={sync.isPending}
+        >
+          {fullSyncPending ? "Full re-syncing…" : "Full re-sync"}
         </button>
         {sync.isSuccess && (
           <span className="agent-note">
             {sync.data.games_synced === 0
               ? "Already up to date"
-              : `Synced ${sync.data.games_synced} new game${
-                  sync.data.games_synced === 1 ? "" : "s"
-                }`}
+              : sync.variables?.full
+                ? `Full re-sync checked ${sync.data.games_synced} game${
+                    sync.data.games_synced === 1 ? "" : "s"
+                  }`
+                : `Synced ${sync.data.games_synced} new game${
+                    sync.data.games_synced === 1 ? "" : "s"
+                  }`}
           </span>
         )}
         {sync.isError && <span role="alert">{sync.error.message}</span>}

@@ -19,10 +19,14 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    result / time-class / analyzed-state filters and an opponent search
    applied client-side, click-to-sort column headers, and prev/next
    paging. A "Sync new games" button pulls fresh games for the player
-   (`POST /sync`, incremental) and refreshes the derived caches. A
-   separate analyze bar (kept out of the filter row) posts to `/analyze`
-   — "Analyze latest N" or "Analyze selected" via row checkboxes — with
-   the progress bar fed by the SSE endpoint.
+   (`POST /sync`, incremental) and refreshes the derived caches. Beside
+   it, a low-emphasis "Full re-sync" action (`POST /sync?full=true`)
+   re-fetches the whole archive to backfill columns — currently
+   `termination` — added after older games were stored; both buttons
+   disable while either sync is pending, and it can be slow on a large
+   archive. A separate analyze bar (kept out of the filter row) posts
+   to `/analyze` — "Analyze latest N" or "Analyze selected" via row
+   checkboxes — with the progress bar fed by the SSE endpoint.
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a

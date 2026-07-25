@@ -102,10 +102,19 @@ class SyncResult(BaseModel):
 
 
 @router.post("/players/{username}/sync")
-async def sync_player(username: str, db: DbDep, book: BookDep) -> SyncResult:
-    """Fetch new games from chess.com, store and classify them."""
+async def sync_player(
+    username: str, db: DbDep, book: BookDep, full: bool = False
+) -> SyncResult:
+    """Fetch new games from chess.com, store and classify them.
+
+    `full=True` re-fetches the entire archive instead of just the games
+    since the last sync — the upsert makes this idempotent — to backfill
+    columns added after games were stored (currently `termination`); a
+    normal sync never re-fetches a stored game, so only a full re-sync
+    can pick up such a column for existing rows.
+    """
     user = username.lower()
-    since = latest_game_time(db, user)
+    since = None if full else latest_game_time(db, user)
     synced = 0
     async for batch in sync_games(user, since):
         upsert_games(db, batch)

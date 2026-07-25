@@ -27,9 +27,9 @@ injected into routes via FastAPI dependencies.
 
 | Method | Path                                   | Behavior            |
 |--------|----------------------------------------|---------------------|
-| POST   | `/api/players/{u}/sync`                | Run ingestion from `latest_game_time`; upsert + classify openings; return counts |
+| POST   | `/api/players/{u}/sync`                | Run ingestion from `latest_game_time`; upsert + classify openings; return counts. Query `full` (default false) re-fetches the entire archive instead — the upsert makes it idempotent — to backfill columns added after games were stored (currently `termination`; a normal sync never re-fetches a stored game) |
 | GET    | `/api/players`                         | Stored players (`{username, games, last_played}`), most games first — the saved-players picker |
-| GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging) |
+| GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging). Rows are slim `GameSummary` (no pgn/full moves — see docs/03-storage.md), so the frontend can page through the whole archive |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining |

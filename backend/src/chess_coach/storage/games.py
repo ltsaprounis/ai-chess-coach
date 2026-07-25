@@ -79,6 +79,21 @@ def upsert_games(db: Db, games: list[Game]) -> None:
         )
 
 
+_SUMMARY_COLUMNS = (
+    "g.id, g.color, g.time_class, g.result, g.end_time, g.opponent, "
+    "g.player_rating, g.opponent_rating, g.accuracy, g.termination, "
+    "g.san_moves, g.opening_eco, g.opening_name, g.opening_ply"
+)
+
+# The exact prefix `playerSystem()` needs for the repertoire
+# drill-through (docs/03-storage.md, "GameSummary"). Both this and
+# `_SYSTEM_PLIES` below encode the same rule — the player's own first
+# three moves define a system (docs/06-coach.md) — and the frontend
+# compares `playerSystem(first_plies)` output against `system` strings
+# built here, so the three must move in lockstep.
+_FIRST_PLIES = 6
+
+
 def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]:
     clauses = ["g.username = ?"]
     params: list[object] = [username]
@@ -98,7 +113,7 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
 
     rows = db.execute(
         f"""
-        SELECT g.*, a.game_id IS NOT NULL AS analyzed
+        SELECT {_SUMMARY_COLUMNS}, a.game_id IS NOT NULL AS analyzed
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE {" AND ".join(clauses)}
         ORDER BY g.end_time DESC
@@ -109,7 +124,7 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
     return [
         GameSummary.model_validate(
             {
-                **_game_fields(row),
+                **_summary_fields(row),
                 "opening": _opening_from_row(row),
                 "analyzed": bool(row["analyzed"]),
             }
@@ -461,6 +476,23 @@ def set_opening(db: Db, game_id: str, opening: Opening) -> None:
             " WHERE id = ?",
             (opening.eco, opening.name, opening.ply, game_id),
         )
+
+
+def _summary_fields(row: sqlite3.Row) -> dict[str, object]:
+    san_moves: list[str] = json.loads(row["san_moves"])
+    return {
+        "id": row["id"],
+        "color": row["color"],
+        "time_class": row["time_class"],
+        "result": row["result"],
+        "end_time": row["end_time"],
+        "opponent": row["opponent"],
+        "player_rating": row["player_rating"],
+        "opponent_rating": row["opponent_rating"],
+        "accuracy": row["accuracy"],
+        "termination": row["termination"],
+        "first_plies": san_moves[:_FIRST_PLIES],
+    }
 
 
 def _game_fields(row: sqlite3.Row) -> dict[str, object]:

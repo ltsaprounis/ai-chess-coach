@@ -130,8 +130,17 @@ def save_report(db: Db, key: ReportKey, prompt: str, advice: str,
 Pydantic handles the JSON columns (`model_dump_json` /
 `model_validate_json`).
 
-`GameSummary` (Game + opening + analyzed flag) and `GameDetail`
-(Game + optional analysis + opening) are domain composites;
+`GameSummary` is the slim list row — the fields the list views
+render (id, color, time_class, result, end_time, opponent, ratings,
+accuracy, termination, opening, analyzed) plus `first_plies`, the
+first 6 SAN plies, which the repertoire drill-through needs to
+derive the player's system client-side. Deliberately **not** a
+`Game`: `pgn` is never selected for list rows and the full
+`san_moves` never crosses the boundary (it is read and sliced to
+`first_plies` inside storage), which is what lets the frontend fetch
+the whole archive uncapped
+(docs/fixes-2026-07/01-games-list-uncap.md). `GameDetail`
+(Game + optional analysis + opening) stays the full record;
 `GameFilters` (opening/result/time_class/analyzed/paging) is
 storage's own public parameter type.
 

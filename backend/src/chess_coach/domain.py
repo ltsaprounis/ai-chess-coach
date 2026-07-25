@@ -40,13 +40,11 @@ class Thresholds(BaseModel):
 
 class LlmConfig(BaseModel):
     # claude-agent-sdk rides the local Claude Code login: no API key.
+    # No token ceiling: neither shipped provider's SDK takes one (both
+    # ride a local CLI login). A ceiling returns as a provider-specific
+    # setting if an API-backed provider lands.
     provider: LlmProvider = "claude-agent-sdk"
     model: str = "claude-opus-4-8"
-    # Not yet consumed by any shipped provider: both ride a local CLI
-    # login rather than an API call that takes a token ceiling. Setting
-    # it in coach.config.yaml therefore does nothing today — wire it
-    # into the providers before treating it as a control.
-    max_tokens: int = 4096
 
 
 class CoachAgent(LlmConfig):
@@ -311,7 +309,31 @@ class PlayerReport(BaseModel):
     critical_positions: list[CriticalPosition]
 
 
-class GameSummary(Game):
+class GameSummary(BaseModel):
+    """One row of the games list — everything the list views render,
+    nothing they don't.
+
+    Deliberately not a `Game`: the full record ships `pgn` (~2.3 KB a
+    row) and every SAN move, which no list view renders, and at
+    thousands of rows that weight is what forced the frontend to cap
+    its fetch-everything helper — truncating the Dashboard's stats.
+    `first_plies` is the first 6 SAN plies: the exact prefix the
+    repertoire drill-through needs to derive the player's three-move
+    system client-side. It is not the game record; that stays on
+    `GameDetail`.
+    """
+
+    id: str
+    color: Color
+    time_class: TimeClass
+    result: Result
+    end_time: int
+    opponent: str
+    player_rating: int
+    opponent_rating: int
+    accuracy: float | None = None
+    termination: str | None = None
+    first_plies: list[str]
     opening: Opening | None = None
     analyzed: bool = False
 

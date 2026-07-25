@@ -242,6 +242,19 @@ button:disabled {
   border-color: var(--accent-hover);
 }
 
+/* A de-emphasized secondary action, e.g. Games' "Full re-sync". */
+.btn-low-emphasis {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.btn-low-emphasis:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
