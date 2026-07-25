@@ -508,11 +508,15 @@ def player_report(
     )
 
 
+# Docstring stays word-for-word the API's OpenAPI description (no HTTP
+# surface change here) — the engine-tool wiring is explained in comments
+# below instead of growing the docstring.
 @router.post("/players/{username}/coach")
 async def coach_player(
     username: str,
     db: DbDep,
     cfg: CfgDep,
+    pool: PoolDep,
     providers: ProvidersDep,
     body: CoachRequest | None = None,
 ) -> CoachResponse:
@@ -581,8 +585,23 @@ async def coach_player(
         return render_prompt(report), report
 
     prompt, report = await run_in_threadpool(_load_and_build)
+
+    # Same wrapper explain_move builds around the engine pool — this is
+    # where coach meets engine; they never import each other. When the
+    # pool is up, the provider runs agentically against `analyze_position`
+    # so it can verify concrete lines before asserting them. Unlike
+    # analyze/eval, a missing pool is not fatal here: `None` degrades the
+    # provider to its single-turn path and the report still generates.
+    analyst: PositionAnalystFn | None = None
+    if pool is not None:
+
+        async def _analyst(fen: str) -> list[EvalLine]:
+            return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
+
+        analyst = _analyst
+
     try:
-        advice = await provider.complete(prompt)
+        advice = await provider.complete(prompt, analyst)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

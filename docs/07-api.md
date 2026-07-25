@@ -36,7 +36,7 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
-| POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider, cached. Optional body `{agent_id, since, until, time_class, refresh}` — the same window and time-control filters `/report` takes, so the coach reasons over the period the student is looking at (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id, cached, generated_at, games_analyzed}` |
+| POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider (agentic with the engine tool when the pool is up), cached. Optional body `{agent_id, since, until, time_class, refresh}` — the same window and time-control filters `/report` takes, so the coach reasons over the period the student is looking at (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id, cached, generated_at, games_analyzed}` |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
 | GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent), `refresh` (optional, default false — skip the cache read and regenerate; the result overwrites the cached row). Cached hit: one `done` event with the full text. Miss or refresh: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
 
@@ -66,7 +66,12 @@ unexpected to 500.
   `refresh` escape hatch mirroring `GET /games/{id}/explain`. The
   response reports `games_analyzed` at generation time so the UI can
   say "generated over 515 games; you have 540 now" rather than serving
-  stale advice silently.
+  stale advice silently. When the engine pool is up, the route passes
+  `complete` the same analyst wrapper explain builds around
+  `pool.eval_lines` (config depth/multipv), so the report run can
+  verify concrete lines with `analyze_position`; with no pool it
+  passes `None` and the provider degrades to a single turn — the
+  report still generates without an engine.
 - Live eval (`/api/eval`): engine's `stream_eval` does the work; the
   route maps its `ValueError` (bad FEN) to 400 and a missing pool to
   503, and closes the iterator when the client disconnects so the

@@ -46,6 +46,15 @@ PositionAnalystFn = Callable[[str], Awaitable[list[EvalLine]]]
 # the run off outright — see CopilotSdkProvider.explain.
 _EXPLAIN_MAX_TURNS = 8
 
+# Same budget, for the agentic complete() loop when an analyst is supplied
+# (docs/fixes-2026-07/04-report-engine-tool.md): a report run gets a couple
+# of engine calls to verify concrete lines before asserting them, plus the
+# final write-up. A separate constant from _EXPLAIN_MAX_TURNS because the
+# two flows are tuned independently even though they share a value today.
+# Same per-provider enforcement split — see ClaudeAgentSdkProvider.complete
+# and CopilotSdkProvider.complete.
+_REPORT_MAX_TURNS = 8
+
 # The in-process MCP server exposing the engine seam as a tool. The model
 # calls it as f"mcp__{_MCP_SERVER_NAME}__{_ANALYZE_TOOL_NAME}".
 _MCP_SERVER_NAME = "engine"
@@ -71,14 +80,16 @@ class CoachProviderError(Exception):
 
 
 class CoachProvider(Protocol):
-    async def complete(self, prompt: str) -> str: ...
+    async def complete(
+        self, prompt: str, analyst: PositionAnalystFn | None = None
+    ) -> str: ...
     def explain(
         self, prompt: str, analyst: PositionAnalystFn
     ) -> AsyncGenerator[ExplainEvent]: ...
 
 
 class ClaudeAgentSdkProvider:
-    """One-shot completion through the local Claude Code login.
+    """Coach completions through the local Claude Code login.
 
     No API key anywhere: authentication and billing ride the user's
     Claude subscription. Requires the `claude` CLI to be installed
@@ -89,12 +100,30 @@ class ClaudeAgentSdkProvider:
         self._model = model
         self._system_prompt = system_prompt
 
-    async def complete(self, prompt: str) -> str:
-        options = ClaudeAgentOptions(
-            model=self._model,
-            max_turns=1,
-            system_prompt=self._system_prompt,
-        )
+    async def complete(
+        self, prompt: str, analyst: PositionAnalystFn | None = None
+    ) -> str:
+        if analyst is None:
+            options = ClaudeAgentOptions(
+                model=self._model,
+                max_turns=1,
+                system_prompt=self._system_prompt,
+            )
+        else:
+            # Same MCP-server mechanics as explain() below, under the
+            # report turn budget rather than the explain one — the model
+            # can verify a concrete line before asserting it in the brief.
+            server = create_sdk_mcp_server(
+                name=_MCP_SERVER_NAME, tools=[_build_analyze_tool(analyst)]
+            )
+            options = ClaudeAgentOptions(
+                model=self._model,
+                system_prompt=self._system_prompt,
+                max_turns=_REPORT_MAX_TURNS,
+                mcp_servers={_MCP_SERVER_NAME: server},
+                tools=[],  # no built-in Claude Code tools — only the engine tool
+                allowed_tools=[_ALLOWED_ANALYZE_TOOL],
+            )
         chunks: list[str] = []
         fallback: str | None = None
         try:
@@ -208,15 +237,17 @@ _ANALYZE_TOOL_SCHEMA: dict[str, Any] = {
 
 # What analyze_position returns instead of calling the engine again once the
 # budget is spent — both for the one-time grace round and for every runaway
-# call after it, steering the model to wrap up rather than looping.
-_EXPLAIN_BUDGET_EXHAUSTED = (
-    "Engine analysis budget for this explanation is exhausted — finish your "
-    "answer with the analysis already gathered."
+# call after it, steering the model to wrap up rather than looping. Shared by
+# explain() and complete() (with an analyst) — both enforce the same
+# self-imposed-budget pattern, just against different turn budgets.
+_ENGINE_BUDGET_EXHAUSTED = (
+    "Engine analysis budget for this run is exhausted — finish your answer "
+    "with the analysis already gathered."
 )
 
 
 class CopilotSdkProvider:
-    """One-shot completion through the local GitHub Copilot CLI login.
+    """Coach completions through the local GitHub Copilot CLI login.
 
     No API key anywhere: authentication and billing ride the user's
     Copilot seat. Requires the Copilot CLI runtime to be installed
@@ -228,7 +259,9 @@ class CopilotSdkProvider:
         self._model = model
         self._system_prompt = system_prompt
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(
+        self, prompt: str, analyst: PositionAnalystFn | None = None
+    ) -> str:
         chunks: list[str] = []
         error: CoachProviderError | None = None
         idle = asyncio.Event()
@@ -249,14 +282,67 @@ class CopilotSdkProvider:
                 case _:  # every other session-event type is irrelevant here
                     pass
 
+        # A one-shot coaching completion (no analyst) needs no tools at all —
+        # same reasoning as explain()'s built-in-tool lockdown. With an
+        # analyst, register the same analyze_position custom tool explain()
+        # does, under the report turn budget.
+        tools: list[Tool] | None = None
+        available_tools = ToolSet()
+        if analyst is not None:
+            engine_analyst = analyst  # narrowed: not None from here on
+            tool_calls = 0
+
+            async def handle_analyze(invocation: ToolInvocation) -> ToolResult:
+                nonlocal tool_calls
+                tool_calls += 1
+                args = cast("dict[str, Any]", invocation.arguments or {})
+                fen = str(args.get("fen", ""))
+                if tool_calls == _REPORT_MAX_TURNS + 1:
+                    # One grace round: nudge the model to wrap up instead of
+                    # cutting it off the instant it goes over budget.
+                    return ToolResult(
+                        text_result_for_llm=_ENGINE_BUDGET_EXHAUSTED,
+                        result_type="success",
+                    )
+                if tool_calls > _REPORT_MAX_TURNS + 1:
+                    # The grace round is spent and the model called again
+                    # anyway — a runaway. Unlike explain()'s queue-based
+                    # drain sentinel, complete() collects straight into
+                    # `chunks`, so the cutoff is: set the idle event so the
+                    # `await idle.wait()` below returns and the `async with`
+                    # blocks disconnect the session instead of letting the
+                    # run loop forever. Text already collected stands.
+                    idle.set()
+                    return ToolResult(
+                        text_result_for_llm=_ENGINE_BUDGET_EXHAUSTED,
+                        result_type="success",
+                    )
+                lines = await engine_analyst(fen)
+                return ToolResult(
+                    text_result_for_llm=_render_lines(lines), result_type="success"
+                )
+
+            tools = [
+                Tool(
+                    name=_ANALYZE_TOOL_NAME,
+                    description=_ANALYZE_TOOL_DESCRIPTION,
+                    parameters=_ANALYZE_TOOL_SCHEMA,
+                    handler=handle_analyze,
+                    # No permission prompt for our own tool — it is the only
+                    # tool available_tools admits below, so nothing else can
+                    # run.
+                    skip_permission=True,
+                )
+            ]
+            available_tools = ToolSet().add_custom(_ANALYZE_TOOL_NAME)
+
         try:
             async with CopilotClient() as client:
                 session = await client.create_session(
                     model=self._model,
                     system_message=_system_message(self._system_prompt),
-                    # A one-shot coaching completion needs no tools at all —
-                    # same reasoning as explain()'s built-in-tool lockdown.
-                    available_tools=ToolSet(),
+                    tools=tools,
+                    available_tools=available_tools,
                 )
                 async with session:
                     unsubscribe = session.on(handle_event)
@@ -324,7 +410,7 @@ class CopilotSdkProvider:
                 # One grace round: nudge the model to wrap up instead of
                 # cutting it off the instant it goes over budget.
                 return ToolResult(
-                    text_result_for_llm=_EXPLAIN_BUDGET_EXHAUSTED, result_type="success"
+                    text_result_for_llm=_ENGINE_BUDGET_EXHAUSTED, result_type="success"
                 )
             if tool_calls > _EXPLAIN_MAX_TURNS + 1:
                 # The model used its grace round and called again anyway —
@@ -334,7 +420,7 @@ class CopilotSdkProvider:
                 # letting it loop forever. Text already yielded stands.
                 queue.put_nowait(None)
                 return ToolResult(
-                    text_result_for_llm=_EXPLAIN_BUDGET_EXHAUSTED, result_type="success"
+                    text_result_for_llm=_ENGINE_BUDGET_EXHAUSTED, result_type="success"
                 )
             queue.put_nowait(ExplainEvent(type="tool", text=_analyze_summary(fen)))
             lines = await analyst(fen)

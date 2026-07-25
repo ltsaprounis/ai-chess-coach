@@ -91,4 +91,5 @@ Write the coaching brief now, following these rules:
 - **Citation.** Refer to positions and games by date and move number (e.g. "your 26...Nb6 in the June 14 blitz game"), never by list position or table row.
 - **One biggest lever.** Open with the single change most likely to raise this student's results, not a flat list of co-equal weaknesses. Order everything else by impact behind it.
 - **Honesty.** If the data does not support a conclusion -- too few games, no sample past the floor -- say so plainly instead of filling the section anyway.
+- **Verification.** When the `analyze_position` tool is available, check any concrete line with it before asserting it -- never present an unverified variation as fact.
 - **Plan.** Close with a two-week training plan sized to the time controls and volume shown above, not a generic study list.

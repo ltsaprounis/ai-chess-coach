@@ -46,18 +46,19 @@ reviewable as a diff of the artifact.
 | 3 | Repertoire `Avg cp loss` is whole-game ACPL, labelled as opening | `coach/report.py:64`, `storage/games.py:286` | coach + dashboard | P0 | done |
 | 4 | Phase ACPL averages in 0.0 for phases a game never reached | `engine/analysis.py:97`, `coach/report.py:40` | coach + dashboard | P0 | done |
 | 5 | Judgment counts have no denominator | `coach/prompt.py:66` | coach (dashboard has per-game tiles) | P0 | done |
-| 6 | Critical positions cited by list index, bare FEN, no before-eval | `coach/prompt.py:89` | coach | P0 | done (PV still absent — needs 9) |
+| 6 | Critical positions cited by list index, bare FEN, no before-eval | `coach/prompt.py:89` | coach | P0 | done (no stored PV by design — 9 verifies lines live) |
 | 7 | Rating, trend, time class, termination never reach the prompt | `domain.py:131`, `ingestion/normalize.py:30` | coach + dashboard | P1 | done (termination backfills on re-sync) |
 | 8 | Instructions ask for sections, not for rigor | `coach/prompt.py:32` | coach | P1 | done |
-| 9 | Report path has no engine tool, so it cannot verify a line | `coach/providers.py`, `docs/06-coach.md:54` | coach | P2 | open |
+| 9 | Report path has no engine tool, so it cannot verify a line | `coach/providers.py`, `docs/06-coach.md:54` | coach | P2 | done |
 | 10 | The report LLM call is never cached | `api/routes.py:486` | coach | P2 | done |
 | 11 | No durable player profile to feed other features | — | coach + dashboard | P3 | open |
 | 12 | The coach ignores the window/time-control filters the report takes | `api/routes.py:502` | coach | P1 | done |
 
-Two notes for whoever picks up 9 and 11. The turning-point entries
-carry no engine PV, because producing one needs the analyst callable
-finding 9 adds — that is the one part of finding 6 still outstanding.
-And the family rollup keys on the student's own first three moves
+Two notes for whoever picks up 11. The turning-point entries still
+carry no stored engine PV — deliberately: finding 9 gave the report
+run the analyst tool instead, so the model verifies a refutation
+live rather than trusting a line computed at analysis time, closing
+the part of finding 6 that had stayed open. And the family rollup keys on the student's own first three moves
 rather than on "first moves plus ECO, falling back to the name root"
 as sketched below: the lichess names turned out too coarse for a
 name-based fallback (82 variations sit under "Queen's Pawn Game",
@@ -629,8 +630,8 @@ Closing instructions, in place of `_INSTRUCTIONS`:
   repertoire section lists it under their color as a system they
   chose; never advise dropping an opening they only face.
 - Citation rule: refer to positions by date and move number.
-- Verification rule (once finding 9 lands): check any line with
-  `analyze_position` before asserting it.
+- Verification rule (finding 9): when the `analyze_position` tool is
+  available, check any line with it before asserting it.
 - Output: the biggest lever first, then weaknesses with evidence,
   then opening advice, then a two-week plan sized to the student's
   actual playing time. Say so when the data does not support a

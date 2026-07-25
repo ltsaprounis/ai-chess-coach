@@ -1,5 +1,6 @@
 """Coach component tests (docs/06-coach.md)."""
 
+import asyncio
 import os
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -623,6 +624,105 @@ async def test_agent_sdk_provider_wraps_failures(
         await provider.complete("coach me")
 
 
+async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs/fixes-2026-07/04-report-engine-tool.md: given an analyst,
+    complete() reuses explain()'s MCP-wrapped tool mechanics under the
+    report turn budget, and text across the whole tool loop -- before and
+    after an engine call -- concatenates into the returned advice.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        captured["prompt"] = prompt
+        captured["options"] = options
+
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="Let's verify the critical line.")],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="t1",
+                        name="mcp__engine__analyze_position",
+                        input={"fen": "fen-after"},
+                    )
+                ],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[TextBlock(text=" Confirmed: Nxe5 wins the exchange.")],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=2,
+                session_id="s",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert (
+        advice == "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
+    )
+    options = captured["options"]
+    assert isinstance(options, ClaudeAgentOptions)
+    # The engine tool is the only tool on offer, under the report budget --
+    # not explain()'s budget, even though the two happen to share a value.
+    assert options.max_turns == 8
+    assert options.tools == []
+    assert options.allowed_tools == ["mcp__engine__analyze_position"]
+    mcp_servers = options.mcp_servers
+    assert isinstance(mcp_servers, dict)
+    assert "engine" in mcp_servers
+
+
+async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no analyst, complete() must degrade to exactly today's
+    behavior: one turn, no MCP server, no tools wired up at all."""
+    captured: dict[str, object] = {}
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        captured["options"] = options
+
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="Work on your endgames.")],
+                model="claude-opus-4-8",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("coach me")
+
+    assert advice == "Work on your endgames."
+    options = captured["options"]
+    assert isinstance(options, ClaudeAgentOptions)
+    assert options.max_turns == 1
+    assert options.tools is None
+    assert not options.mcp_servers
+
+
 def test_unimplemented_providers_raise_clearly() -> None:
     with pytest.raises(CoachProviderError, match="not implemented") as excinfo:
         create_provider(LlmConfig(provider="anthropic"))
@@ -1140,6 +1240,126 @@ async def test_copilot_provider_complete_raises_on_empty_output(
     provider = create_provider(LlmConfig(provider="github-copilot"))
     with pytest.raises(CoachProviderError, match="returned no text"):
         await provider.complete("coach me")
+
+
+async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs/fixes-2026-07/04-report-engine-tool.md: given an analyst,
+    complete() registers analyze_position exactly as explain() does, and
+    text either side of an engine call concatenates into the returned
+    advice."""
+    captured: dict[str, object] = {}
+    script = [
+        ("text", "Let's verify the critical line. "),
+        ("tool_call", "fen-after"),
+        ("text", "Confirmed: Nxe5 wins the exchange."),
+        ("idle", ""),
+    ]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == (
+        "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
+    )
+    # The engine tool is the only tool on offer -- same lockdown as explain().
+    available_tools = captured["available_tools"]
+    assert isinstance(available_tools, ToolSet)
+    assert available_tools.to_list() == ["custom:analyze_position"]
+
+
+async def test_copilot_provider_complete_without_analyst_gets_no_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no analyst, complete() must degrade to exactly today's
+    behavior: the session gets an empty ToolSet, no custom tool at all."""
+    captured: dict[str, object] = {}
+    script = [("text", "Work on your endgames."), ("idle", "")]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    advice = await provider.complete("coach me")
+
+    assert advice == "Work on your endgames."
+    available_tools = captured["available_tools"]
+    assert isinstance(available_tools, ToolSet)
+    assert available_tools.to_list() == []
+
+
+async def test_copilot_provider_complete_enforces_report_turn_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Mirrors test_copilot_provider_explain_caps_engine_tool_calls: the SDK
+    # has no turn limit, so the provider counts engine-tool calls itself
+    # against _REPORT_MAX_TURNS. Every call past the budget -- the one
+    # grace round and the runaway calls after it -- gets steered to wrap up
+    # instead of reaching the engine.
+    max_engine_calls = 8  # _REPORT_MAX_TURNS
+    captured: dict[str, object] = {}
+    over_budget = 3
+    script = [("tool_call", f"fen-{n}") for n in range(max_engine_calls + over_budget)]
+    script.append(("text", "Here's what I found."))
+    script.append(("idle", ""))
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == "Here's what I found."
+    # _FakeCopilotSession.send stores a list[ToolResult]; captured erases
+    # that to plain object for its other (str, bool) entries.
+    tool_results = cast("list[ToolResult]", captured["tool_results"])
+    assert len(tool_results) == max_engine_calls + over_budget
+    for result in tool_results[max_engine_calls:]:
+        assert isinstance(result, ToolResult)
+        assert result.result_type == "success"
+        assert "budget" in result.text_result_for_llm
+
+
+async def test_copilot_provider_complete_runaway_tool_calls_cut_the_run_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Mirrors test_copilot_provider_explain_runaway_tool_calls_end_the_stream,
+    # adapted to complete()'s collection shape: instead of explain()'s
+    # queue-based drain sentinel, the runaway branch sets the idle event
+    # directly, so `await idle.wait()` returns and the `async with` blocks
+    # disconnect the session -- text collected before the runaway stands.
+    # No "idle" step is scripted at all: if the implementation failed to
+    # set the event on the runaway call, this would hang instead of pass,
+    # so the timeout wrapper turns that failure mode into a clean failure.
+    max_engine_calls = 8  # _REPORT_MAX_TURNS
+    captured: dict[str, object] = {}
+    script = [
+        ("text", "Let's check a few lines."),
+        *[("tool_call", f"fen-{n}") for n in range(max_engine_calls)],  # in budget
+        ("tool_call", "fen-grace"),  # budget + 1: the one grace round
+        ("tool_call", "fen-runaway"),  # past the grace round: hard stop
+    ]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    advice = await asyncio.wait_for(
+        provider.complete("write the report", stub_analyst), timeout=5
+    )
+
+    assert advice == "Let's check a few lines."
+    tool_results = cast("list[ToolResult]", captured["tool_results"])
+    assert len(tool_results) == max_engine_calls + 2
+    assert "budget" in tool_results[-1].text_result_for_llm
+    # Teardown still ran: the `async with` blocks disconnected on the idle
+    # event set from inside the runaway call, not from a scripted idle.
+    assert captured["session_disconnected"] is True
+    assert captured["client_stopped"] is True
 
 
 async def test_copilot_provider_explain_streams_tool_and_text_events_in_order(

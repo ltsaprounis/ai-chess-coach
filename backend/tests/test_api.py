@@ -1,5 +1,6 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from pathlib import Path
@@ -56,11 +57,17 @@ class StubProvider:
     def __init__(self, advice: str = "Practice rook endgames.") -> None:
         self.advice = advice
         self.prompts: list[str] = []
+        # One entry per `complete` call, so tests can see whether that
+        # call carried a working analyst (pool up) or None (pool down).
+        self.complete_analysts: list[PositionAnalystFn | None] = []
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(
+        self, prompt: str, analyst: PositionAnalystFn | None = None
+    ) -> str:
         self.prompts.append(prompt)
+        self.complete_analysts.append(analyst)
         return self.advice
 
     async def explain(
@@ -82,6 +89,7 @@ class StubPool:
 
     def __init__(self) -> None:
         self.stream_eval_calls: list[tuple[str, int, int]] = []
+        self.eval_lines_calls: list[tuple[str, int, int]] = []
         self.eval_lines_error: Exception | None = None
 
     async def analyze_game(
@@ -127,6 +135,7 @@ class StubPool:
         self, fen: str, depth: int, multipv: int = 1
     ) -> list[EvalLine]:
         chess.Board(fen)  # same eager ValueError on a bad FEN as the pool
+        self.eval_lines_calls.append((fen, depth, multipv))
         if self.eval_lines_error is not None:
             raise self.eval_lines_error
         return [
@@ -660,8 +669,11 @@ def test_coach_caches_and_a_repeat_is_a_cache_hit(
     assert second["advice"] == first["advice"]
     assert second["games_analyzed"] == 1
     assert second["generated_at"] == first["generated_at"]
-    # No further provider invocation on the cache hit.
+    # No further provider invocation on the cache hit, and the engine
+    # pool is never touched either -- the cache short-circuits before
+    # the analyst wrapper is even built.
     assert len(provider.prompts) == 1
+    assert stub_pool(stub_registry).eval_lines_calls == []
 
 
 def test_coach_generated_at_survives_a_clock_tick(
@@ -709,6 +721,77 @@ def test_coach_refresh_bypasses_the_cache_and_regenerates(
     repeat: Any = post(client, "/api/players/testuser/coach").json()
     assert repeat["cached"] is True
     assert len(provider.prompts) == 2
+
+
+def test_coach_refresh_reinvokes_the_provider_with_the_analyst_again(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    post(client, "/api/players/testuser/coach")
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.complete_analysts) == 1
+    assert provider.complete_analysts[0] is not None
+
+    post(client, "/api/players/testuser/coach", json={"refresh": True})
+    assert len(provider.complete_analysts) == 2
+    assert provider.complete_analysts[1] is not None
+
+
+def test_coach_pool_present_passes_a_working_analyst_to_the_provider(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """On a cache miss with the engine pool up, `complete` gets a real
+    analyst -- and calling it reaches the stub pool's `eval_lines` with
+    the injector's (config's) depth/multipv, not a caller's choice."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = post(client, "/api/players/testuser/coach")
+    assert response.status_code == 200
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.complete_analysts) == 1
+    analyst = provider.complete_analysts[0]
+    assert analyst is not None
+
+    async def call_analyst() -> list[EvalLine]:
+        return await analyst(chess.STARTING_FEN)
+
+    lines = asyncio.run(call_analyst())
+    assert len(lines) == 1
+    pool = stub_pool(stub_registry)
+    assert pool.eval_lines_calls == [(chess.STARTING_FEN, 16, 5)]
+
+
+def test_coach_without_engine_pool_passes_no_analyst_and_still_succeeds(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike analyze/eval, a missing engine is not fatal here -- the
+    report still generates, degraded to the provider's single-turn path."""
+    registry: dict[str, object] = {}
+
+    def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
+        provider = StubProvider(advice=f"advice from {cfg.id}")
+        registry[f"provider:{cfg.id}"] = provider
+        return provider
+
+    monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
+    config = AppConfig(
+        engine=EngineConfig(bin_path=tmp_path / "missing-stockfish"),
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
+    )
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    with TestClient(create_app(config)) as coach_client:
+        response = post(coach_client, "/api/players/testuser/coach")
+
+    assert response.status_code == 200
+    body: Any = response.json()
+    assert body["advice"] == "advice from claude"
+    provider = stub_provider(registry, "claude")
+    assert provider.complete_analysts == [None]
 
 
 def test_coach_cache_key_separates_windows_and_agents(

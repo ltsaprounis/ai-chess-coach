@@ -60,8 +60,14 @@ class ExplainEvent(BaseModel):     # one streamed explain increment
     text: str                      # text chunk | tool-call summary
 
 # The provider seam — everything LLM-specific hides behind this.
+# `complete` takes an optional analyst: with one, the report run is
+# agentic — the analyst exposed as the same `analyze_position(fen)`
+# tool `explain` uses, under a small turn budget — so the model can
+# verify concrete lines before asserting them. With `None` it is
+# today's single turn, the fallback when no engine pool exists.
 class CoachProvider(Protocol):
-    async def complete(self, prompt: str) -> str
+    async def complete(self, prompt: str,
+                       analyst: PositionAnalystFn | None = None) -> str
     def explain(self, prompt: str, analyst: PositionAnalystFn,
                 ) -> AsyncGenerator[ExplainEvent]
 
@@ -221,8 +227,11 @@ either side of the move, so a blunder that threw away a won game is
 distinguishable from a coup de grâce.
 
 The engine's principal variation would be the natural companion to
-`best`, but the report path has no engine tool (finding 9, not yet
-built), so entries state the move, not the refutation line.
+`best`, but only a live engine call produces a trustworthy one, so
+entries still state the move, not a stored refutation line. The
+refutation comes from the run instead: `complete` carries the engine
+tool (see Providers), and the instruction block tells the model to
+verify any concrete line with it before asserting it.
 
 ### Error patterns are counted, not narrated
 
@@ -266,12 +275,20 @@ weaknesses, and carries the rules the data alone cannot enforce:
   a club player, pawns never centipawns, the idea before the number.
 - **Honesty.** Say when the data does not support a conclusion instead
   of filling the section anyway.
+- **Verification.** When the `analyze_position` tool is available,
+  check any concrete line with it before asserting it; never present
+  an unverified variation as fact. (The template is identical either
+  way — the cache is keyed on `PROMPT_VERSION`, not tool
+  availability — so the rule is phrased conditionally.)
 
 ## Providers
 
-- **v1 — `ClaudeAgentSdkProvider`** (default): `complete` is a
-  one-shot `claude_agent_sdk.query(...)` with `max_turns=1` and a
-  coach system prompt that replaces the Claude Code coding persona.
+- **v1 — `ClaudeAgentSdkProvider`** (default): `complete` runs
+  `claude_agent_sdk.query(...)` with a coach system prompt that
+  replaces the Claude Code coding persona. Given an analyst it is
+  agentic with the same MCP-server mechanics as `explain` below,
+  bounded by `_REPORT_MAX_TURNS`; with `analyst=None` it is a
+  one-shot `max_turns=1` completion.
   `explain` is an agentic `query(...)`: the injected
   `PositionAnalystFn` is exposed as an `analyze_position(fen)` tool
   on an **in-process SDK MCP server** (`create_sdk_mcp_server` +
@@ -289,7 +306,12 @@ weaknesses, and carries the rules the data alone cannot enforce:
   seat) — like the Claude provider, **no API key anywhere**. The
   session replaces the Copilot coding persona with the coach system
   prompt. `complete` is one session + one prompt, collecting
-  assistant text until the session idles. `explain` registers the
+  assistant text until the session idles; given an analyst it
+  registers the same `analyze_position` custom tool `explain` does
+  and enforces the same self-imposed budget, sized by
+  `_REPORT_MAX_TURNS` (one grace wrap-up round past the budget, then
+  the run is cut off); with `analyst=None` the session gets no tools
+  at all. `explain` registers the
   injected `PositionAnalystFn` as a custom `analyze_position` tool
   on the session — built-in Copilot tools (shell, file edits, web)
   are not permitted; only the engine tool may run — and yields a

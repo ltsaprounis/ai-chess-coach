@@ -24,7 +24,7 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-faced-split"
+PROMPT_VERSION = "2026-07-engine-tool"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -63,6 +63,9 @@ _INSTRUCTIONS = (
     "- **Honesty.** If the data does not support a conclusion -- too few "
     "games, no sample past the floor -- say so plainly instead of "
     "filling the section anyway.\n"
+    "- **Verification.** When the `analyze_position` tool is available, "
+    "check any concrete line with it before asserting it -- never present "
+    "an unverified variation as fact.\n"
     "- **Plan.** Close with a two-week training plan sized to the time "
     "controls and volume shown above, not a generic study list."
 )
