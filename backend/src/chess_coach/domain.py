@@ -10,6 +10,16 @@ from pydantic import BaseModel
 
 MATE_SCORE = 10_000  # mate folded to ±cp for loss arithmetic
 
+# Phase boundaries. The engine tags every move it judges
+# (docs/04-engine.md) and the coach re-derives the same tags when it
+# aggregates from raw `evals` (docs/06-coach.md) — two components
+# applying one rule, so the constants live here rather than drifting
+# apart in each. `PIECE_POINTS` is keyed by lowercase piece symbol so
+# domain stays free of a chess-library import.
+OPENING_PLIES = 20  # 10 full moves, until book-exit refinement lands
+ENDGAME_MATERIAL = 13  # per side, kings excluded
+PIECE_POINTS: dict[str, int] = {"q": 9, "r": 5, "b": 3, "n": 3, "p": 1}
+
 Color = Literal["white", "black"]
 Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
@@ -32,6 +42,10 @@ class LlmConfig(BaseModel):
     # claude-agent-sdk rides the local Claude Code login: no API key.
     provider: LlmProvider = "claude-agent-sdk"
     model: str = "claude-opus-4-8"
+    # Not yet consumed by any shipped provider: both ride a local CLI
+    # login rather than an API call that takes a token ceiling. Setting
+    # it in coach.config.yaml therefore does nothing today — wire it
+    # into the providers before treating it as a control.
     max_tokens: int = 4096
 
 
@@ -60,6 +74,12 @@ class Game(BaseModel):
     player_rating: int
     opponent_rating: int
     accuracy: float | None = None  # chess.com's own, when provided
+    # The raw chess.com per-player result code ("timeout", "resigned",
+    # "checkmated", "abandoned", "agreed"…). `result` collapses these
+    # to win/loss/draw; how a game ended is coaching signal in its own
+    # right, so the code is kept alongside. None on games stored before
+    # the column existed, until they are re-synced.
+    termination: str | None = None
 
 
 class MoveEval(BaseModel):
@@ -101,15 +121,56 @@ class Opening(BaseModel):
     ply: int
 
 
+class Record(BaseModel):
+    """A win/loss/draw tally. Score is (wins + draws/2) / games."""
+
+    games: int = 0
+    wins: int = 0
+    losses: int = 0
+    draws: int = 0
+
+
 class OpeningStats(BaseModel):
+    """One opening as the player met it, from one side of the board.
+
+    Rows are keyed by (color, eco, name): an opening is a property of
+    the *game*, so without `color` the table silently merges the lines
+    the player chose with the ones their opponents chose against them.
+
+    The two move strings do the work no opening name can. `system` is
+    the player's *own* first moves and nothing else — it is what a
+    repertoire actually is, and grouping on it separates the openings
+    they chose from the ones they merely faced. `first_moves` shows the
+    same line with both sides answering, which is what makes a gambit
+    visibly the opponent's. Consumers roll rows up by (color, system);
+    the rule is stated once in docs/06-coach.md and implemented against
+    this type by both the report and the Dashboard.
+    """
+
     eco: str
     name: str
+    color: Color  # the side the player had in these games
+    system: str  # the player's own moves, e.g. "1.d4 2.Nf3 3.Bg5"
+    first_moves: str  # the line as played, e.g. "1.d4 e5 2.dxe5"
     games: int
     wins: int
     losses: int
     draws: int
     analyzed_games: int  # how many of `games` have engine analysis
-    avg_cp_loss: float | None = None  # None until games are analyzed
+    # Two different questions, so two columns: does the player come out
+    # of the opening safely, and do these games go well overall. Only
+    # the first is opening advice. Both are None until games are
+    # analyzed, and both are move-weighted, never a mean of per-game
+    # means.
+    opening_acpl: float | None = None  # opening-phase moves only
+    avg_cp_loss: float | None = None  # whole game, all phases
+    # The denominators behind those two columns. Consumers roll these
+    # rows up into families, and a rollup can only stay move-weighted
+    # if it can re-weight by moves — without these it has to fall back
+    # to weighting by games, which is the mean-of-per-game-means this
+    # type exists to stamp out, reintroduced one level up.
+    opening_moves: int = 0  # player moves behind `opening_acpl`
+    player_moves: int = 0  # player moves behind `avg_cp_loss`
 
 
 class PlayerSummary(BaseModel):
@@ -120,21 +181,133 @@ class PlayerSummary(BaseModel):
     last_played: int  # epoch seconds of the most recent stored game
 
 
+class PhaseStats(BaseModel):
+    """Player-move aggregates for one phase, with its denominator.
+
+    `acpl` is total centipawn loss ÷ `moves` — never a mean of per-game
+    means — and is None when the player made no moves in the phase. A
+    phase the games never reached must read as "no moves", not as 0.0
+    centipawn loss, which is indistinguishable from flawless play.
+    """
+
+    moves: int
+    acpl: float | None
+    judgment_counts: dict[Judgment, int]
+
+
+class TimeClassStats(BaseModel):
+    """Play and rating movement within one time control."""
+
+    time_class: TimeClass
+    record: Record
+    rating_start: int  # oldest game in the window
+    rating_end: int  # newest game in the window
+    rating_min: int
+    rating_max: int
+
+
+class MonthStats(BaseModel):
+    """One calendar month — the trend row that says whether it helped."""
+
+    month: str  # "2026-07"
+    games: int
+    rating_end: int | None  # last rating seen that month
+    acpl: float | None
+    blunder_rate: float | None  # blunders ÷ player moves
+
+
+class OpponentStats(BaseModel):
+    """How the player scores against stronger and weaker opposition."""
+
+    avg_rating_diff: float  # mean of player_rating - opponent_rating
+    vs_stronger: Record  # opponent rated clearly above
+    vs_similar: Record
+    vs_weaker: Record  # opponent rated clearly below
+
+
+class TerminationStats(BaseModel):
+    """How games ended — 'lost on time' and 'resigned' are not the same."""
+
+    result: Result
+    termination: str  # raw chess.com code; "unknown" before re-sync
+    games: int
+
+
+class ErrorPattern(BaseModel):
+    """A recurring mistake, tagged deterministically with python-chess.
+
+    Counts generalize where anecdotes do not: "you hung a piece to a
+    check 34 times" outweighs five sample positions and costs no LLM
+    tokens. Tags are assigned by static analysis of the position, never
+    by a model.
+    """
+
+    pattern: str  # stable id, e.g. "hangs_piece_to_check"
+    label: str  # human phrasing for the prompt and the UI
+    count: int
+    share_of_blunders: float  # count ÷ total blunders, 0-1
+    # One instance the student can go and look at. Carries the same
+    # identity a CriticalPosition does — the citation rule is "date and
+    # move number", and a bare game id is exactly the unfindable handle
+    # that rule exists to ban.
+    example_game_id: str | None = None
+    example_ply: int | None = None
+    example_end_time: int | None = None
+    example_move_number: int | None = None
+
+
 class CriticalPosition(BaseModel):
-    fen: str
-    played: str
-    best: str
-    cp_loss: int
+    """A turning point the student can actually find and act on.
+
+    Identity (date, time class, color, opening, move number) so the
+    prompt can say "your 26...Nb6 in the June 14 blitz Pirc" instead of
+    "position 1", and the eval either side of the move so a blunder
+    that lost a won game is distinguishable from one played in an
+    already-lost position.
+    """
+
     game_id: str
+    end_time: int
+    time_class: TimeClass
+    color: Color  # the side the player had
+    opening_name: str | None
+    ply: int  # 1-based, matches MoveEval.ply
+    move_number: int  # the "26" in "26...Nb6"
+    fen: str  # the position before the move
+    leading_up: list[str]  # the SAN plies into this position
+    played: str
+    best: str  # SAN when it parses in this position, else raw UCI
+    cp_loss: int
+    eval_before_cp: int | None
+    eval_before_mate: int | None
+    eval_after_cp: int | None
+    eval_after_mate: int | None
 
 
 class PlayerReport(BaseModel):
+    """Everything the coaching prompt and the Dashboard read.
+
+    Aggregated over analyzed games only; `window_start`/`window_end`
+    report the extent of the data actually covered, so neither the
+    model nor the student has to guess what period the numbers describe.
+    """
+
     username: str
     games_analyzed: int
-    overall_acpl: float
-    acpl_by_phase: dict[Phase, float]
+    player_moves: int  # the denominator for judgment_counts
+    window_start: int | None  # epoch seconds of the oldest game covered
+    window_end: int | None  # epoch seconds of the newest
+    time_class: TimeClass | None  # the filter applied; None = all mixed
+    record: Record
+    overall_acpl: float  # total loss ÷ player_moves
+    phases: dict[Phase, PhaseStats]
     judgment_counts: dict[Judgment, int]
+    time_classes: list[TimeClassStats]
+    months: list[MonthStats]  # oldest first
+    terminations: list[TerminationStats]
+    opponents: OpponentStats | None  # None with no games
     openings: list[OpeningStats]
+    error_patterns: list[ErrorPattern]
     critical_positions: list[CriticalPosition]
 
 

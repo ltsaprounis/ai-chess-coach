@@ -1,7 +1,10 @@
 """Coach component tests (docs/06-coach.md)."""
 
+import os
+from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
@@ -40,70 +43,100 @@ from chess_coach.coach import (
 from chess_coach.domain import (
     AnalyzedGame,
     EvalLine,
-    GameAnalysis,
     LlmConfig,
     MoveEval,
     Opening,
+    Phase,
+    Record,
+    TimeClass,
 )
-from tests.factories import make_analysis, make_game
+from tests.coach_scenario import scenario_games
+from tests.factories import make_analysis, make_analyzed, make_game
 
 RUY = Opening(eco="C60", name="Ruy Lopez", ply=5)
-
-
-def analyzed(
-    game_id: str,
-    *,
-    result: str = "win",
-    opening: Opening | None = RUY,
-    analysis: GameAnalysis | None = None,
-) -> AnalyzedGame:
-    game = make_game(id=game_id, result=result)
-    return AnalyzedGame.model_validate(
-        {
-            **game.model_dump(),
-            "opening": opening,
-            "analysis": analysis or make_analysis(game_id=game_id),
-        }
-    )
+PROMPT_SNAPSHOT = Path(__file__).parent / "testdata" / "coach_prompt.md"
 
 
 def test_build_report_aggregates_player_stats() -> None:
-    report = build_report(
-        "testuser",
-        [
-            analyzed("g-1", result="win"),
-            analyzed("g-2", result="loss", opening=None),
-        ],
+    game1 = make_analyzed(
+        "g-1",
+        ["e4", "e5", "Nf3", "Nc6"],
+        color="white",
+        result="win",
+        opening=Opening(eco="C60", name="Ruy Lopez", ply=3),
+        losses=[0, 20],  # white's two moves: e4 (0), Nf3 (20)
     )
+    game2 = make_analyzed(
+        "g-2",
+        ["e4", "e5", "Nf3", "Nc6"],
+        color="white",
+        result="loss",
+        opening=None,
+        losses=[10, 30],
+    )
+    report = build_report("testuser", [game1, game2])
 
     assert report.username == "testuser"
     assert report.games_analyzed == 2
-    assert report.overall_acpl == 2.5  # both factory analyses are 2.5
-    assert report.acpl_by_phase["opening"] == 2.5
-    assert report.judgment_counts["best"] == 2
+    assert report.player_moves == 4  # two white moves per game
+    assert report.record == Record(games=2, wins=1, losses=1, draws=0)
+    # move-weighted: (0 + 20 + 10 + 30) / 4 -- never a mean of per-game means.
+    assert report.overall_acpl == 15.0
+    assert report.phases["opening"].moves == 4
+    assert report.phases["opening"].acpl == 15.0
+    assert report.phases["endgame"].moves == 0
+    assert report.phases["endgame"].acpl is None
+
     # Only the classified game contributes to the repertoire.
-    assert [(s.eco, s.games, s.wins) for s in report.openings] == [("C60", 1, 1)]
-    assert report.openings[0].avg_cp_loss == 2.5
-    assert report.openings[0].analyzed_games == 1
+    assert len(report.openings) == 1
+    stats = report.openings[0]
+    assert stats.eco == "C60"
+    assert stats.color == "white"
+    assert stats.games == 1
+    assert stats.wins == 1
+    assert stats.analyzed_games == 1
+    assert stats.system == "1.e4 2.Nf3"
+    assert stats.first_moves == "1.e4 e5 2.Nf3 Nc6"
+    assert stats.opening_acpl == 10.0  # (0 + 20) / 2
+    assert stats.avg_cp_loss == 10.0
+
+
+def test_build_report_records_time_class_filter() -> None:
+    report = build_report("testuser", [], time_class="blitz")
+    assert report.time_class == "blitz"
+    assert build_report("testuser", []).time_class is None
 
 
 def test_openings_sorted_worst_first() -> None:
+    # Impact (games x win-rate deficit), not raw win rate: the 5-game
+    # all-loss line must outrank the 2-game all-win line.
     games = [
-        analyzed("w1", result="win"),
-        analyzed("w2", result="win"),
-        analyzed(
-            "l1",
+        make_analyzed(
+            f"w{i}",
+            ["e4", "e5", "Nf3", "Nc6"],
+            color="white",
+            result="win",
+            opening=Opening(eco="C60", name="Ruy Lopez", ply=3),
+        )
+        for i in range(2)
+    ] + [
+        make_analyzed(
+            f"l{i}",
+            ["d4", "d5", "c4", "e6"],
+            color="white",
             result="loss",
             opening=Opening(eco="D06", name="Queen's Gambit", ply=3),
-        ),
+        )
+        for i in range(5)
     ]
     report = build_report("testuser", games)
     assert [s.eco for s in report.openings] == ["D06", "C60"]
 
 
 def test_critical_positions_replay_to_fen() -> None:
-    # White's third move (Nf3, index 2 -> ply 3) loses 300 cp; the
-    # position before it is after 1. e4 e5.
+    # White's second move (Nf3, index 2 -> ply 3) loses 300 cp while the
+    # game is still roughly level (+0.30) -- a genuine equal -> losing
+    # crossing, and so a qualifying turning point.
     evals = [
         MoveEval(
             ply=1,
@@ -134,12 +167,18 @@ def test_critical_positions_replay_to_fen() -> None:
         ),
     ]
     analysis = make_analysis(game_id="g-crit").model_copy(update={"evals": evals})
-    game = make_game(id="g-crit", san_moves=["e4", "e5", "Nf3"], color="white")
+    game = make_game(
+        id="g-crit",
+        san_moves=["e4", "e5", "Nf3"],
+        color="white",
+        time_class="blitz",
+        end_time=1_781_000_000,
+    )
     report = build_report(
         "testuser",
         [
             AnalyzedGame.model_validate(
-                {**game.model_dump(), "opening": None, "analysis": analysis}
+                {**game.model_dump(), "opening": RUY, "analysis": analysis}
             )
         ],
     )
@@ -151,57 +190,353 @@ def test_critical_positions_replay_to_fen() -> None:
     assert critical.best == "d4"  # UCI d2d4 rendered as SAN
     assert critical.cp_loss == 300
     assert critical.game_id == "g-crit"
+    assert critical.color == "white"
+    assert critical.time_class == "blitz"
+    assert critical.end_time == 1_781_000_000
+    assert critical.opening_name == "Ruy Lopez"
+    assert critical.ply == 3
+    assert critical.move_number == 2
+    assert critical.leading_up == ["e4", "e5"]
+    assert critical.eval_before_cp == 30
+    assert critical.eval_after_cp == -270
 
 
-def test_render_prompt_is_deterministic_and_complete() -> None:
-    # Give the analysis a player loss so a critical position exists.
+def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
+    """The Englund regression (COACH-REPORT-IMPROVEMENTS.md finding 1).
+
+    The student is White; the Englund is the opponent's own gambit
+    (1...e5!? in reply to 1.d4). The guarantee this protects is
+    attribution, not naming or rendering: `system` must carry only the
+    student's own moves, so the opponent's defining reply -- 1...e5, the
+    move that makes this the Englund at all -- can never appear there,
+    only in `first_moves`. A revert that built `system` from the full
+    line (both sides), or from the wrong side's plies, would surface
+    "e5" as a standalone token in `system`; asserting only that the row
+    is rendered somewhere would not catch that.
+    """
+    report = build_report("testuser", scenario_games())
+    englund = next(o for o in report.openings if o.eco == "A40")
+    assert englund.color == "white"  # the student had White in this game
+    assert "Englund" in englund.name  # still correctly classified
+
+    system_tokens = englund.system.split()
+    first_move_tokens = englund.first_moves.split()
+    assert "e5" not in system_tokens  # the opponent's move, never the student's
+    assert "e5" in first_move_tokens  # ...but visible in the full line
+    assert englund.system == "1.d4 2.dxe5 3.Nf3"
+
+    prompt = render_prompt(report)
+    white_section = prompt.split("### As White")[1].split("### As Black")[0]
+    assert "Englund" in white_section  # named -- it clears the 5-game floor
+    # The row itself must state the student's own moves explicitly.
+    assert "1.d4 2.dxe5 3.Nf3" in white_section
+
+
+def test_phase_aggregation_ignores_games_that_never_reach_an_endgame() -> None:
+    """Finding 4: a phase never reached reads as "no moves", not 0.0 cp
+    loss averaged in from every game that stopped short of it."""
+    report = build_report("testuser", scenario_games())
+    assert report.phases["endgame"].moves == 0
+    assert report.phases["endgame"].acpl is None
+
+
+def test_single_game_lines_land_in_long_tail_not_top_of_table() -> None:
+    london = [
+        make_analyzed(
+            f"g-london-{i}",
+            ["d4", "Nf6", "Nf3", "d5", "Bf4"],
+            color="white",
+            result="win",
+            opening=Opening(eco="D02", name="London System", ply=5),
+        )
+        for i in range(5)
+    ]
+    bird = make_analyzed(
+        "g-bird-solo",
+        ["f4", "d5", "Nf3", "Nf6", "g3"],
+        color="white",
+        result="loss",
+        opening=Opening(eco="A02", name="Bird Opening", ply=5),
+    )
+    report = build_report("testuser", [*london, bird])
+    prompt = render_prompt(report)
+    white_section = prompt.split("### As White")[1]
+
+    assert "London System" in white_section
+    assert "Bird Opening" not in white_section
+    assert "Long tail: 1 line" in white_section
+    assert "1 game total" in white_section
+
+
+def test_turning_points_prefer_contestable_blunder_over_walk_into_mate() -> None:
+    """Finding 6: a mate-scale loss in an already-lost position must never
+    crowd out an instructive blunder in a position still up for grabs."""
+    report = build_report("testuser", scenario_games())
+
+    assert report.critical_positions  # a turning point was found at all
+    assert all(p.cp_loss < 9_000 for p in report.critical_positions)
+    # The Ruy's 310cp middlegame collapse (still-contestable) must be
+    # selected -- never a mate-scale loss in an already-lost position,
+    # which the assertion above already rules out.
+    assert any(p.cp_loss == 310 for p in report.critical_positions)
+
+
+def test_critical_positions_contestable_band_boundary() -> None:
+    """docs/06-coach.md: a turning point must fall inside the roughly
+    +/-3 pawn "still contestable" band, measured on the before-eval. A
+    blunder just inside the band is eligible; one centipawn past it is
+    not, even though both are otherwise identical qualifying blunders
+    (a mistake/blunder judgment crossing a decision boundary).
+    """
+    from chess_coach.coach.report import (
+        _CONTESTABLE_BAND,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    def _one_turning_point_game(game_id: str, before_cp: int) -> AnalyzedGame:
+        evals = [
+            MoveEval(
+                ply=1, san="e4", eval_cp=30, eval_mate=None,
+                best_move="e2e4", cp_loss=0, judgment="best",
+            ),
+            MoveEval(
+                ply=2, san="e5", eval_cp=before_cp, eval_mate=None,
+                best_move="e7e5", cp_loss=0, judgment="best",
+            ),
+            MoveEval(
+                ply=3, san="Nf3", eval_cp=before_cp - 400, eval_mate=None,
+                best_move="d2d4", cp_loss=300, judgment="blunder",
+            ),
+        ]  # fmt: skip
+        analysis = make_analysis(game_id=game_id).model_copy(update={"evals": evals})
+        game = make_game(id=game_id, san_moves=["e4", "e5", "Nf3"], color="white")
+        return AnalyzedGame.model_validate(
+            {**game.model_dump(), "opening": None, "analysis": analysis}
+        )
+
+    # Both swing from "winning" to "equal" (a genuine decision-boundary
+    # crossing) with an identical 300cp blunder; they differ only in
+    # whether the before-eval sits inside or outside the band.
+    inside = _one_turning_point_game("g-inside", before_cp=_CONTESTABLE_BAND)
+    outside = _one_turning_point_game("g-outside", before_cp=_CONTESTABLE_BAND + 1)
+
+    assert build_report("testuser", [inside]).critical_positions
+    assert not build_report("testuser", [outside]).critical_positions
+
+
+def test_select_critical_diversity_cap_binds_with_enough_candidates() -> None:
+    """`_select_critical`'s per-bucket cap only does anything once there
+    are more candidates than `_TOP_CRITICAL` -- the scenario fixture's 8
+    candidates never exercise it (docs/06-coach.md's spread rule). Build
+    13 directly, cluster 5 of them on one phase so the cap must reject
+    one of the game's own most-recent candidates in favour of an older,
+    more diverse one, and check the resulting spread.
+    """
+    from chess_coach.coach.report import (
+        _DIVERSITY_CAP_FRACTION,  # pyright: ignore[reportPrivateUsage]
+        _TOP_CRITICAL,  # pyright: ignore[reportPrivateUsage]
+        _Candidate,  # pyright: ignore[reportPrivateUsage]
+        _select_critical,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    time_classes: list[TimeClass] = ["bullet", "blitz", "rapid", "daily"]
+    # Five middlegame candidates as the five most-recent games -- more
+    # than the cap allows from one phase. Candidates 6-13 fill the rest
+    # of the table from the other two phases, four apiece, none of them
+    # tripping the phase, opening or time-class cap.
+    phases: list[Phase] = [
+        "middlegame",
+        "middlegame",
+        "middlegame",
+        "middlegame",
+        "middlegame",
+        "opening",
+        "endgame",
+        "opening",
+        "endgame",
+        "opening",
+        "endgame",
+        "opening",
+        "endgame",
+    ]
+    base_time = 1_800_000_000
+    candidates = [
+        _Candidate(
+            game=make_analyzed(
+                f"g-{i}",
+                ["e4", "e5"],
+                opening=Opening(eco=f"Z{i:02d}", name=f"Test Opening {i}", ply=2),
+                time_class=time_classes[(i - 1) % len(time_classes)],
+                end_time=base_time - i * 86_400,  # i=1 most recent, i=13 oldest
+            ),
+            idx=0,
+            phase=phase,
+        )
+        for i, phase in enumerate(phases, start=1)
+    ]
+
+    selected = _select_critical(candidates)
+
+    assert len(selected) == _TOP_CRITICAL  # capped down from 13
+    selected_ids = {c.game.id for c in selected}
+    # The 5th-most-recent candidate ("g-5") is the one over the phase cap
+    # -- it must lose out to "g-13", the *oldest* candidate, which the
+    # cap-free fill loop only reaches because g-5's slot never opens up.
+    assert "g-5" not in selected_ids
+    assert "g-13" in selected_ids
+
+    # The spread the cap exists to produce: every phase and time class
+    # appears, and none of them dominates the final 12.
+    cap = round(_TOP_CRITICAL * _DIVERSITY_CAP_FRACTION)
+    phase_counts: dict[str, int] = defaultdict(int)
+    time_class_counts: dict[str, int] = defaultdict(int)
+    for c in selected:
+        phase_counts[c.phase] += 1
+        time_class_counts[c.game.time_class] += 1
+    assert set(phase_counts) == {"middlegame", "opening", "endgame"}
+    assert all(count <= cap for count in phase_counts.values())
+    assert set(time_class_counts) == set(time_classes)
+    assert all(count <= cap for count in time_class_counts.values())
+
+
+# --- error pattern tags (docs/06-coach.md) ---------------------------------
+
+
+def test_error_pattern_hangs_piece() -> None:
+    # 3.Qxe5+?? Nxe5: the queen is undefended on e5 and simply recaptured,
+    # with no check involved.
+    game = make_analyzed(
+        "g-hangs",
+        ["e4", "e5", "Qh5", "Nc6", "Qxe5+", "Nxe5"],
+        color="white",
+        result="loss",
+        losses=[0, 0, 700],
+    )
+    report = build_report("testuser", [game])
+    patterns = {p.pattern: p for p in report.error_patterns}
+    assert "hangs_piece" in patterns
+    assert patterns["hangs_piece"].count == 1
+    assert patterns["hangs_piece"].label == "Hung a piece"
+
+
+def test_error_pattern_hangs_piece_to_check() -> None:
+    # 4.b4?? Bxb4+: the pawn is undefended and the recapture opens with
+    # check along the a5-e1 diagonal.
+    game = make_analyzed(
+        "g-hangs-check",
+        ["e4", "e5", "d4", "exd4", "Bc4", "Bc5", "b4", "Bxb4+"],
+        color="white",
+        result="loss",
+        losses=[0, 0, 0, 250],
+    )
+    report = build_report("testuser", [game])
+    patterns = {p.pattern: p for p in report.error_patterns}
+    assert "hangs_piece_to_check" in patterns
+    assert patterns["hangs_piece_to_check"].count == 1
+
+
+def test_error_pattern_back_rank() -> None:
+    # The long dark-square diagonal is opened (b3, Na3, h3) and the
+    # bishop swoops all the way down to capture the undefended rook on
+    # the back rank.
+    game = make_analyzed(
+        "g-back-rank",
+        ["b3", "g6", "Na3", "Bg7", "h3", "Bxa1"],
+        color="white",
+        result="loss",
+        losses=[0, 0, 550],
+    )
+    report = build_report("testuser", [game])
+    patterns = {p.pattern: p for p in report.error_patterns}
+    assert "back_rank" in patterns
+    assert patterns["back_rank"].count == 1
+
+
+def test_error_pattern_missed_win() -> None:
+    game = make_game(id="g-missed-win", san_moves=["e4", "e5", "Nf3"], color="white")
     evals = [
         MoveEval(
-            ply=1,
-            san="e4",
-            eval_cp=-270,
-            eval_mate=None,
-            best_move="d2d4",
-            cp_loss=300,
-            judgment="blunder",
+            ply=1, san="e4", eval_cp=350, eval_mate=None,
+            best_move="e2e4", cp_loss=0, judgment="best",
         ),
-    ]
-    analysis = make_analysis(game_id="g-1").model_copy(update={"evals": evals})
-    report = build_report("testuser", [analyzed("g-1", analysis=analysis)])
+        MoveEval(
+            ply=2, san="e5", eval_cp=350, eval_mate=None,
+            best_move="e7e5", cp_loss=0, judgment="best",
+        ),
+        MoveEval(
+            ply=3, san="Nf3", eval_cp=50, eval_mate=None,
+            best_move="g1f3", cp_loss=300, judgment="blunder",
+        ),
+    ]  # fmt: skip
+    analysis = make_analysis(game_id="g-missed-win").model_copy(update={"evals": evals})
+    analyzed_game = AnalyzedGame.model_validate(
+        {**game.model_dump(), "opening": None, "analysis": analysis}
+    )
+    report = build_report("testuser", [analyzed_game])
+    patterns = {p.pattern: p for p in report.error_patterns}
+    assert "missed_win" in patterns
+    assert patterns["missed_win"].count == 1
+    assert patterns["missed_win"].label == "Let a winning position slip"
+
+
+def test_error_pattern_walks_into_mate() -> None:
+    game = make_analyzed(
+        "g-mate",
+        ["f3", "e5", "g4", "Qh4#"],
+        color="white",
+        result="loss",
+        losses=[0, 9_950],
+    )
+    report = build_report("testuser", [game])
+    patterns = {p.pattern: p for p in report.error_patterns}
+    assert "walks_into_mate" in patterns
+    assert patterns["walks_into_mate"].count == 1
+
+
+def test_render_prompt_matches_snapshot() -> None:
+    """The prompt is a user-visible artifact — changes must be reviewed.
+
+    docs/06-coach.md calls for a snapshot test precisely because
+    determinism is not stability: the template can change completely
+    and still render the same string twice. Regenerate deliberately
+    with `UPDATE_SNAPSHOTS=1 uv run pytest -k snapshot`, then read the
+    diff of `testdata/coach_prompt.md` as the review artifact.
+    """
+    report = build_report("testuser", scenario_games())
     prompt = render_prompt(report)
 
-    assert prompt == render_prompt(report)
-    assert "## Player profile: testuser" in prompt
-    assert "| C60 | Ruy Lopez | 1 | 1-0-0 | 2.5 |" in prompt
-    assert "## Costliest moves" in prompt
-    assert "played e4 (lost 300 cp; engine preferred d4)" in prompt
-    assert "Training plan" in prompt
+    assert prompt == render_prompt(report), "render_prompt is not deterministic"
+    if os.environ.get("UPDATE_SNAPSHOTS"):
+        PROMPT_SNAPSHOT.write_text(prompt)
+    assert prompt == PROMPT_SNAPSHOT.read_text()
 
 
 def test_mate_scale_losses_render_as_words_not_centipawns() -> None:
-    evals = [
-        MoveEval(
-            ply=1,
-            san="f3",
-            eval_cp=None,
-            eval_mate=-2,
-            best_move="e2e4",
-            cp_loss=10_050,  # walked into a forced mate
-            judgment="blunder",
-        ),
-    ]
-    analysis = make_analysis(game_id="g-mate").model_copy(update={"evals": evals})
-    report = build_report("testuser", [analyzed("g-mate", analysis=analysis)])
+    # A mate-scale loss must never appear as a raw centipawn number
+    # anywhere in the prompt -- it surfaces as the walks_into_mate error
+    # pattern (never as a critical position -- those exclude mate-scale
+    # losses outright, see test_turning_points_prefer_contestable_...).
+    game = make_analyzed(
+        "g-mate",
+        ["f3", "e5", "g4", "Qh4#"],
+        color="white",
+        result="loss",
+        losses=[0, 9_950],
+    )
+    report = build_report("testuser", [game])
     prompt = render_prompt(report)
 
-    assert "forced-mate-scale blunder" in prompt
-    assert "10050" not in prompt  # no nonsense centipawn numbers
+    assert "9950" not in prompt
+    assert "10050" not in prompt
+    assert "Walked into a forced mate" in prompt
 
 
 def test_empty_report_prompt_has_no_empty_sections() -> None:
     prompt = render_prompt(build_report("testuser", []))
     assert "Repertoire" not in prompt
-    assert "Costliest" not in prompt
+    assert "Turning points" not in prompt
+    assert "Trend" not in prompt
+    assert "How games end" not in prompt
+    assert "Recurring error patterns" not in prompt
 
 
 async def test_agent_sdk_provider_collects_text(

@@ -519,6 +519,13 @@ td {
   width: 5rem;
 }
 
+/* Repertoire table: the line as played, shown under the system. */
+.rep-line {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: normal;
+}
+
 /* Games page: filters summary, analyze bar, sortable headers, paging. */
 
 .games-toolbar {

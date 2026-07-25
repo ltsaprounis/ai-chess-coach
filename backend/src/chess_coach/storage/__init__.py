@@ -17,15 +17,19 @@ from chess_coach.storage.games import (
     set_opening,
     upsert_games,
 )
+from chess_coach.storage.reports import CachedReport, ReportKey, get_report, save_report
 
 __all__ = [
+    "CachedReport",
     "Db",
     "GameFilters",
+    "ReportKey",
     "count_games_needing_analysis",
     "games_missing_opening",
     "games_needing_analysis",
     "get_explanation",
     "get_game",
+    "get_report",
     "latest_game_time",
     "list_analyses",
     "list_analyzed_games",
@@ -35,6 +39,7 @@ __all__ = [
     "opening_stats",
     "save_analysis",
     "save_explanation",
+    "save_report",
     "set_opening",
     "upsert_games",
 ]

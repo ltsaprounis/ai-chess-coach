@@ -1,7 +1,11 @@
 """Coach component — see docs/06-coach.md."""
 
 from chess_coach.coach.context import MoveContext, build_move_context
-from chess_coach.coach.prompt import render_explain_prompt, render_prompt
+from chess_coach.coach.prompt import (
+    PROMPT_VERSION,
+    render_explain_prompt,
+    render_prompt,
+)
 from chess_coach.coach.providers import (
     ClaudeAgentSdkProvider,
     CoachProvider,
@@ -14,6 +18,7 @@ from chess_coach.coach.providers import (
 from chess_coach.coach.report import build_report
 
 __all__ = [
+    "PROMPT_VERSION",
     "ClaudeAgentSdkProvider",
     "CoachProvider",
     "CoachProviderError",

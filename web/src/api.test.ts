@@ -30,12 +30,18 @@ describe("queryString", () => {
 function stats(partial: Partial<OpeningStats> & { eco: string }): OpeningStats {
   return {
     name: partial.eco,
+    color: "white",
+    system: "1.e4",
+    first_moves: "1.e4 e5",
     games: 0,
     wins: 0,
     losses: 0,
     draws: 0,
     analyzed_games: 0,
     avg_cp_loss: null,
+    opening_acpl: null,
+    opening_moves: 0,
+    player_moves: 0,
     ...partial,
   };
 }

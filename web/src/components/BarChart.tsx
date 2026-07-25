@@ -10,12 +10,19 @@ const VB_WIDTH = 480;
 const VB_HEIGHT = 220;
 const MARGIN = { top: 12, right: 12, bottom: 26, left: 36 };
 const INNER_WIDTH = VB_WIDTH - MARGIN.left - MARGIN.right;
-const INNER_HEIGHT = VB_HEIGHT - MARGIN.top - MARGIN.bottom;
+/** Extra headroom reserved above the bars when any datum carries a
+ *  `note` — without it, a bar near the max value leaves no room for
+ *  its label and the two overlap illegibly. */
+const NOTE_HEADROOM = 16;
 
 export type BarDatum = {
   label: string;
   value: number;
   color?: string;
+  /** Small annotation shown above the bar, e.g. "412 moves" — the
+   *  sample size behind the value, so a thin sample is visible rather
+   *  than read as a flat, confident number. */
+  note?: string;
 };
 
 type Props = {
@@ -32,8 +39,11 @@ export default function BarChart({ data, label }: Props) {
 
   const maxValue = Math.max(1, ...data.map((datum) => datum.value));
   const scale = axisScale(0, maxValue, { zeroBased: true, minStep: 1 });
+  const hasNotes = data.some((datum) => datum.note !== undefined);
+  const topMargin = MARGIN.top + (hasNotes ? NOTE_HEADROOM : 0);
+  const innerHeight = VB_HEIGHT - topMargin - MARGIN.bottom;
   const y = (value: number): number =>
-    MARGIN.top + INNER_HEIGHT - (value / scale.hi) * INNER_HEIGHT;
+    topMargin + innerHeight - (value / scale.hi) * innerHeight;
 
   const slot = INNER_WIDTH / data.length;
   const barWidth = Math.max(2, Math.min(56, slot - 2));
@@ -82,13 +92,24 @@ export default function BarChart({ data, label }: Props) {
               {/* Full-column hit target so the tooltip is easy to reach. */}
               <rect
                 x={MARGIN.left + index * slot}
-                y={MARGIN.top}
+                y={topMargin}
                 width={slot}
-                height={INNER_HEIGHT}
+                height={innerHeight}
                 fill="transparent"
               >
                 <title>{title}</title>
               </rect>
+              {datum.note !== undefined && (
+                <text
+                  x={barX + barWidth / 2}
+                  y={top - 5}
+                  textAnchor="middle"
+                  fontSize={9.5}
+                  fill={MUTED_COLOR}
+                >
+                  {datum.note}
+                </text>
+              )}
               <text
                 x={barX + barWidth / 2}
                 y={VB_HEIGHT - 8}

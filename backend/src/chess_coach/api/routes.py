@@ -9,9 +9,11 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import run_in_threadpool
 
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
+    PROMPT_VERSION,
     CoachProvider,
     CoachProviderError,
     PositionAnalystFn,
@@ -39,11 +41,13 @@ from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
     Db,
     GameFilters,
+    ReportKey,
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_explanation,
     get_game,
+    get_report,
     latest_game_time,
     list_analyzed_games,
     list_games,
@@ -51,6 +55,7 @@ from chess_coach.storage import (
     opening_stats,
     save_analysis,
     save_explanation,
+    save_report,
     set_opening,
     upsert_games,
 )
@@ -455,12 +460,22 @@ def coach_agents(cfg: CfgDep) -> CoachAgentsResponse:
 
 class CoachRequest(BaseModel):
     agent_id: str | None = None  # None -> config default agent
+    # The same window/time-control filters `/report` takes, so the coach
+    # reasons over the period the student is looking at rather than the
+    # player's entire history.
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
+    refresh: bool = False  # bypass the cache read and regenerate
 
 
 class CoachResponse(BaseModel):
     prompt: str
     advice: str
     agent_id: str
+    cached: bool
+    generated_at: int  # epoch seconds the served advice was generated
+    games_analyzed: int  # games covered at generation time
 
 
 @router.get("/players/{username}/report")
@@ -480,6 +495,7 @@ def player_report(
     return build_report(
         user,
         list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
+        time_class=time_class,
     )
 
 
@@ -491,23 +507,84 @@ async def coach_player(
     providers: ProvidersDep,
     body: CoachRequest | None = None,
 ) -> CoachResponse:
-    """Build the report, render the prompt, and ask the chosen agent."""
+    """Build the report, render the prompt, and ask the chosen agent.
+
+    Coaching is the most expensive call the app makes, so — like
+    `GET /games/{id}/explain` — it is cached: the window/time-class
+    filters are part of the cache key alongside the agent and
+    `coach.PROMPT_VERSION`, with a `refresh` escape hatch that skips the
+    cache read and overwrites the cached row.
+    """
     agent_id = cfg.coach.default_agent
-    if body is not None and body.agent_id is not None:
-        agent_id = body.agent_id
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
+    refresh = False
+    if body is not None:
+        if body.agent_id is not None:
+            agent_id = body.agent_id
+        since = body.since
+        until = body.until
+        time_class = body.time_class
+        refresh = body.refresh
     provider = providers.get(agent_id)
     if provider is None:
         raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
+
     user = username.lower()
-    report = build_report(user, list_analyzed_games(db, user))
-    if report.games_analyzed == 0:
-        raise HTTPException(
-            status_code=409,
-            detail="no analyzed games yet — sync and analyze first",
+    key = ReportKey(
+        username=user,
+        agent_id=agent_id,
+        prompt_version=PROMPT_VERSION,
+        since=since if since is not None else 0,
+        until=until if until is not None else 0,
+        time_class=time_class if time_class is not None else "",
+    )
+
+    if not refresh:
+        cached = await run_in_threadpool(get_report, db, key)
+        if cached is not None:
+            # A cache hit serves without touching storage's games table
+            # or the provider — a report for a player whose games were
+            # since deleted still serves from here.
+            return CoachResponse(
+                prompt=cached.prompt,
+                advice=cached.advice,
+                agent_id=agent_id,
+                cached=True,
+                generated_at=cached.created_at,
+                games_analyzed=cached.games_analyzed,
+            )
+
+    def _load_and_build() -> tuple[str, PlayerReport]:
+        # Runs off the event loop: list_analyzed_games hits storage and
+        # build_report replays every game with python-chess several
+        # times over, which is not cheap at hundreds of games.
+        games = list_analyzed_games(
+            db, user, since=since, until=until, time_class=time_class
         )
-    prompt = render_prompt(report)
+        if not games:
+            raise HTTPException(
+                status_code=409,
+                detail="no analyzed games yet — sync and analyze first",
+            )
+        report = build_report(user, games, time_class=time_class)
+        return render_prompt(report), report
+
+    prompt, report = await run_in_threadpool(_load_and_build)
     try:
         advice = await provider.complete(prompt)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return CoachResponse(prompt=prompt, advice=advice, agent_id=agent_id)
+
+    generated_at = await run_in_threadpool(
+        save_report, db, key, prompt, advice, report.games_analyzed
+    )
+    return CoachResponse(
+        prompt=prompt,
+        advice=advice,
+        agent_id=agent_id,
+        cached=False,
+        generated_at=generated_at,
+        games_analyzed=report.games_analyzed,
+    )

@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from chess_coach.domain import Opening
+from chess_coach.domain import GameAnalysis, MoveEval, Opening
 from chess_coach.storage import (
+    CachedReport,
     Db,
     GameFilters,
+    ReportKey,
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_explanation,
     get_game,
+    get_report,
     latest_game_time,
     list_analyses,
     list_analyzed_games,
@@ -23,12 +26,26 @@ from chess_coach.storage import (
     opening_stats,
     save_analysis,
     save_explanation,
+    save_report,
     set_opening,
     upsert_games,
 )
 from tests.factories import make_analysis, make_game
 
 RUY_LOPEZ = Opening(eco="C60", name="Ruy Lopez", ply=5)
+
+
+def _move_eval(ply: int, cp_loss: int) -> MoveEval:
+    """A minimal player-move eval — only ply and cp_loss matter here."""
+    return MoveEval(
+        ply=ply,
+        san="m",
+        eval_cp=0,
+        eval_mate=None,
+        best_move="m",
+        cp_loss=cp_loss,
+        judgment="best",
+    )
 
 
 @pytest.fixture
@@ -204,6 +221,233 @@ def test_opening_stats_time_window(db: Db) -> None:
     assert record(until=200) == (1, 1, 0)  # until is exclusive
 
 
+def test_opening_stats_splits_by_color(db: Db) -> None:
+    """Two colors of one opening are two rows, never merged.
+
+    Grouping by (eco, name) alone would fold the games the player chose
+    the Ruy Lopez in together with the games where they only faced it
+    as Black — the Englund-Gambit-shaped bug this whole table exists to
+    fix (docs/06-coach.md, "Repertoire: keyed by the side the player
+    had").
+    """
+    white_game = make_game(id="w1", color="white", result="win")
+    black_game = make_game(id="b1", color="black", result="loss")
+    upsert_games(db, [white_game, black_game])
+    set_opening(db, "w1", RUY_LOPEZ)
+    set_opening(db, "b1", RUY_LOPEZ)
+
+    stats = opening_stats(db, "testuser")
+    assert {(s.color, s.games, s.wins, s.losses) for s in stats} == {
+        ("white", 1, 1, 0),
+        ("black", 1, 0, 1),
+    }
+
+
+def test_opening_stats_system_and_first_moves_as_white(db: Db) -> None:
+    game = make_game(
+        id="w1", color="white", san_moves=["d4", "Nf6", "Nf3", "d5", "Bg5"]
+    )
+    upsert_games(db, [game])
+    set_opening(db, "w1", RUY_LOPEZ)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.system == "1.d4 2.Nf3 3.Bg5"  # the player's own moves only
+    assert stat.first_moves == "1.d4 Nf6 2.Nf3 d5 3.Bg5"  # both sides
+
+
+def test_opening_stats_system_and_first_moves_as_black(db: Db) -> None:
+    game = make_game(
+        id="b1", color="black", san_moves=["e4", "d6", "d4", "Nf6", "Nc3", "g6"]
+    )
+    upsert_games(db, [game])
+    set_opening(db, "b1", RUY_LOPEZ)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.system == "1...d6 2...Nf6 3...g6"  # the player's own moves only
+    assert stat.first_moves == "1.e4 d6 2.d4 Nf6 3.Nc3 g6"  # both sides
+
+
+def test_opening_stats_system_uses_most_played_line(db: Db) -> None:
+    """The majority line wins even when it was not inserted first."""
+    minority = make_game(id="g-b1", color="white", san_moves=["d4", "d5", "c4"])
+    majority_1 = make_game(id="g-a1", color="white", san_moves=["d4", "Nf6", "c4"])
+    majority_2 = make_game(id="g-a2", color="white", san_moves=["d4", "Nf6", "c4"])
+    upsert_games(db, [minority, majority_1, majority_2])
+    for game_id in ("g-b1", "g-a1", "g-a2"):
+        set_opening(db, game_id, RUY_LOPEZ)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.system == "1.d4 2.c4"
+    assert stat.first_moves == "1.d4 Nf6 2.c4"
+
+
+def test_opening_stats_line_tie_break_uses_lowest_game_id(db: Db) -> None:
+    """A 1-1 tie in game count is broken deterministically, not by
+    insertion order."""
+    tied_high_id = make_game(id="g-9", color="white", san_moves=["e4", "e5"])
+    tied_low_id = make_game(id="g-1", color="white", san_moves=["d4", "Nf6"])
+    upsert_games(db, [tied_high_id, tied_low_id])  # inserted high-id first
+    for game_id in ("g-9", "g-1"):
+        set_opening(db, game_id, RUY_LOPEZ)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.system == "1.d4"
+    assert stat.first_moves == "1.d4 Nf6"
+
+
+def test_opening_stats_system_follows_the_player_line_not_the_full_line(
+    db: Db,
+) -> None:
+    """The most-played *player* sequence wins even when some other,
+    less-played player sequence happens to have the single most-played
+    full (both-sides) line.
+
+    Six games share the player sequence "d4, Nf3, Bf4" (system A), but
+    its games split 3/2/1 across three different Black setups, so no
+    single full line backs more than 3 of them. Four games share a
+    different player sequence "d4, Bf4, e3" (system B), all against the
+    same Black setup, so system B's full line is backed by 4 games —
+    more than any single system-A full line. `system` must still come
+    from A (6 games beats 4), and `first_moves` from A's own
+    most-played full line (the 3-game bucket), never from B's.
+    """
+    bucket1 = [
+        make_game(
+            id=f"a1-{i}",
+            color="white",
+            san_moves=["d4", "d5", "Nf3", "Nf6", "Bf4", "e6"],
+        )
+        for i in range(3)
+    ]
+    bucket2 = [
+        make_game(
+            id=f"a2-{i}",
+            color="white",
+            san_moves=["d4", "d5", "Nf3", "Nf6", "Bf4", "c5"],
+        )
+        for i in range(2)
+    ]
+    bucket3 = [
+        make_game(
+            id="a3-0", color="white", san_moves=["d4", "g6", "Nf3", "Bg7", "Bf4", "c6"]
+        )
+    ]
+    system_b = [
+        make_game(
+            id=f"b-{i}",
+            color="white",
+            san_moves=["d4", "e6", "Bf4", "Nf6", "e3", "Be7"],
+        )
+        for i in range(4)
+    ]
+    games = bucket1 + bucket2 + bucket3 + system_b
+    upsert_games(db, games)
+    for game in games:
+        set_opening(db, game.id, RUY_LOPEZ)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.games == 10
+    assert stat.system == "1.d4 2.Nf3 3.Bf4"  # system A (6 games), not B (4)
+    assert stat.first_moves == "1.d4 d5 2.Nf3 Nf6 3.Bf4 e6"  # A's own top bucket
+
+
+def test_opening_stats_acpl_is_move_weighted_not_a_mean_of_means(db: Db) -> None:
+    """A 1-move game and a 5-move game must not weigh equally.
+
+    A naive mean of per-game means would average the short game's 100
+    cp loss with the long game's 0 and report 50.0. Move-weighted, the
+    100 is spread over all 6 player moves across both games: 16.7.
+    """
+    short_game = make_game(id="short", color="white", end_time=1)
+    long_game = make_game(id="long", color="white", end_time=2)
+    upsert_games(db, [short_game, long_game])
+    set_opening(db, "short", RUY_LOPEZ)
+    set_opening(db, "long", RUY_LOPEZ)
+
+    save_analysis(
+        db,
+        GameAnalysis(
+            game_id="short",
+            depth=16,
+            evals=[_move_eval(1, 100)],  # one player move (ply 1, White)
+            overall_acpl=100.0,
+            acpl_by_phase={"opening": 100.0, "middlegame": 0.0, "endgame": 0.0},
+            judgment_counts={
+                "best": 0,
+                "good": 0,
+                "inaccuracy": 0,
+                "mistake": 1,
+                "blunder": 0,
+            },
+        ),
+    )
+    save_analysis(
+        db,
+        GameAnalysis(
+            game_id="long",
+            depth=16,
+            # plies 1,3,5,7,9 are the player's (White); all lose nothing.
+            evals=[_move_eval(ply, 0) for ply in range(1, 10)],
+            overall_acpl=0.0,
+            acpl_by_phase={"opening": 0.0, "middlegame": 0.0, "endgame": 0.0},
+            judgment_counts={
+                "best": 9,
+                "good": 0,
+                "inaccuracy": 0,
+                "mistake": 0,
+                "blunder": 0,
+            },
+        ),
+    )
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.avg_cp_loss == 16.7  # 100 / (1 + 5), not (100 + 0) / 2 == 50.0
+    assert stat.analyzed_games == 2
+    # The denominator is the real move count across both games (6),
+    # never the game count (2) — that is what keeps a rollup that
+    # re-weights by these move-weighted.
+    assert stat.player_moves == 6
+    assert stat.opening_moves == 6  # all plies here are <= OPENING_PLIES
+
+
+def test_opening_stats_opening_acpl_excludes_later_phases(db: Db) -> None:
+    """opening_acpl restricts to opening-phase player moves; avg_cp_loss
+    does not."""
+    game = make_game(id="g1", color="white", end_time=1)
+    upsert_games(db, [game])
+    set_opening(db, "g1", RUY_LOPEZ)
+
+    save_analysis(
+        db,
+        GameAnalysis(
+            game_id="g1",
+            depth=16,
+            evals=[
+                _move_eval(1, 20),  # ply 1 <= OPENING_PLIES: opening
+                _move_eval(21, 300),  # ply 21 > OPENING_PLIES: middlegame
+            ],
+            overall_acpl=160.0,
+            acpl_by_phase={"opening": 20.0, "middlegame": 300.0, "endgame": 0.0},
+            judgment_counts={
+                "best": 1,
+                "good": 0,
+                "inaccuracy": 0,
+                "mistake": 0,
+                "blunder": 1,
+            },
+        ),
+    )
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.opening_acpl == 20.0
+    assert stat.avg_cp_loss == 160.0  # (20 + 300) / 2, whole game
+    # The two ACPL columns have different denominators: opening_moves
+    # counts only the opening-phase player move, player_moves counts
+    # both player moves in the game.
+    assert stat.opening_moves == 1
+    assert stat.player_moves == 2
+
+
 def test_list_analyzed_games_time_window(db: Db) -> None:
     upsert_games(
         db,
@@ -251,6 +495,32 @@ def test_games_missing_opening(db: Db) -> None:
     assert [g.id for g in games_missing_opening(db, "testuser")] == ["b"]
 
 
+def test_termination_round_trip(db: Db) -> None:
+    upsert_games(db, [make_game(termination="resigned")])
+
+    detail = get_game(db, "game-1")
+    assert detail is not None
+    assert detail.termination == "resigned"
+    assert list_games(db, "testuser", GameFilters())[0].termination == "resigned"
+
+
+def test_termination_is_none_until_resync_backfills_it(db: Db) -> None:
+    """Existing rows predate the column and stay NULL until re-synced.
+
+    A re-sync (a fresh upsert_games call for the same id) must backfill
+    termination — the entire migration story for pre-existing games.
+    """
+    upsert_games(db, [make_game(termination=None)])
+    detail = get_game(db, "game-1")
+    assert detail is not None
+    assert detail.termination is None
+
+    upsert_games(db, [make_game(termination="timeout")])
+    detail = get_game(db, "game-1")
+    assert detail is not None
+    assert detail.termination == "timeout"
+
+
 def test_reopen_persists_data_and_migrations_are_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "persist.sqlite3"
     first = open_db(path)
@@ -296,4 +566,100 @@ def test_explanation_survives_close_and_reopen(tmp_path: Path) -> None:
 
     second = open_db(path)  # migration 003 must be a no-op here
     assert get_explanation(second, "game-1", 3, "coach-a") == "castle early for safety"
+    second.close()
+
+
+def test_get_report_misses_when_absent(db: Db) -> None:
+    key = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+    assert get_report(db, key) is None
+
+
+def test_report_cache_round_trips_for_the_all_time_window(db: Db) -> None:
+    """since=0, until=0, time_class='' (the dataclass defaults) is the
+    all-time, all-controls report — the sentinel key that must round-
+    trip cleanly rather than colliding with NULL semantics.
+    """
+    key = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+    save_report(db, key, prompt="the prompt", advice="the advice", games_analyzed=42)
+
+    cached = get_report(db, key)
+    assert cached is not None
+    assert cached == CachedReport(
+        prompt="the prompt",
+        advice="the advice",
+        games_analyzed=42,
+        created_at=cached.created_at,
+    )
+    assert cached.created_at > 0
+
+
+def test_save_report_returns_the_created_at_it_persisted(db: Db) -> None:
+    """The caller (the API layer) must use this return value rather than
+    reading its own clock a second time — two independent reads of
+    `time.time()` can straddle a second boundary and disagree, which is
+    exactly the flake this return value exists to remove."""
+    key = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+
+    created_at = save_report(
+        db, key, prompt="the prompt", advice="the advice", games_analyzed=42
+    )
+
+    assert created_at > 0
+    cached = get_report(db, key)
+    assert cached is not None
+    assert cached.created_at == created_at
+
+
+def test_report_cache_upsert_overwrites_same_key(db: Db) -> None:
+    key = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+    save_report(db, key, prompt="first draft", advice="first advice", games_analyzed=10)
+    save_report(db, key, prompt="revised", advice="revised advice", games_analyzed=20)
+
+    cached = get_report(db, key)
+    assert cached is not None
+    assert cached.prompt == "revised"
+    assert cached.advice == "revised advice"
+    assert cached.games_analyzed == 20
+
+
+def test_report_cache_keys_include_the_window_and_agent(db: Db) -> None:
+    """A different window, time class, agent, or prompt version is a
+    distinct cache entry — never a collision with the all-time row."""
+    all_time = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+    windowed = all_time.model_copy(
+        update={"since": 100, "until": 200, "time_class": "blitz"}
+    )
+    other_agent = all_time.model_copy(update={"agent_id": "coach-b"})
+    other_prompt_version = all_time.model_copy(update={"prompt_version": "v2"})
+
+    save_report(db, all_time, prompt="all", advice="all advice", games_analyzed=5)
+
+    assert get_report(db, all_time) is not None
+    assert get_report(db, windowed) is None
+    assert get_report(db, other_agent) is None
+    assert get_report(db, other_prompt_version) is None
+
+    save_report(
+        db, windowed, prompt="windowed", advice="windowed advice", games_analyzed=2
+    )
+    cached_all_time = get_report(db, all_time)
+    cached_windowed = get_report(db, windowed)
+    assert cached_all_time is not None
+    assert cached_windowed is not None
+    assert cached_all_time.prompt == "all"
+    assert cached_windowed.prompt == "windowed"
+
+
+def test_report_survives_close_and_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "reports.sqlite3"
+    key = ReportKey(username="testuser", agent_id="coach-a", prompt_version="v1")
+
+    first = open_db(path)
+    save_report(first, key, prompt="prompt", advice="advice", games_analyzed=7)
+    first.close()
+
+    second = open_db(path)  # migration 005 must be a no-op here
+    cached = get_report(second, key)
+    assert cached is not None
+    assert cached.advice == "advice"
     second.close()

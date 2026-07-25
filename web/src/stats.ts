@@ -1,15 +1,16 @@
 // Pure stat computations behind the Dashboard page — no fetching,
 // no React, unit-tested in stats.test.ts.
 
-import type { GameSummary } from "./api.ts";
+import type { GameSummary, PlayerReport, TimeClass } from "./api.ts";
+import type { BarDatum } from "./components/BarChart.tsx";
+
+export type { TimeClass };
 
 /** The GameSummary fields the dashboard stats need. */
 export type StatGame = Pick<
   GameSummary,
   "result" | "color" | "time_class" | "end_time" | "player_rating"
 >;
-
-export type TimeClass = StatGame["time_class"];
 
 export type Tally = {
   games: number;
@@ -152,4 +153,37 @@ export function monthlyActivity(games: readonly StatGame[]): MonthActivity[] {
     }
   }
   return months;
+}
+
+/** The three phases a game passes through, in order. */
+export const PHASES = ["opening", "middlegame", "endgame"] as const;
+
+/**
+ * Splits a report's per-phase ACPL into chartable bars and the phases
+ * with no player moves at all. `PhaseStats.acpl` is `null` — never
+ * `0.0` — when `moves` is zero, and the two must never be conflated:
+ * a phase the player genuinely played error-free (moves > 0, acpl 0)
+ * still gets a real bar, while a phase never reached gets an explicit
+ * "no moves" state instead of a bar indistinguishable from flawless
+ * play. `?? 0` on `acpl` would silently reintroduce that bug.
+ */
+export function splitPhases(phases: PlayerReport["phases"]): {
+  phaseData: BarDatum[];
+  emptyPhases: string[];
+} {
+  const phaseData: BarDatum[] = [];
+  const emptyPhases: string[] = [];
+  for (const phase of PHASES) {
+    const stat = phases[phase];
+    if (stat !== undefined && stat.moves > 0 && stat.acpl !== null) {
+      phaseData.push({
+        label: phase,
+        value: stat.acpl,
+        note: `${stat.moves} move${stat.moves === 1 ? "" : "s"}`,
+      });
+    } else {
+      emptyPhases.push(phase);
+    }
+  }
+  return { phaseData, emptyPhases };
 }

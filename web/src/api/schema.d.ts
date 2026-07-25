@@ -239,6 +239,12 @@ export interface paths {
         /**
          * Coach Player
          * @description Build the report, render the prompt, and ask the chosen agent.
+         *
+         *     Coaching is the most expensive call the app makes, so — like
+         *     `GET /games/{id}/explain` — it is cached: the window/time-class
+         *     filters are part of the cache key alongside the agent and
+         *     `coach.PROMPT_VERSION`, with a `refresh` escape hatch that skips the
+         *     cache read and overwrites the cached row.
          */
         post: operations["coach_player_api_players__username__coach_post"];
         delete?: never;
@@ -293,6 +299,17 @@ export interface components {
         CoachRequest: {
             /** Agent Id */
             agent_id?: string | null;
+            /** Since */
+            since?: number | null;
+            /** Until */
+            until?: number | null;
+            /** Time Class */
+            time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh: boolean;
         };
         /** CoachResponse */
         CoachResponse: {
@@ -302,19 +319,89 @@ export interface components {
             advice: string;
             /** Agent Id */
             agent_id: string;
+            /** Cached */
+            cached: boolean;
+            /** Generated At */
+            generated_at: number;
+            /** Games Analyzed */
+            games_analyzed: number;
         };
-        /** CriticalPosition */
+        /**
+         * CriticalPosition
+         * @description A turning point the student can actually find and act on.
+         *
+         *     Identity (date, time class, color, opening, move number) so the
+         *     prompt can say "your 26...Nb6 in the June 14 blitz Pirc" instead of
+         *     "position 1", and the eval either side of the move so a blunder
+         *     that lost a won game is distinguishable from one played in an
+         *     already-lost position.
+         */
         CriticalPosition: {
+            /** Game Id */
+            game_id: string;
+            /** End Time */
+            end_time: number;
+            /**
+             * Time Class
+             * @enum {string}
+             */
+            time_class: "bullet" | "blitz" | "rapid" | "daily";
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /** Opening Name */
+            opening_name: string | null;
+            /** Ply */
+            ply: number;
+            /** Move Number */
+            move_number: number;
             /** Fen */
             fen: string;
+            /** Leading Up */
+            leading_up: string[];
             /** Played */
             played: string;
             /** Best */
             best: string;
             /** Cp Loss */
             cp_loss: number;
-            /** Game Id */
-            game_id: string;
+            /** Eval Before Cp */
+            eval_before_cp: number | null;
+            /** Eval Before Mate */
+            eval_before_mate: number | null;
+            /** Eval After Cp */
+            eval_after_cp: number | null;
+            /** Eval After Mate */
+            eval_after_mate: number | null;
+        };
+        /**
+         * ErrorPattern
+         * @description A recurring mistake, tagged deterministically with python-chess.
+         *
+         *     Counts generalize where anecdotes do not: "you hung a piece to a
+         *     check 34 times" outweighs five sample positions and costs no LLM
+         *     tokens. Tags are assigned by static analysis of the position, never
+         *     by a model.
+         */
+        ErrorPattern: {
+            /** Pattern */
+            pattern: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Share Of Blunders */
+            share_of_blunders: number;
+            /** Example Game Id */
+            example_game_id?: string | null;
+            /** Example Ply */
+            example_ply?: number | null;
+            /** Example End Time */
+            example_end_time?: number | null;
+            /** Example Move Number */
+            example_move_number?: number | null;
         };
         /** GameAnalysis */
         GameAnalysis: {
@@ -372,6 +459,8 @@ export interface components {
             opponent_rating: number;
             /** Accuracy */
             accuracy?: number | null;
+            /** Termination */
+            termination?: string | null;
             opening?: components["schemas"]["Opening"] | null;
             analysis?: components["schemas"]["GameAnalysis"] | null;
         };
@@ -412,6 +501,8 @@ export interface components {
             opponent_rating: number;
             /** Accuracy */
             accuracy?: number | null;
+            /** Termination */
+            termination?: string | null;
             opening?: components["schemas"]["Opening"] | null;
             /**
              * Analyzed
@@ -423,6 +514,22 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * MonthStats
+         * @description One calendar month — the trend row that says whether it helped.
+         */
+        MonthStats: {
+            /** Month */
+            month: string;
+            /** Games */
+            games: number;
+            /** Rating End */
+            rating_end: number | null;
+            /** Acpl */
+            acpl: number | null;
+            /** Blunder Rate */
+            blunder_rate: number | null;
         };
         /** MoveEval */
         MoveEval: {
@@ -453,12 +560,37 @@ export interface components {
             /** Ply */
             ply: number;
         };
-        /** OpeningStats */
+        /**
+         * OpeningStats
+         * @description One opening as the player met it, from one side of the board.
+         *
+         *     Rows are keyed by (color, eco, name): an opening is a property of
+         *     the *game*, so without `color` the table silently merges the lines
+         *     the player chose with the ones their opponents chose against them.
+         *
+         *     The two move strings do the work no opening name can. `system` is
+         *     the player's *own* first moves and nothing else — it is what a
+         *     repertoire actually is, and grouping on it separates the openings
+         *     they chose from the ones they merely faced. `first_moves` shows the
+         *     same line with both sides answering, which is what makes a gambit
+         *     visibly the opponent's. Consumers roll rows up by (color, system);
+         *     the rule is stated once in docs/06-coach.md and implemented against
+         *     this type by both the report and the Dashboard.
+         */
         OpeningStats: {
             /** Eco */
             eco: string;
             /** Name */
             name: string;
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /** System */
+            system: string;
+            /** First Moves */
+            first_moves: string;
             /** Games */
             games: number;
             /** Wins */
@@ -469,27 +601,94 @@ export interface components {
             draws: number;
             /** Analyzed Games */
             analyzed_games: number;
+            /** Opening Acpl */
+            opening_acpl?: number | null;
             /** Avg Cp Loss */
             avg_cp_loss?: number | null;
+            /**
+             * Opening Moves
+             * @default 0
+             */
+            opening_moves: number;
+            /**
+             * Player Moves
+             * @default 0
+             */
+            player_moves: number;
         };
-        /** PlayerReport */
+        /**
+         * OpponentStats
+         * @description How the player scores against stronger and weaker opposition.
+         */
+        OpponentStats: {
+            /** Avg Rating Diff */
+            avg_rating_diff: number;
+            vs_stronger: components["schemas"]["Record"];
+            vs_similar: components["schemas"]["Record"];
+            vs_weaker: components["schemas"]["Record"];
+        };
+        /**
+         * PhaseStats
+         * @description Player-move aggregates for one phase, with its denominator.
+         *
+         *     `acpl` is total centipawn loss ÷ `moves` — never a mean of per-game
+         *     means — and is None when the player made no moves in the phase. A
+         *     phase the games never reached must read as "no moves", not as 0.0
+         *     centipawn loss, which is indistinguishable from flawless play.
+         */
+        PhaseStats: {
+            /** Moves */
+            moves: number;
+            /** Acpl */
+            acpl: number | null;
+            /** Judgment Counts */
+            judgment_counts: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * PlayerReport
+         * @description Everything the coaching prompt and the Dashboard read.
+         *
+         *     Aggregated over analyzed games only; `window_start`/`window_end`
+         *     report the extent of the data actually covered, so neither the
+         *     model nor the student has to guess what period the numbers describe.
+         */
         PlayerReport: {
             /** Username */
             username: string;
             /** Games Analyzed */
             games_analyzed: number;
+            /** Player Moves */
+            player_moves: number;
+            /** Window Start */
+            window_start: number | null;
+            /** Window End */
+            window_end: number | null;
+            /** Time Class */
+            time_class: ("bullet" | "blitz" | "rapid" | "daily") | null;
+            record: components["schemas"]["Record"];
             /** Overall Acpl */
             overall_acpl: number;
-            /** Acpl By Phase */
-            acpl_by_phase: {
-                [key: string]: number;
+            /** Phases */
+            phases: {
+                [key: string]: components["schemas"]["PhaseStats"];
             };
             /** Judgment Counts */
             judgment_counts: {
                 [key: string]: number;
             };
+            /** Time Classes */
+            time_classes: components["schemas"]["TimeClassStats"][];
+            /** Months */
+            months: components["schemas"]["MonthStats"][];
+            /** Terminations */
+            terminations: components["schemas"]["TerminationStats"][];
+            opponents: components["schemas"]["OpponentStats"] | null;
             /** Openings */
             openings: components["schemas"]["OpeningStats"][];
+            /** Error Patterns */
+            error_patterns: components["schemas"]["ErrorPattern"][];
             /** Critical Positions */
             critical_positions: components["schemas"]["CriticalPosition"][];
         };
@@ -505,10 +704,71 @@ export interface components {
             /** Last Played */
             last_played: number;
         };
+        /**
+         * Record
+         * @description A win/loss/draw tally. Score is (wins + draws/2) / games.
+         */
+        Record: {
+            /**
+             * Games
+             * @default 0
+             */
+            games: number;
+            /**
+             * Wins
+             * @default 0
+             */
+            wins: number;
+            /**
+             * Losses
+             * @default 0
+             */
+            losses: number;
+            /**
+             * Draws
+             * @default 0
+             */
+            draws: number;
+        };
         /** SyncResult */
         SyncResult: {
             /** Games Synced */
             games_synced: number;
+        };
+        /**
+         * TerminationStats
+         * @description How games ended — 'lost on time' and 'resigned' are not the same.
+         */
+        TerminationStats: {
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "win" | "loss" | "draw";
+            /** Termination */
+            termination: string;
+            /** Games */
+            games: number;
+        };
+        /**
+         * TimeClassStats
+         * @description Play and rating movement within one time control.
+         */
+        TimeClassStats: {
+            /**
+             * Time Class
+             * @enum {string}
+             */
+            time_class: "bullet" | "blitz" | "rapid" | "daily";
+            record: components["schemas"]["Record"];
+            /** Rating Start */
+            rating_start: number;
+            /** Rating End */
+            rating_end: number;
+            /** Rating Min */
+            rating_min: number;
+            /** Rating Max */
+            rating_max: number;
         };
         /** ValidationError */
         ValidationError: {

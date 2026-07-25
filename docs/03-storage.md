@@ -17,12 +17,13 @@ games (
   time_control TEXT, time_class TEXT, result TEXT, end_time INTEGER,
   opponent TEXT, player_rating INTEGER, opponent_rating INTEGER,
   accuracy REAL,             -- chess.com's own, nullable
+  termination TEXT,          -- raw per-player result code, nullable
   opening_eco TEXT, opening_name TEXT, opening_ply INTEGER
 );
 analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),
   depth INTEGER, evals TEXT,         -- JSON list[MoveEval]
-  overall_acpl REAL,                 -- feeds opening_stats averages
+  overall_acpl REAL,                 -- the game's own mean cp loss
   acpl_by_phase TEXT, judgment_counts TEXT
 );
 explanations (                       -- cached coach move explanations
@@ -33,7 +34,26 @@ explanations (                       -- cached coach move explanations
   created_at INTEGER NOT NULL,      -- unix seconds
   PRIMARY KEY (game_id, ply, agent_id)
 );
+reports (                            -- cached whole-report coaching
+  username TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  since INTEGER NOT NULL,            -- window start, 0 = open
+  until INTEGER NOT NULL,            -- window end, 0 = open
+  time_class TEXT NOT NULL,          -- '' = all controls
+  prompt_version TEXT NOT NULL,      -- coach.PROMPT_VERSION
+  prompt TEXT NOT NULL,              -- what was sent, markdown
+  advice TEXT NOT NULL,              -- what came back, markdown
+  games_analyzed INTEGER NOT NULL,   -- coverage, for the staleness hint
+  created_at INTEGER NOT NULL,       -- unix seconds
+  PRIMARY KEY (username, agent_id, since, until, time_class,
+               prompt_version)
+);
 ```
+
+The window columns are NOT NULL with sentinels on purpose: SQLite
+treats NULLs as distinct in a primary key, so nullable window columns
+would make every all-time report a cache miss that silently inserts a
+new row and re-bills the model.
 
 Indexes on `games(username, end_time)`. Migrations are numbered SQL
 files applied at open; the current version lives in `user_version`.
@@ -63,6 +83,14 @@ def opening_stats(db, username: str, *, since: int | None = None,
                   time_class: TimeClass | None = None) -> list[OpeningStats]
 #   since/until: epoch-second window (since inclusive, until exclusive)
 #   time_class: restrict to one time control
+#   Rows are keyed by (color, eco, name) and carry both move strings
+#   and both ACPL columns — the semantics are defined once in
+#   06-coach.md; this is the SQL implementation of that definition,
+#   over classified games rather than analyzed ones. Returned
+#   most-played first (the coach's implementation sorts by impact
+#   instead; both are re-sorted by their consumers).
+#   ACPL comes from the per-move `analyses.evals`, not from
+#   `overall_acpl`, so the columns stay move-weighted.
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
 # Analysis repo
@@ -76,6 +104,27 @@ def get_explanation(db: Db, game_id: str, ply: int,
                     agent_id: str) -> str | None
 def save_explanation(db: Db, game_id: str, ply: int,
                      agent_id: str, text: str) -> None
+
+# Report cache. A whole-report coaching run is the most expensive
+# call the app makes, so house policy — user-triggered AND cached —
+# applies to it exactly as it does to explanations. `CachedReport`
+# is storage's own result type (the cached text plus the coverage
+# the UI needs to flag staleness).
+class ReportKey(BaseModel):        # every field is part of the key
+    username: str; agent_id: str; prompt_version: str
+    since: int = 0; until: int = 0     # 0 = open-ended
+    time_class: str = ""               # '' = all controls
+
+class CachedReport(BaseModel):
+    prompt: str; advice: str
+    games_analyzed: int; created_at: int
+
+def get_report(db: Db, key: ReportKey) -> CachedReport | None
+def save_report(db: Db, key: ReportKey, prompt: str, advice: str,
+                games_analyzed: int) -> int
+#   Returns the created_at (unix seconds) it persisted. Storage reads
+#   that clock exactly once per call; callers use the return value
+#   instead of taking a second, possibly-disagreeing reading.
 ```
 
 Pydantic handles the JSON columns (`model_dump_json` /

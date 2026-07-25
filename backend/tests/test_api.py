@@ -1,5 +1,6 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -19,7 +20,14 @@ from chess_coach.config import (
     OpeningsConfig,
     StorageConfig,
 )
-from chess_coach.domain import CoachAgent, EvalLine, Game, GameAnalysis
+from chess_coach.domain import (
+    AnalyzedGame,
+    CoachAgent,
+    EvalLine,
+    Game,
+    GameAnalysis,
+    TimeClass,
+)
 from chess_coach.engine import (
     EngineError,
     EngineOptions,
@@ -29,6 +37,7 @@ from chess_coach.engine import (
 )
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import (
+    Db,
     get_explanation,
     open_db,
     save_analysis,
@@ -346,8 +355,6 @@ def test_openings_endpoint_aggregates_records(
 
 
 def wait_until_analyzed(client: TestClient, username: str, expected: int) -> None:
-    import time
-
     for _ in range(100):
         analyzed: Any = get(
             client,
@@ -388,7 +395,14 @@ def test_analyze_fills_opening_avg_cp_loss(
     wait_until_analyzed(client, "testuser", 1)
 
     stats: Any = get(client, "/api/players/testuser/openings").json()
-    assert stats[0]["avg_cp_loss"] == 2.5
+    # avg_cp_loss is move-weighted over the player's own plies only
+    # (storage's opening_stats); StubPool's canned analysis credits the
+    # player's one recorded ply (white, ply 1) with zero loss, so
+    # "filled in" here means "no longer None" -- a plain `== 0.0` cannot
+    # tell a computed zero apart from an unfilled None collapsing to
+    # zero, which is exactly the bug this assertion exists to catch.
+    assert stats[0]["avg_cp_loss"] is not None
+    assert stats[0]["avg_cp_loss"] == 0.0
     assert stats[0]["analyzed_games"] == 1
 
 
@@ -458,7 +472,12 @@ def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> 
     report: Any = get(client, "/api/players/TestUser/report").json()
     assert report["username"] == "testuser"
     assert report["games_analyzed"] == 2
-    assert report["overall_acpl"] == 2.5
+    # overall_acpl is move-weighted over the player's own plies only
+    # (coach's build_report); make_analysis's canned analysis credits
+    # the player's one recorded ply per game (white, ply 1) with zero
+    # loss, so this is the two games' combined average, not a per-game
+    # echo of GameAnalysis.overall_acpl.
+    assert report["overall_acpl"] == 0.0
 
 
 def test_report_and_openings_respect_time_window(
@@ -491,6 +510,10 @@ def test_report_and_openings_respect_time_window(
         client, "/api/players/testuser/report", params={"time_class": "blitz"}
     ).json()
     assert blitz["games_analyzed"] == 0
+    # The applied filter is recorded on the report even with no games --
+    # PlayerReport.time_class is the scope of the numbers, not a summary
+    # of the games found.
+    assert blitz["time_class"] == "blitz"
 
 
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
@@ -521,7 +544,9 @@ def test_coach_uses_default_agent_without_a_body(
     body: Any = post(client, "/api/players/testuser/coach").json()
     assert body["agent_id"] == "claude"
     assert body["advice"] == "advice from claude"
-    assert "## Player profile: testuser" in body["prompt"]
+    assert "# Coaching brief -- testuser" in body["prompt"]
+    assert body["cached"] is False
+    assert body["games_analyzed"] == 1
 
 
 def test_coach_routes_to_the_requested_agent(client: TestClient, db_path: Path) -> None:
@@ -548,6 +573,164 @@ def test_coach_409s_without_analyzed_games(client: TestClient, db_path: Path) ->
     response = post(client, "/api/players/testuser/coach")
     assert response.status_code == 409
     assert "analyze first" in response.json()["error"]["message"]
+
+
+def test_coach_caches_and_a_repeat_is_a_cache_hit(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    first: Any = post(client, "/api/players/testuser/coach").json()
+    assert first["cached"] is False
+    assert first["games_analyzed"] == 1
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+
+    second: Any = post(client, "/api/players/testuser/coach").json()
+    assert second["cached"] is True
+    assert second["prompt"] == first["prompt"]
+    assert second["advice"] == first["advice"]
+    assert second["games_analyzed"] == 1
+    assert second["generated_at"] == first["generated_at"]
+    # No further provider invocation on the cache hit.
+    assert len(provider.prompts) == 1
+
+
+def test_coach_generated_at_survives_a_clock_tick(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """generated_at must be the single clock read storage's save_report
+    persists, not a second, independent time.time() read in the API
+    layer -- two independent reads can straddle a second boundary and
+    disagree, which a same-second test run would never catch. Here every
+    time.time() call advances the clock by a full second, so any second,
+    independent read would necessarily disagree with the one persisted."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    clock = [1_700_000_000.0]
+
+    def ticking_time() -> float:
+        clock[0] += 1.0
+        return clock[0]
+
+    monkeypatch.setattr(time, "time", ticking_time)
+
+    first: Any = post(client, "/api/players/testuser/coach").json()
+    assert first["cached"] is False
+
+    second: Any = post(client, "/api/players/testuser/coach").json()
+    assert second["cached"] is True
+    assert second["generated_at"] == first["generated_at"]
+
+
+def test_coach_refresh_bypasses_the_cache_and_regenerates(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    post(client, "/api/players/testuser/coach")
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+
+    refreshed: Any = post(
+        client, "/api/players/testuser/coach", json={"refresh": True}
+    ).json()
+    assert refreshed["cached"] is False
+    assert len(provider.prompts) == 2  # refresh bypasses the cache read
+
+    # A plain repeat is now a cache hit on the freshly-generated advice.
+    repeat: Any = post(client, "/api/players/testuser/coach").json()
+    assert repeat["cached"] is True
+    assert len(provider.prompts) == 2
+
+
+def test_coach_cache_key_separates_windows_and_agents(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """Two coach runs over different scopes are different reports, not a
+    cache hit -- the window/time-class filters and the agent are all
+    part of the cache key, and the all-time (no window) case is the
+    sentinel most likely to collide with itself if since/until/time_class
+    default to None instead of the documented 0/""."""
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=100),
+            make_game(id="g-new", end_time=200),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+    provider = stub_provider(stub_registry, "claude")
+
+    all_time: Any = post(client, "/api/players/testuser/coach").json()
+    assert all_time["cached"] is False
+    assert all_time["games_analyzed"] == 2
+    assert len(provider.prompts) == 1
+
+    # A repeat all-time call is a cache hit -- the sentinel case.
+    repeat_all_time: Any = post(client, "/api/players/testuser/coach").json()
+    assert repeat_all_time["cached"] is True
+    assert len(provider.prompts) == 1
+
+    # A windowed call is a different cache key -> another provider call.
+    windowed: Any = post(
+        client, "/api/players/testuser/coach", json={"since": 150}
+    ).json()
+    assert windowed["cached"] is False
+    assert windowed["games_analyzed"] == 1
+    assert len(provider.prompts) == 2
+
+    # Repeating the same window is a cache hit.
+    repeat_windowed: Any = post(
+        client, "/api/players/testuser/coach", json={"since": 150}
+    ).json()
+    assert repeat_windowed["cached"] is True
+    assert len(provider.prompts) == 2
+
+    # A different agent over the same (all-time) scope is a third key.
+    other_agent: Any = post(
+        client, "/api/players/testuser/coach", json={"agent_id": "beta"}
+    ).json()
+    assert other_agent["cached"] is False
+    assert len(provider.prompts) == 2
+    assert len(stub_provider(stub_registry, "beta").prompts) == 1
+
+
+def test_coach_filters_reach_list_analyzed_games_and_the_prompt(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=100, time_class="blitz"),
+            make_game(id="g-new", end_time=200, time_class="rapid"),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+    calls: list[dict[str, object]] = []
+    original = routes.list_analyzed_games
+
+    def spy(
+        db: Db,
+        username: str,
+        *,
+        since: int | None = None,
+        until: int | None = None,
+        time_class: TimeClass | None = None,
+    ) -> list[AnalyzedGame]:
+        calls.append({"since": since, "until": until, "time_class": time_class})
+        return original(db, username, since=since, until=until, time_class=time_class)
+
+    monkeypatch.setattr(routes, "list_analyzed_games", spy)
+
+    body: Any = post(
+        client,
+        "/api/players/testuser/coach",
+        json={"since": 150, "time_class": "rapid"},
+    ).json()
+
+    assert calls == [{"since": 150, "until": None, "time_class": "rapid"}]
+    assert body["games_analyzed"] == 1
+    assert "Scope: rapid only" in body["prompt"]
 
 
 def test_eval_streams_eval_events_then_done(client: TestClient) -> None:

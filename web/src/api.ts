@@ -2,16 +2,18 @@
 // Types come from the generated OpenAPI schema; run `make gen-api`
 // after changing backend routes or models.
 
-import type { paths } from "./api/schema";
+import type { components, paths } from "./api/schema";
 
 export type GameSummary =
   paths["/api/players/{username}/games"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type TimeClass = GameSummary["time_class"];
 export type GameDetail =
   paths["/api/games/{game_id}"]["get"]["responses"]["200"]["content"]["application/json"];
 export type SyncResult =
   paths["/api/players/{username}/sync"]["post"]["responses"]["200"]["content"]["application/json"];
 export type OpeningStats =
   paths["/api/players/{username}/openings"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type Color = OpeningStats["color"];
 export type AnalyzeResult =
   paths["/api/players/{username}/analyze"]["post"]["responses"]["202"]["content"]["application/json"];
 export type GameAnalysis = NonNullable<GameDetail["analysis"]>;
@@ -22,6 +24,7 @@ export type PlayerSummary =
   paths["/api/players"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type CoachResponse =
   paths["/api/players/{username}/coach"]["post"]["responses"]["200"]["content"]["application/json"];
+export type CoachRequest = components["schemas"]["CoachRequest"];
 export type CoachAgentsResponse =
   paths["/api/coach/agents"]["get"]["responses"]["200"]["content"]["application/json"];
 export type CoachAgent = CoachAgentsResponse["agents"][number];
@@ -41,7 +44,20 @@ export type GameFilters = {
 export type StatsQuery = {
   since?: number;
   until?: number;
-  time_class?: string;
+  time_class?: TimeClass;
+};
+
+/**
+ * Scoping + cache control for `POST /coach` — the same window and
+ * time-control filters `/report` takes, so the coach reasons over the
+ * period the student is looking at rather than every game ever
+ * played. `refresh` skips the server cache and overwrites the cached
+ * report, mirroring `explainUrl`'s `refresh` — used by the page's
+ * Regenerate action.
+ */
+export type CoachOptions = StatsQuery & {
+  agentId?: string;
+  refresh?: boolean;
 };
 
 /** Page size for the dashboard's fetch-everything helper. */
@@ -134,12 +150,21 @@ export const api = {
         `/api/players/${encodeURIComponent(username)}/report${queryString(query)}`,
       ),
     ),
-  coach: async (username: string, agentId?: string): Promise<CoachResponse> =>
+  coach: async (
+    username: string,
+    options: CoachOptions = {},
+  ): Promise<CoachResponse> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/coach`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent_id: agentId ?? null }),
+        body: JSON.stringify({
+          agent_id: options.agentId ?? null,
+          since: options.since ?? null,
+          until: options.until ?? null,
+          time_class: options.time_class ?? null,
+          refresh: options.refresh ?? false,
+        } satisfies CoachRequest),
       }),
     ),
   coachAgents: async (): Promise<CoachAgentsResponse> =>

@@ -55,13 +55,25 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    win rate by color, current rating per time class, ACPL, blunder
    rate), rating-over-time and monthly-activity charts from
    `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
-   judgment charts from `GET /players/{u}/report`, and the
-   sortable worst-first repertoire table from
-   `GET /players/{u}/openings` (collapsed client-side into opening
-   families with a min-games threshold, showing analyzed coverage — see
-   `openings.ts`); a family links through to the Games page filtered to
-   it. Both the Games and repertoire tables use the shared
-   `useTableSort` hook + `SortableTh` header for click-to-sort columns.
+   judgment charts plus the termination breakdown and the monthly
+   ACPL/blunder-rate trend from `GET /players/{u}/report`, and the
+   sortable repertoire table from `GET /players/{u}/openings`
+   (collapsed client-side into opening families with a min-games
+   threshold, showing analyzed coverage — see `openings.ts`); a family
+   links through to the Games page filtered to it. Both the Games and
+   repertoire tables use the shared `useTableSort` hook + `SortableTh`
+   header for click-to-sort columns.
+
+   The repertoire table is **split by the color the player had**, with
+   the system (their own first moves) and the line as played shown as
+   columns: without them the table lists openings the opponent chose
+   as if they were the player's own. Its two ACPL columns are labelled
+   for what they measure — opening-phase and whole-game — since only
+   the first is opening advice. `groupByFamily` rolls rows up by
+   `(color, system)` per the rule in [06-coach.md](06-coach.md); two
+   colors of one family never merge. The ACPL-by-phase chart shows the
+   move count behind each bar and renders "no endgame moves" where the
+   phase has none, rather than a zero bar that reads as flawless play.
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
    (per class, defaulting to the most-played so stats are never mixed
    across controls) filters scope the whole page: games-derived stats
@@ -70,7 +82,15 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    components — no chart library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
-   button (the manual-use fallback).
+   button (the manual-use fallback). The same time-window and
+   time-control controls the Dashboard uses scope the request, so the
+   advice covers the period the student is looking at rather than
+   every game they have ever played. Advice is cached server-side per
+   (player, agent, window, prompt version): a cached result renders
+   immediately, labelled with when it was generated and over how many
+   games, with a "Regenerate" action (`refresh: true`) — the same
+   user-triggered rule as the in-game Explain button, since both spend
+   LLM calls.
 6. **Settings** (`/settings`) — manages the two things a player
    configures: the saved players (list from `GET /api/players` + an
    add-a-player form) and the coach LLM (`AgentSelect`, persisted in

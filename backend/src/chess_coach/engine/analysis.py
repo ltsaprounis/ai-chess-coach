@@ -11,6 +11,9 @@ import chess
 from pydantic import BaseModel
 
 from chess_coach.domain import (
+    ENDGAME_MATERIAL,
+    OPENING_PLIES,
+    PIECE_POINTS,
     Game,
     GameAnalysis,
     Judgment,
@@ -22,15 +25,6 @@ from chess_coach.engine.uci import PositionEval
 
 EvaluateFn = Callable[[str], Awaitable[PositionEval]]
 
-_OPENING_PLIES = 20  # 10 full moves, until book-exit refinement lands
-_ENDGAME_MATERIAL = 13  # per side, kings excluded
-_PIECE_POINTS = {
-    chess.QUEEN: 9,
-    chess.ROOK: 5,
-    chess.BISHOP: 3,
-    chess.KNIGHT: 3,
-    chess.PAWN: 1,
-}
 _JUDGMENTS: tuple[Judgment, ...] = (
     "best",
     "good",
@@ -117,10 +111,16 @@ def _judge(
 
 
 def _phase(ply: int, board_before: chess.Board) -> Phase:
-    if ply <= _OPENING_PLIES:
+    """The shared rule (domain constants) — mirrored by the coach.
+
+    The coach re-derives phases when aggregating raw `evals`
+    (docs/06-coach.md); `test_phase_rule_matches_coach` asserts the two
+    stay in step.
+    """
+    if ply <= OPENING_PLIES:
         return "opening"
     if all(
-        _material(board_before, color) <= _ENDGAME_MATERIAL
+        _material(board_before, color) <= ENDGAME_MATERIAL
         for color in (chess.WHITE, chess.BLACK)
     ):
         return "endgame"
@@ -129,8 +129,9 @@ def _phase(ply: int, board_before: chess.Board) -> Phase:
 
 def _material(board: chess.Board, color: chess.Color) -> int:
     return sum(
-        points * len(board.pieces(piece, color))
-        for piece, points in _PIECE_POINTS.items()
+        PIECE_POINTS.get(piece.symbol().lower(), 0)
+        for piece in board.piece_map().values()
+        if piece.color == color
     )
 
 

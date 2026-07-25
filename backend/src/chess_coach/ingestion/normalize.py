@@ -3,7 +3,10 @@
 Rules documented in docs/02-ingestion.md (informed by the
 chess-guess repo): standard chess only, per-player result codes
 mapped to win/draw/loss, usernames lowercased, unknown shapes
-skipped with a warning rather than raised.
+skipped with a warning rather than raised. The raw per-player result
+code is also kept verbatim as `Game.termination` — the win/draw/loss
+collapse discards how a game actually ended (timeout vs. resigned vs.
+checkmated), which is coaching signal in its own right.
 """
 
 import io
@@ -80,6 +83,7 @@ def normalize_game(raw: RawGame, username: str) -> Game | None:
         player_rating=me.rating,
         opponent_rating=opponent.rating,
         accuracy=accuracy,
+        termination=me.result,
     )
 
 

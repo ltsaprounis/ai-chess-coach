@@ -38,6 +38,11 @@ uses the same API and informed the normalization rules below.
     `50move`, `timevsinsufficient`
   - loss: `checkmated`, `timeout`, `resigned`, `lose`, `abandoned`
   - unknown codes log a warning and skip the game.
+- The raw code is **also kept verbatim** as `Game.termination`. The
+  win/draw/loss collapse discards the difference between losing on
+  time, resigning and being mated, which is among the most actionable
+  signals a coach has; keeping the code costs one column and makes
+  "38% of your losses are on the clock" answerable.
 - `accuracies.{white,black}`, when present, is kept on the `Game` as
   `accuracy` — a free sanity check against our own engine numbers.
 

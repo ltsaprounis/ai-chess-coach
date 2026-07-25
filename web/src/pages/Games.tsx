@@ -4,7 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type GameSummary, score } from "../api.ts";
 import Layout from "../components/Layout.tsx";
 import SortableTh from "../components/SortableTh.tsx";
-import { openingFamily } from "../openings.ts";
+import { openingFamily, playerSystem } from "../openings.ts";
 import { tally } from "../stats.ts";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
 import { compareValues, useTableSort } from "../useTableSort.ts";
@@ -66,8 +66,14 @@ export default function Games() {
   const queryClient = useQueryClient();
 
   // `family` (and an initial `time_class`) can arrive from a repertoire
-  // drill-through on the dashboard.
+  // drill-through on the dashboard. Since the repertoire is grouped by
+  // (color, system) and two systems can share a name-root label (the
+  // London and the Torre are both "Queen's Pawn Game"), `color` and
+  // `system` narrow the match to the exact row that was clicked —
+  // matching on `family` alone would silently reunite them.
   const family = searchParams.get("family") ?? "";
+  const familyColor = searchParams.get("color") ?? "";
+  const familySystem = searchParams.get("system") ?? "";
 
   const [result, setResult] = useState("");
   const [timeClass, setTimeClass] = useState(
@@ -108,15 +114,42 @@ export default function Games() {
 
   const filtered = useMemo(() => {
     const needle = opponent.trim().toLowerCase();
-    return (games.data ?? []).filter(
-      (game) =>
-        (result === "" || game.result === result) &&
-        (timeClass === "" || game.time_class === timeClass) &&
-        (analyzedFilter === "" || String(game.analyzed) === analyzedFilter) &&
-        (family === "" || openingFamily(game.opening?.name ?? "") === family) &&
-        (needle === "" || game.opponent.toLowerCase().includes(needle)),
-    );
-  }, [games.data, result, timeClass, analyzedFilter, family, opponent]);
+    return (games.data ?? []).filter((game) => {
+      if (result !== "" && game.result !== result) {
+        return false;
+      }
+      if (timeClass !== "" && game.time_class !== timeClass) {
+        return false;
+      }
+      if (analyzedFilter !== "" && String(game.analyzed) !== analyzedFilter) {
+        return false;
+      }
+      // A drill-through link carries `color` + `system` when it comes
+      // from the (color, system)-keyed repertoire table; older links
+      // (or a bare `family` typed into the URL) fall back to the
+      // coarser name-root match.
+      if (family !== "") {
+        const matches =
+          familySystem !== ""
+            ? game.color === familyColor &&
+              playerSystem(game.san_moves, game.color) === familySystem
+            : openingFamily(game.opening?.name ?? "") === family;
+        if (!matches) {
+          return false;
+        }
+      }
+      return needle === "" || game.opponent.toLowerCase().includes(needle);
+    });
+  }, [
+    games.data,
+    result,
+    timeClass,
+    analyzedFilter,
+    family,
+    familyColor,
+    familySystem,
+    opponent,
+  ]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -139,7 +172,17 @@ export default function Games() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on filter/sort change
   useEffect(() => {
     setPage(0);
-  }, [result, timeClass, analyzedFilter, family, opponent, sortKey, sortDir]);
+  }, [
+    result,
+    timeClass,
+    analyzedFilter,
+    family,
+    familyColor,
+    familySystem,
+    opponent,
+    sortKey,
+    sortDir,
+  ]);
 
   const analyze = useMutation({
     mutationFn: () =>
@@ -180,6 +223,8 @@ export default function Games() {
   const clearFamily = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("family");
+    next.delete("color");
+    next.delete("system");
     setSearchParams(next, { replace: true });
   };
 
@@ -251,6 +296,7 @@ export default function Games() {
         <p className="games-summary">
           <span className="filter-chip">
             Opening: <strong>{family}</strong>
+            {familyColor !== "" ? ` (as ${familyColor})` : ""}
             <button
               type="button"
               className="chip-clear"

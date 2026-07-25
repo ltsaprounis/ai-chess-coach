@@ -71,7 +71,10 @@ async def test_sync_yields_one_batch_per_month_skipping_bad_games() -> None:
     async with make_mock_client() as client:
         ids = await batch_ids("TestUser", None, client)
     # Variant, unknown-result, and malformed entries are dropped.
-    assert ids == [["g-may-1"], ["g-june-1", "g-june-5"]]
+    assert ids == [
+        ["g-may-1"],
+        ["g-june-timeout", "g-june-resigned", "g-june-1", "g-june-5"],
+    ]
 
 
 async def test_normalization_maps_colors_results_and_accuracy() -> None:
@@ -91,11 +94,32 @@ async def test_normalization_maps_colors_results_and_accuracy() -> None:
     assert games["g-may-1"].result == "loss"
 
 
+async def test_termination_keeps_the_raw_code_behind_result() -> None:
+    async with make_mock_client() as client:
+        games = await all_games(client)
+
+    # win, draw, and loss all keep their raw per-player code verbatim.
+    assert games["g-june-1"].termination == "win"
+    assert games["g-june-5"].termination == "repetition"
+    assert games["g-may-1"].termination == "checkmated"
+
+    # The win/draw/loss collapse otherwise hides *how* a loss happened;
+    # timeout and resignation both map to result="loss" but must remain
+    # distinguishable via termination.
+    timeout_loss = games["g-june-timeout"]
+    resigned_loss = games["g-june-resigned"]
+    assert timeout_loss.result == "loss"
+    assert resigned_loss.result == "loss"
+    assert timeout_loss.termination == "timeout"
+    assert resigned_loss.termination == "resigned"
+    assert timeout_loss.termination != resigned_loss.termination
+
+
 async def test_since_skips_whole_months_without_fetching_them() -> None:
     requested: list[str] = []
     async with make_mock_client(requested) as client:
         ids = await batch_ids("TestUser", JUNE_START, client)
-    assert ids == [["g-june-1", "g-june-5"]]
+    assert ids == [["g-june-timeout", "g-june-resigned", "g-june-1", "g-june-5"]]
     assert MAY_URL not in requested
 
 
