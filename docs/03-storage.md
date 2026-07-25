@@ -83,10 +83,12 @@ def opening_stats(db, username: str, *, since: int | None = None,
                   time_class: TimeClass | None = None) -> list[OpeningStats]
 #   since/until: epoch-second window (since inclusive, until exclusive)
 #   time_class: restrict to one time control
-#   Rows are keyed by (color, eco, name) and carry both move strings
-#   and both ACPL columns — the semantics are defined once in
-#   06-coach.md; this is the SQL implementation of that definition,
-#   over classified games rather than analyzed ones. Returned
+#   Rows are keyed by (color, eco, name) and carry both move strings,
+#   both ACPL columns, and `faced` (opponent-named by `opening_ply`
+#   parity, strict majority per row) — the semantics are defined once
+#   in 06-coach.md; this is storage's implementation of that
+#   definition, over classified games rather than analyzed ones (a SQL
+#   fetch, aggregated in Python). Returned
 #   most-played first (the coach's implementation sorts by impact
 #   instead; both are re-sorted by their consumers).
 #   ACPL comes from the per-move `analyses.evals`, not from

@@ -586,9 +586,11 @@ export interface components {
          *     repertoire actually is, and grouping on it separates the openings
          *     they chose from the ones they merely faced. `first_moves` shows the
          *     same line with both sides answering, which is what makes a gambit
-         *     visibly the opponent's. Consumers roll rows up by (color, system);
-         *     the rule is stated once in docs/06-coach.md and implemented against
-         *     this type by both the report and the Dashboard.
+         *     visibly the opponent's. Consumers partition rows by `faced`, then
+         *     roll the chosen partition up by (color, system) and the faced one
+         *     by (color, name root); the rules are stated once in
+         *     docs/06-coach.md and implemented against this type by both the
+         *     report and the Dashboard.
          */
         OpeningStats: {
             /** Eco */
@@ -604,6 +606,8 @@ export interface components {
             system: string;
             /** First Moves */
             first_moves: string;
+            /** Faced */
+            faced: boolean;
             /** Games */
             games: number;
             /** Wins */

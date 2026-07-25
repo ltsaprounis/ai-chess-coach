@@ -34,6 +34,7 @@ function stats(partial: Partial<OpeningStats> & { eco: string }): OpeningStats {
     color: "white",
     system: "1.e4",
     first_moves: "1.e4 e5",
+    faced: false,
     games: 0,
     wins: 0,
     losses: 0,

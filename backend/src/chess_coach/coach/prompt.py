@@ -24,7 +24,7 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-rework"
+PROMPT_VERSION = "2026-07-faced-split"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -51,9 +51,9 @@ _INSTRUCTIONS = (
     "engine: pawns, never centipawns, and lead with the idea -- the "
     "threat, the plan, what a line wins -- before any number.\n"
     "- **Attribution.** An opening is the student's own only where the "
-    "repertoire lists it under their color as a system they chose. Never "
-    "advise dropping an opening they only face as the other side -- "
-    "recommend a response to it instead.\n"
+    'repertoire lists it under their color in "Systems you chose". Never '
+    'advise dropping a line from the "What you face" table -- recommend '
+    "a response to it instead.\n"
     "- **Citation.** Refer to positions and games by date and move "
     'number (e.g. "your 26...Nb6 in the June 14 blitz game"), never by '
     "list position or table row.\n"
@@ -228,16 +228,38 @@ def _terminations_section(report: PlayerReport) -> str:
 
 
 @dataclass
-class _Family:
-    label: str
-    system: str
-    first_moves: str
+class _FamilyRecord:
+    """Fields shared by both rollup partitions -- enough for impact/score."""
+
     games: int
     wins: int
     losses: int
     draws: int
     opening_acpl: float | None
     avg_cp_loss: float | None
+
+
+@dataclass
+class _Family(_FamilyRecord):
+    """A chosen-partition family: one (color, system) rolled up."""
+
+    label: str
+    system: str
+    first_moves: str
+
+
+@dataclass
+class _FacedFamily(_FamilyRecord):
+    """A faced-partition family: one (color, name root) rolled up.
+
+    No `system` -- for faced lines the name is the opponent's choice, and
+    the player's own reply (hence `system`) varies member to member, so
+    there is no single system to show (docs/06-coach.md, "Family
+    rollup").
+    """
+
+    label: str
+    first_moves: str
 
 
 def _repertoire_section(report: PlayerReport) -> str:
@@ -254,44 +276,89 @@ def _repertoire_section(report: PlayerReport) -> str:
 
 
 def _repertoire_color_section(label: str, rows: list[OpeningStats]) -> str:
-    families = _rollup_families(rows)
-    total_games = sum(f.games for f in families)
-    main = [f for f in families if f.games >= _REPERTOIRE_SAMPLE_FLOOR]
-    tail = [f for f in families if f.games < _REPERTOIRE_SAMPLE_FLOOR]
-    main.sort(key=lambda f: -_family_impact(f))
+    """Two sub-tables per color: rows partition by `faced` before any
+    rollup (docs/06-coach.md, "Rendering the split"). The chosen partition
+    is the player's repertoire; the faced partition is the coaching
+    target for "learn a response", never "stop playing this". Below-floor
+    families from *both* partitions fold into one shared long-tail line.
+    """
+    total_games = sum(r.games for r in rows)
+    chosen_families = _rollup_chosen_families([r for r in rows if not r.faced])
+    faced_families = _rollup_faced_families([r for r in rows if r.faced])
 
-    lines = [f"### As {label} ({_plural(total_games, 'game')})"]
-    if main:
-        lines += [
-            "| System (first moves) | Games | Score | Opening ACPL | Game ACPL |",
-            "|---|---|---|---|---|",
-        ]
-        for f in main:
-            # `system` (the student's own moves) is rendered explicitly, not
-            # just implied by `first_moves` -- an opponent's reply can make
-            # an otherwise-unremarkable system read like a named gambit
-            # (the Englund regression), so the student's own choice must be
-            # legible on its own, not just inferable from the full line.
-            lines.append(
-                f"| {f.label} -- {f.system} ({f.first_moves}) | {f.games} "
-                f"| {_family_score(f)}% | {_pawns_or_na(f.opening_acpl)} "
-                f"| {_pawns_or_na(f.avg_cp_loss)} |"
-            )
-    else:
+    chosen_main = [f for f in chosen_families if f.games >= _REPERTOIRE_SAMPLE_FLOOR]
+    chosen_tail = [f for f in chosen_families if f.games < _REPERTOIRE_SAMPLE_FLOOR]
+    faced_main = [f for f in faced_families if f.games >= _REPERTOIRE_SAMPLE_FLOOR]
+    faced_tail = [f for f in faced_families if f.games < _REPERTOIRE_SAMPLE_FLOOR]
+    chosen_main.sort(key=lambda f: -_family_impact(f))
+    faced_main.sort(key=lambda f: -_family_impact(f))
+
+    parts = [
+        f"### As {label} ({_plural(total_games, 'game')})",
+        _chosen_subtable(chosen_main),
+        _faced_subtable(faced_main, label),
+    ]
+    tail: list[_FamilyRecord] = [*chosen_tail, *faced_tail]
+    if tail:
+        tail_games = sum(f.games for f in tail)
+        parts.append(
+            f"Long tail: {_plural(len(tail), 'line')} under "
+            f"{_REPERTOIRE_SAMPLE_FLOOR} games, {_plural(tail_games, 'game')} total."
+        )
+    return "\n".join(parts)
+
+
+def _chosen_subtable(families: list[_Family]) -> str:
+    lines = ["#### Systems you chose"]
+    if not families:
         lines.append(
             f"No line yet reaches the {_REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
         )
-    if tail:
-        tail_games = sum(f.games for f in tail)
+        return "\n".join(lines)
+    lines += [
+        "| System (first moves) | Games | Score | Opening ACPL | Game ACPL |",
+        "|---|---|---|---|---|",
+    ]
+    for f in families:
+        # `system` (the student's own moves) is rendered explicitly, not
+        # just implied by `first_moves` -- an opponent's reply can make
+        # an otherwise-unremarkable system read like a named gambit
+        # (the Englund regression), so the student's own choice must be
+        # legible on its own, not just inferable from the full line.
         lines.append(
-            f"Long tail: {_plural(len(tail), 'line')} under "
-            f"{_REPERTOIRE_SAMPLE_FLOOR} games, {_plural(tail_games, 'game')} total."
+            f"| {f.label} -- {f.system} ({f.first_moves}) | {f.games} "
+            f"| {_family_score(f)}% | {_pawns_or_na(f.opening_acpl)} "
+            f"| {_pawns_or_na(f.avg_cp_loss)} |"
         )
     return "\n".join(lines)
 
 
-def _rollup_families(rows: list[OpeningStats]) -> list[_Family]:
-    """Collapse rows by (color, system) -- rows already share one color.
+def _faced_subtable(families: list[_FacedFamily], label: str) -> str:
+    lines = [f"#### What you face as {label}"]
+    if not families:
+        lines.append(
+            f"No line yet reaches the {_REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
+        )
+        return "\n".join(lines)
+    lines += [
+        "| Opponent's line (your reply) | Games | Score | Opening ACPL | Game ACPL |",
+        "|---|---|---|---|---|",
+    ]
+    for f in families:
+        # No `system` column here -- the name is the opponent's choice,
+        # and `first_moves` alone already shows both the opponent's line
+        # and the player's own reply to it.
+        lines.append(
+            f"| {f.label} ({f.first_moves}) | {f.games} "
+            f"| {_family_score(f)}% | {_pawns_or_na(f.opening_acpl)} "
+            f"| {_pawns_or_na(f.avg_cp_loss)} |"
+        )
+    return "\n".join(lines)
+
+
+def _rollup_chosen_families(rows: list[OpeningStats]) -> list[_Family]:
+    """Collapse the chosen partition by (color, system) -- rows already
+    share one color and are pre-filtered to `not faced`.
 
     Labels the family with its most-played member's name root (the name
     up to the first colon); ties broken by games, then eco, then name for
@@ -337,6 +404,52 @@ def _rollup_families(rows: list[OpeningStats]) -> list[_Family]:
     return families
 
 
+def _rollup_faced_families(rows: list[OpeningStats]) -> list[_FacedFamily]:
+    """Collapse the faced partition by (color, name root) -- rows already
+    share one color and are pre-filtered to `faced`.
+
+    For faced lines the name *is* the opponent's choice, while the
+    player's own system varies with their replies, so keying on `system`
+    (as the chosen partition does) would split one opposing gambit across
+    as many families as the player has tried answers to it. Summing and
+    the move-weighted ACPL re-weighting are otherwise identical to
+    `_rollup_chosen_families` -- only the key differs (docs/06-coach.md,
+    "Family rollup").
+    """
+    groups: dict[str, list[OpeningStats]] = defaultdict(list)
+    for row in rows:
+        groups[row.name.split(":")[0].strip()].append(row)
+
+    families: list[_FacedFamily] = []
+    for label, members in groups.items():
+        lead = min(members, key=lambda r: (-r.games, r.eco, r.name))
+        families.append(
+            _FacedFamily(
+                label=label,
+                first_moves=lead.first_moves,
+                games=sum(r.games for r in members),
+                wins=sum(r.wins for r in members),
+                losses=sum(r.losses for r in members),
+                draws=sum(r.draws for r in members),
+                opening_acpl=_weighted_mean(
+                    [
+                        (r.opening_acpl, r.opening_moves)
+                        for r in members
+                        if r.opening_acpl is not None
+                    ]
+                ),
+                avg_cp_loss=_weighted_mean(
+                    [
+                        (r.avg_cp_loss, r.player_moves)
+                        for r in members
+                        if r.avg_cp_loss is not None
+                    ]
+                ),
+            )
+        )
+    return families
+
+
 def _weighted_mean(pairs: list[tuple[float, int]]) -> float | None:
     total_weight = sum(w for _, w in pairs)
     if not total_weight:
@@ -344,12 +457,12 @@ def _weighted_mean(pairs: list[tuple[float, int]]) -> float | None:
     return round(sum(v * w for v, w in pairs) / total_weight, 1)
 
 
-def _family_impact(f: _Family) -> float:
+def _family_impact(f: _FamilyRecord) -> float:
     score = (f.wins + f.draws / 2) / f.games if f.games else 0.0
     return f.games * (0.5 - score)
 
 
-def _family_score(f: _Family) -> str:
+def _family_score(f: _FamilyRecord) -> str:
     score = (f.wins + f.draws / 2) / f.games if f.games else 0.0
     return f"{score * 100:.0f}"
 

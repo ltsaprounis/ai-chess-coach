@@ -5,14 +5,24 @@
 // unit-tested in openings.test.ts.
 //
 // Family rollup rule — docs/06-coach.md "Family rollup": consumers
-// (this component's prompt, and the Dashboard) collapse rows by
-// (color, system), labelling the family with its most-played member's
-// name root. Keying on the player's OWN moves (never the opponent's)
-// is what keeps the London and the Torre apart though both are named
-// "Queen's Pawn Game", and gathers every Pirc under one heading though
-// the opponent's replies split the lichess names a dozen ways. The
-// backend implements the identical rule for the coach report — see
-// docs/06-coach.md — so the two must never disagree.
+// (this component's prompt, and the Dashboard) partition rows by
+// `faced` BEFORE rolling up. The chosen partition (the systems the
+// player picked) collapses by (color, system) exactly as before,
+// labelling the family with its most-played member's name root.
+// Keying on the player's OWN moves (never the opponent's) is what
+// keeps the London and the Torre apart though both are named "Queen's
+// Pawn Game", and gathers every Pirc under one heading though the
+// opponent's replies split the lichess names a dozen ways. The faced
+// partition (the lines opponents chose) collapses instead by (color,
+// name root), because for a faced line the name *is* the opponent's
+// choice while the player's own reply varies — keying it on `system`
+// would split one opposing gambit across as many families as the
+// player has tried answers to it. Two colors of one family never
+// merge, and the two partitions never merge into each other even when
+// their key happens to collide (a chosen French and a faced French
+// stay apart). The backend implements the identical rule for the
+// coach report — see docs/06-coach.md — so the two must never
+// disagree.
 
 import type { Color, OpeningStats } from "./api.ts";
 
@@ -24,8 +34,16 @@ export type OpeningFamily = {
    *  them, never this label alone. */
   family: string;
   color: Color;
-  /** The rollup key: the player's own first moves, e.g. "1.d4 2.Nf3
-   *  3.Bg5" as White. Identical for every row in this family. */
+  /** True for the "what you face" partition (rolled up by name root),
+   *  false for the "systems you chose" partition (rolled up by
+   *  (color, system)) — see the rollup rule above. */
+  faced: boolean;
+  /** In the chosen partition this is the rollup key: the player's own
+   *  first moves, e.g. "1.d4 2.Nf3 3.Bg5" as White, identical for
+   *  every row in the family. In the faced partition it is NOT the
+   *  key (name root is) and is display-only: the most-played member's
+   *  `system`, i.e. the player's most common reply to this opponent
+   *  line. */
   system: string;
   /** The most-played member's full line (both sides), e.g.
    *  "1.d4 d5 2.Nf3 Nf6 3.Bg5 e6" — representative, not summed. */
@@ -42,18 +60,24 @@ export type OpeningFamily = {
   /** Opening-phase-only ACPL, analysis-weighted; null when nothing is
    *  analyzed. This is the opening-advice number. */
   openingAcpl: number | null;
+  /** The rolled-up rows' identities — one (eco, name) pair per member
+   *  `OpeningStats` row that fed this family. Frozen into the
+   *  drill-through link so the Games page can match by exactly the
+   *  rows this family counted, transpositions included, instead of
+   *  re-deriving membership from a representative line that only some
+   *  of the group's games actually played
+   *  (docs/fixes-2026-07/03-faced-openings.md). */
+  members: { eco: string; name: string }[];
 };
 
 /** The name up to the first colon, e.g. "French Defense: Knight
- *  Variation" -> "French Defense". Used only as a display label — the
- *  rollup key is (color, system), never this string. */
+ *  Variation" -> "French Defense". Used as a display label in the
+ *  chosen partition (whose rollup key is (color, system), never this
+ *  string) and as the rollup key itself, paired with color, in the
+ *  faced partition. */
 export function openingFamily(name: string): string {
   const colon = name.indexOf(":");
   return (colon === -1 ? name : name.slice(0, colon)).trim();
-}
-
-function familyKey(color: Color, system: string): string {
-  return `${color} ${system}`;
 }
 
 /** Deterministic "most-played member" ordering: more games first, tied
@@ -80,22 +104,29 @@ type MutableFamily = {
   draws: number;
   analyzedGames: number;
   representative: OpeningStats;
+  members: Map<string, { eco: string; name: string }>;
 };
 
 /**
- * Group openings by (color, system): sum the records and analyzed
- * counts, and roll up `avg_cp_loss` and `opening_acpl` move-weighted
- * over the member rows that have one — per docs/06-coach.md "Family
- * rollup": `opening_acpl` is `Σ(opening_acpl × opening_moves) ÷
- * Σ opening_moves`, `avg_cp_loss` likewise over `player_moves`.
- * Weighting by `analyzed_games` instead (a game count) would rebuild
- * the mean-of-per-game-means one level up from the rows the backend
- * just removed it from — a 15-move loss would weigh as much as a
- * 90-move grind. Two colors of the same system are never merged, and
- * the label/first-moves shown come from the group's most-played
- * member.
+ * Roll one partition (already filtered to all-chosen or all-faced) up
+ * by `keyOf`, summing records and analyzed counts and move-weighting
+ * both ACPL columns over the member rows that have one — per
+ * docs/06-coach.md "Family rollup": `opening_acpl` is
+ * `Σ(opening_acpl × opening_moves) ÷ Σ opening_moves`, `avg_cp_loss`
+ * likewise over `player_moves`. Weighting by `analyzed_games` instead
+ * (a game count) would rebuild the mean-of-per-game-means one level up
+ * from the rows the backend just removed it from — a 15-move loss
+ * would weigh as much as a 90-move grind. These summing rules are
+ * identical in both partitions; only `keyOf` differs. The
+ * label/first-moves/system shown come from the group's most-played
+ * member — for the faced partition `system` is therefore display-only
+ * (the player's commonest reply), never the rollup key.
  */
-export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
+function rollupPartition(
+  openings: OpeningStats[],
+  keyOf: (opening: OpeningStats) => string,
+  faced: boolean,
+): OpeningFamily[] {
   const byKey = new Map<string, MutableFamily>();
   const cpLossSum = new Map<string, number>();
   const cpLossMoves = new Map<string, number>();
@@ -103,7 +134,7 @@ export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
   const openingAcplMoves = new Map<string, number>();
 
   for (const opening of openings) {
-    const key = familyKey(opening.color, opening.system);
+    const key = keyOf(opening);
     let bucket = byKey.get(key);
     if (bucket === undefined) {
       bucket = {
@@ -117,9 +148,14 @@ export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
         draws: 0,
         analyzedGames: 0,
         representative: opening,
+        members: new Map(),
       };
       byKey.set(key, bucket);
     }
+    bucket.members.set(`${opening.eco}|${opening.name}`, {
+      eco: opening.eco,
+      name: opening.name,
+    });
     bucket.games += opening.games;
     bucket.wins += opening.wins;
     bucket.losses += opening.losses;
@@ -147,6 +183,7 @@ export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
       bucket.representative = opening;
       bucket.family = openingFamily(opening.name);
       bucket.firstMoves = opening.first_moves;
+      bucket.system = opening.system;
     }
   }
 
@@ -166,6 +203,7 @@ export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
     families.push({
       family: bucket.family,
       color: bucket.color,
+      faced,
       system: bucket.system,
       firstMoves: bucket.firstMoves,
       games: bucket.games,
@@ -175,9 +213,36 @@ export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
       analyzedGames: bucket.analyzedGames,
       avgCpLoss,
       openingAcpl,
+      members: [...bucket.members.values()],
     });
   }
   return families;
+}
+
+/**
+ * Partition rows by `faced` before rolling up (docs/06-coach.md
+ * "Family rollup"): the chosen partition (the systems the player
+ * picked) by (color, system), the faced partition (the lines
+ * opponents picked against them) by (color, name root). The two
+ * partitions are rolled up independently and never merge into each
+ * other, even when a chosen row and a faced row happen to share both
+ * a color and a name root.
+ */
+export function groupByFamily(openings: OpeningStats[]): OpeningFamily[] {
+  const chosen = openings.filter((opening) => !opening.faced);
+  const faced = openings.filter((opening) => opening.faced);
+  return [
+    ...rollupPartition(
+      chosen,
+      (opening) => `${opening.color} ${opening.system}`,
+      false,
+    ),
+    ...rollupPartition(
+      faced,
+      (opening) => `${opening.color} ${openingFamily(opening.name)}`,
+      true,
+    ),
+  ];
 }
 
 /**

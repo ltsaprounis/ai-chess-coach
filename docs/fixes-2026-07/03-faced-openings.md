@@ -86,22 +86,53 @@ run against both)
   including the transposition/majority case. Do not weaken the
   scenario fixture.
 
+### Fold-in: the drill-through undercount (pre-existing)
+
+A family row can report 8 games while clicking through shows 4. The
+family's `games` sums all member (color, eco, name) rows,
+transpositions included, but `Games.tsx` matched
+`playerSystem(game.first_plies, game.color) === system` — an exact
+match against the family's *representative* line, which transposed
+games fail. Documented semantics (06-coach.md: a row's `system` is
+the commonest way there, not the only one), but the UI disagreeing
+with its own numbers is a defect, and this slice reworks exactly
+that drill-through — so it is fixed here.
+
+Pinned mechanism: **drill through by the family's member (eco, name)
+list.** Per color there is exactly one `OpeningStats` row per
+(eco, name) and each row rolls into exactly one family, so filtering
+the Games page by "the game's classified opening is in the member
+list, same color" reproduces the family's count by construction, in
+both partitions. The list is frozen into the link at click time, so
+the drill-through shows exactly the games the row counted (rather
+than recomputing membership under a possibly different scope).
+
 ### frontend-dev (after `pnpm gen:api`)
 
 - `web/src/openings.ts`: `groupByFamily` partitions by `faced`
   first, applying the pinned rollup keys (chosen: color+system;
-  faced: color+name root). `openings.test.ts` gains cases keeping
-  the two partitions apart.
+  faced: color+name root), and each `OpeningFamily` carries its
+  member `(eco, name)` pairs. `openings.test.ts` gains cases keeping
+  the two partitions apart and covering the member lists.
 - `web/src/components/RepertoireTable.tsx` (and the Dashboard
   section that hosts it): render the two groups under headings
   mirroring the prompt — repertoire first, "What you face" second.
-- Drill-through: chosen rows keep the (color, system) link. Faced
-  rows link with `family` + `color` only (no `system`).
-  `Games.tsx`'s name-root fallback match must then also respect
-  `color` when present — today it ignores it.
+- Drill-through, both partitions: the link carries `family` (chip
+  label), `color`, and one `opening=ECO|name` param per member row
+  (`|` is safe — ECO codes never contain it). Faced rows also carry
+  a display-only `faced=true` so the filter chip can read "faced as
+  white" rather than "as white". `Games.tsx` matches
+  the game's classified opening against the pairs, same color.
+  Fallbacks for older or hand-typed links, in order: a `system`
+  param keeps the exact (color, system) match (`playerSystem` and
+  `GameSummary.first_plies` stay live for this); a bare `family`
+  falls back to the name-root match, which must now respect `color`
+  when present — today it ignores it.
 
 Acceptance: both gates green; agreement test covers `faced`; the
-snapshot diff shows the Englund under "What you face as White".
+snapshot diff shows the Englund under "What you face as White"; a
+family row's game count equals the row count its drill-through
+shows (transpositions included).
 
 ## Out of scope
 

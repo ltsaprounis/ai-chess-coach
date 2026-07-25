@@ -68,14 +68,34 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    repertoire tables use the shared `useTableSort` hook + `SortableTh`
    header for click-to-sort columns.
 
-   The repertoire table is **split by the color the player had**, with
-   the system (their own first moves) and the line as played shown as
-   columns: without them the table lists openings the opponent chose
-   as if they were the player's own. Its two ACPL columns are labelled
-   for what they measure — opening-phase and whole-game — since only
-   the first is opening advice. `groupByFamily` rolls rows up by
-   `(color, system)` per the rule in [06-coach.md](06-coach.md); two
-   colors of one family never merge. The ACPL-by-phase chart shows the
+   The repertoire is **split by the color the player had**, and
+   within each color **split again into chosen vs faced** — the
+   systems the player picked first, then a "What you face" table of
+   the lines opponents picked against them — mirroring the coach
+   prompt. The system (their own first moves) and the line as played
+   are shown as columns: without them the tables would list openings
+   the opponent chose as if they were the player's own. The two ACPL
+   columns are labelled for what they measure — opening-phase and
+   whole-game — since only the first is opening advice.
+   `groupByFamily` partitions rows by `faced` *before* rolling up,
+   per the rule in [06-coach.md](06-coach.md): the chosen partition
+   by `(color, system)`, the faced partition by `(color, name root)`;
+   two colors of one family never merge.
+
+   A family row drills through to the Games page carrying its member
+   openings — one `opening=ECO|name` URL param per rolled-up row —
+   plus `color` (faced rows add a display-only `faced=true`, which
+   the filter chip renders as "faced as white"), and the Games
+   filter matches games by their classified opening against that
+   list. Matching instead by
+   re-deriving the player's system from each game's moves only ever
+   matched the family's *representative* line, so transposed games
+   silently dropped out and a family reporting 8 games drilled
+   through to 4. The member list is frozen at click time, so the
+   drill-through shows exactly the games the row counted. Legacy
+   links still work: a `system` param falls back to the exact
+   system match, a bare `family` to the name-root match — which
+   respects `color` when present. The ACPL-by-phase chart shows the
    move count behind each bar and renders "no endgame moves" where the
    phase has none, rather than a zero bar that reads as flawless play.
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control

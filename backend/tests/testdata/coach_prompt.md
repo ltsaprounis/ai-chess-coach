@@ -34,16 +34,23 @@ Wins 9
 ## Repertoire
 
 ### As White (13 games)
+#### Systems you chose
 | System (first moves) | Games | Score | Opening ACPL | Game ACPL |
 |---|---|---|---|---|
-| Englund Gambit Complex -- 1.d4 2.dxe5 3.Nf3 (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) | 5 | 40% | 5.16 | 5.16 |
 | Queen's Pawn Game -- 1.d4 2.Bf4 3.e3 (1.d4 d5 2.Bf4 Nf6 3.e3 e6) | 6 | 58% | 0.14 | 0.20 |
+#### What you face as White
+| Opponent's line (your reply) | Games | Score | Opening ACPL | Game ACPL |
+|---|---|---|---|---|
+| Englund Gambit Complex (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) | 5 | 40% | 5.16 | 5.16 |
 Long tail: 1 line under 5 games, 2 games total.
 
 ### As Black (6 games)
+#### Systems you chose
 | System (first moves) | Games | Score | Opening ACPL | Game ACPL |
 |---|---|---|---|---|
 | Pirc Defense -- 1...d6 2...Nf6 3...g6 (1.e4 d6 2.d4 Nf6 3.Nc3 g6) | 6 | 58% | 0.15 | 0.19 |
+#### What you face as Black
+No line yet reaches the 5-game sample floor.
 
 ## Recurring error patterns
 | Pattern | Count | % of blunders | Example |
@@ -80,7 +87,7 @@ You played **7.Qd2** (lost about 1.3 pawns): -0.20 to -1.50. Engine preferred **
 ## Instructions
 Write the coaching brief now, following these rules:
 - **Audience and register.** Write for a club player, not a fellow engine: pawns, never centipawns, and lead with the idea -- the threat, the plan, what a line wins -- before any number.
-- **Attribution.** An opening is the student's own only where the repertoire lists it under their color as a system they chose. Never advise dropping an opening they only face as the other side -- recommend a response to it instead.
+- **Attribution.** An opening is the student's own only where the repertoire lists it under their color in "Systems you chose". Never advise dropping a line from the "What you face" table -- recommend a response to it instead.
 - **Citation.** Refer to positions and games by date and move number (e.g. "your 26...Nb6 in the June 14 blitz game"), never by list position or table row.
 - **One biggest lever.** Open with the single change most likely to raise this student's results, not a flat list of co-equal weaknesses. Order everything else by impact behind it.
 - **Honesty.** If the data does not support a conclusion -- too few games, no sample past the floor -- say so plainly instead of filling the section anyway.

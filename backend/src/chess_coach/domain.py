@@ -140,9 +140,11 @@ class OpeningStats(BaseModel):
     repertoire actually is, and grouping on it separates the openings
     they chose from the ones they merely faced. `first_moves` shows the
     same line with both sides answering, which is what makes a gambit
-    visibly the opponent's. Consumers roll rows up by (color, system);
-    the rule is stated once in docs/06-coach.md and implemented against
-    this type by both the report and the Dashboard.
+    visibly the opponent's. Consumers partition rows by `faced`, then
+    roll the chosen partition up by (color, system) and the faced one
+    by (color, name root); the rules are stated once in
+    docs/06-coach.md and implemented against this type by both the
+    report and the Dashboard.
     """
 
     eco: str
@@ -150,6 +152,16 @@ class OpeningStats(BaseModel):
     color: Color  # the side the player had in these games
     system: str  # the player's own moves, e.g. "1.d4 2.Nf3 3.Bg5"
     first_moves: str  # the line as played, e.g. "1.d4 e5 2.dxe5"
+    # True when the name describes the opponent's choice, not the
+    # player's. Per game: `Opening.ply` is the 1-based ply of the book
+    # move that fixed the name — White moves are odd plies, Black even —
+    # so the name is opponent-named iff that parity belongs to the
+    # opponent (player is white → even ply, player is black → odd ply).
+    # Per row: transpositions can reach one name at different plies, so
+    # the flag is a strict majority over the group's games — true iff
+    # opponent-named games * 2 > `games`; ties are chosen. Both
+    # producers implement exactly this rule (docs/06-coach.md).
+    faced: bool
     games: int
     wins: int
     losses: int

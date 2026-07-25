@@ -297,6 +297,13 @@ def opening_stats(
     in `analyses.evals`, so those are finished in Python rather than in
     SQL. `opening_acpl`/`avg_cp_loss` are None until a group has at
     least one analyzed game.
+
+    `faced` marks rows whose name describes the opponent's choice: per
+    game, opponent-named iff `opening_ply`'s parity belongs to the
+    opponent; per row, a strict majority of the group's games (ties are
+    chosen). Same rule as `06-coach.md`'s Python implementation over
+    analyzed games; `test_repertoire_agreement.py` keeps the two in
+    sync.
     """
     clauses = ["g.username = ?", "g.opening_eco IS NOT NULL"]
     params: list[object] = [username]
@@ -312,8 +319,8 @@ def opening_stats(
     rows = db.execute(
         f"""
         SELECT g.id AS id, g.color AS color, g.opening_eco AS eco,
-               g.opening_name AS name, g.result AS result,
-               g.san_moves AS san_moves, a.evals AS evals
+               g.opening_name AS name, g.opening_ply AS opening_ply,
+               g.result AS result, g.san_moves AS san_moves, a.evals AS evals
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE {" AND ".join(clauses)}
         """,
@@ -336,6 +343,8 @@ def _opening_group_stats(key: _OpeningKey, rows: list[sqlite3.Row]) -> OpeningSt
     wins = sum(1 for r in rows if r["result"] == "win")
     losses = sum(1 for r in rows if r["result"] == "loss")
     draws = sum(1 for r in rows if r["result"] == "draw")
+    opponent_named = sum(1 for r in rows if _is_opponent_named(r, color))
+    faced = opponent_named * 2 > len(rows)  # strict majority; ties are chosen
 
     best_line = _most_played_line(rows, color)
 
@@ -364,6 +373,7 @@ def _opening_group_stats(key: _OpeningKey, rows: list[sqlite3.Row]) -> OpeningSt
         color=color,
         system=_format_own_moves(best_line, color),
         first_moves=_format_first_moves(best_line),
+        faced=faced,
         games=len(rows),
         wins=wins,
         losses=losses,
@@ -440,6 +450,15 @@ def _most_played_line(rows: list[sqlite3.Row], color: Color) -> tuple[str, ...]:
 def _is_player_ply(ply: int, color: Color) -> bool:
     """Plies alternate white/black starting at 1 (white's first move)."""
     return ply % 2 == 1 if color == "white" else ply % 2 == 0
+
+
+def _is_opponent_named(row: sqlite3.Row, color: Color) -> bool:
+    """True iff `opening_ply`'s parity belongs to the opponent (06-coach.md,
+    "Repertoire: keyed by the side the player had")."""
+    ply = row["opening_ply"]
+    if ply is None:
+        return False  # no ply on a classified row: treat as player-named
+    return (color == "white") == (ply % 2 == 0)
 
 
 def _format_own_moves(line: Sequence[str], color: Color, count: int = 3) -> str:

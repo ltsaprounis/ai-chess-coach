@@ -202,7 +202,8 @@ def test_critical_positions_replay_to_fen() -> None:
 
 
 def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
-    """The Englund regression (COACH-REPORT-IMPROVEMENTS.md finding 1).
+    """The Englund regression (COACH-REPORT-IMPROVEMENTS.md finding 1) and
+    its faced/chosen split (docs/fixes-2026-07/03-faced-openings.md).
 
     The student is White; the Englund is the opponent's own gambit
     (1...e5!? in reply to 1.d4). The guarantee this protects is
@@ -213,11 +214,17 @@ def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
     line (both sides), or from the wrong side's plies, would surface
     "e5" as a standalone token in `system`; asserting only that the row
     is rendered somewhere would not catch that.
+
+    `faced` must also resolve True from the opponent-named ply, and the
+    prompt must render the row under "What you face as White" -- never
+    under "Systems you chose", where a misattributed line would invite
+    advice to stop playing a gambit the student never chose.
     """
     report = build_report("testuser", scenario_games())
     englund = next(o for o in report.openings if o.eco == "A40")
     assert englund.color == "white"  # the student had White in this game
     assert "Englund" in englund.name  # still correctly classified
+    assert englund.faced is True  # named by the opponent's own move
 
     system_tokens = englund.system.split()
     first_move_tokens = englund.first_moves.split()
@@ -227,9 +234,12 @@ def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
 
     prompt = render_prompt(report)
     white_section = prompt.split("### As White")[1].split("### As Black")[0]
-    assert "Englund" in white_section  # named -- it clears the 5-game floor
-    # The row itself must state the student's own moves explicitly.
-    assert "1.d4 2.dxe5 3.Nf3" in white_section
+    chosen_part, faced_part = white_section.split("#### What you face as White")
+    assert "Englund" not in chosen_part  # never listed as a system the student chose
+    assert "Englund" in faced_part  # named -- it clears the 5-game floor
+    # The full line -- both the opponent's choice and the student's reply
+    # to it -- must still be legible in the faced row.
+    assert "1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7" in faced_part
 
 
 def test_phase_aggregation_ignores_games_that_never_reach_an_endgame() -> None:

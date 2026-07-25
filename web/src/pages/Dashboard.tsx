@@ -195,28 +195,46 @@ export default function Dashboard() {
     [analyzed],
   );
 
-  // Collapse the fine ECO variations into (color, system) families —
-  // never merging a color's own choices with what it faces — split by
-  // color for the two repertoire tables below.
+  // Collapse the fine ECO variations into families, partitioned by
+  // `faced` before rolling up (docs/06-coach.md "Family rollup") —
+  // chosen by (color, system), faced by (color, name root) — split by
+  // color and partition for the four repertoire tables below.
   const allFamilies = useMemo(
     () => groupByFamily(openings.data ?? []),
     [openings.data],
   );
-  const whiteFamilies = useMemo(
-    () => allFamilies.filter((family) => family.color === "white"),
+  const whiteChosen = useMemo(
+    () => allFamilies.filter((f) => f.color === "white" && !f.faced),
     [allFamilies],
   );
-  const blackFamilies = useMemo(
-    () => allFamilies.filter((family) => family.color === "black"),
+  const whiteFaced = useMemo(
+    () => allFamilies.filter((f) => f.color === "white" && f.faced),
+    [allFamilies],
+  );
+  const blackChosen = useMemo(
+    () => allFamilies.filter((f) => f.color === "black" && !f.faced),
+    [allFamilies],
+  );
+  const blackFaced = useMemo(
+    () => allFamilies.filter((f) => f.color === "black" && f.faced),
     [allFamilies],
   );
 
+  // Freezes the family's exact member (eco, name) rows into the link
+  // so the Games page can drill through to exactly the games this row
+  // counted, transpositions included — matching by re-deriving the
+  // system from each game's moves only ever caught the family's
+  // representative line (docs/fixes-2026-07/03-faced-openings.md).
   const familyLink = (family: OpeningFamily): string => {
-    const params = new URLSearchParams({
-      family: family.family,
-      color: family.color,
-      system: family.system,
-    });
+    const params = new URLSearchParams();
+    params.set("family", family.family);
+    params.set("color", family.color);
+    if (family.faced) {
+      params.set("faced", "true");
+    }
+    for (const member of family.members) {
+      params.append("opening", `${member.eco}|${member.name}`);
+    }
     if (classParam !== undefined) {
       params.set("time_class", classParam);
     }
@@ -449,11 +467,14 @@ export default function Dashboard() {
       <section>
         <h2>Repertoire</h2>
         <p>
-          Split by the color you had — an opponent's choice is not your
-          repertoire. The system column is your own first moves; the line
-          beneath it is the most common continuation, both sides answering.
-          Opening ACPL covers the opening phase only; whole-game ACPL covers the
-          full game and is not opening advice on its own.
+          Split by the color you had, then split again into the systems you
+          chose and what you faced — an opponent's choice is not your
+          repertoire. In the "chose" tables the system column is your own first
+          moves; in the "face" tables it's your commonest reply to their line.
+          The secondary line beneath it is the most common continuation, both
+          sides answering. Opening ACPL covers the opening phase only;
+          whole-game ACPL covers the full game and is not opening advice on its
+          own.
         </p>
         <div className="filters">
           <label>
@@ -479,14 +500,28 @@ export default function Dashboard() {
         {openings.isSuccess && openings.data.length > 0 && (
           <>
             <RepertoireTable
-              title="As White"
-              families={whiteFamilies}
+              title="Systems you chose as White"
+              families={whiteChosen}
               minGames={minGames}
               familyLink={familyLink}
             />
             <RepertoireTable
-              title="As Black"
-              families={blackFamilies}
+              title="What you face as White"
+              faced
+              families={whiteFaced}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+            <RepertoireTable
+              title="Systems you chose as Black"
+              families={blackChosen}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+            <RepertoireTable
+              title="What you face as Black"
+              faced
+              families={blackFaced}
               minGames={minGames}
               familyLink={familyLink}
             />

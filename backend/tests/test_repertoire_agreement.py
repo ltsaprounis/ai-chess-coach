@@ -32,9 +32,15 @@ from tests.factories import make_analyzed
 # deliberately: it is a real sub-count in SQL and trivially equal to
 # `games` in the coach path (which only ever sees analyzed games), and
 # this fixture analyzes everything, so the two must still line up.
+# `faced` is included for the same reason: both producers derive it from
+# the same `Opening.ply` parity-majority rule
+# (docs/fixes-2026-07/03-faced-openings.md), and a one-bit divergence
+# would split one family across the wrong side of the chosen/faced
+# rollup on the Dashboard without failing anything else.
 COMPARED = (
     "system",
     "first_moves",
+    "faced",
     "games",
     "wins",
     "losses",
@@ -95,6 +101,73 @@ def test_both_producers_pick_the_player_system_not_the_commonest_full_line(
         row = rows[key]
         assert row.system == "1.d4 2.Nf3 3.Bf4"
         assert row.first_moves == "1.d4 d5 2.Nf3 Nf6 3.Bf4 e6"
+
+
+# One (color, eco, name) group reached by three different move orders
+# (transpositions), each classifying the name at a different ply. Two of
+# the three land on an opponent's (even, for White) ply, one on the
+# player's own (odd) ply -- 2 of 3 is a strict majority, so both
+# producers must resolve the row to faced (docs/06-coach.md,
+# "Repertoire: keyed by the side the player had";
+# docs/fixes-2026-07/03-faced-openings.md).
+_MAJORITY_FACED_GAMES = [
+    ("mf-1", "d4 e5", 2),  # opponent-named (Black's 1...e5)
+    ("mf-2", "d4 Nf6 c4 e5", 4),  # opponent-named (Black's 2...e5)
+    ("mf-3", "d4 d5 c4", 3),  # player-named (White's 2.c4)
+]
+
+
+def test_both_producers_resolve_faced_by_majority_across_transpositions(
+    tmp_path: Path,
+) -> None:
+    games = [
+        make_analyzed(
+            game_id,
+            line.split(),
+            color="white",
+            result="win",
+            opening=Opening(eco="A40", name="Englund Gambit", ply=ply),
+        )
+        for game_id, line, ply in _MAJORITY_FACED_GAMES
+    ]
+    from_sql, from_coach = _both_producers(games, tmp_path / "faced-majority.db")
+
+    key: _Key = ("white", "A40", "Englund Gambit")
+    for rows in (from_sql, from_coach):
+        row = rows[key]
+        assert row.games == 3
+        assert row.faced is True  # the rule the majority must resolve to
+    assert from_sql[key].faced == from_coach[key].faced
+
+
+# An even split (1 opponent-named, 1 player-named) is not a strict
+# majority, so both producers must resolve the row to chosen, never
+# faced -- "ties are chosen" (docs/06-coach.md).
+_TIE_GAMES = [
+    ("tf-1", "d4 e5", 2),  # opponent-named (Black's 1...e5)
+    ("tf-2", "d4 d5", 1),  # player-named (White's 1.d4)
+]
+
+
+def test_both_producers_resolve_faced_ties_as_chosen(tmp_path: Path) -> None:
+    games = [
+        make_analyzed(
+            game_id,
+            line.split(),
+            color="white",
+            result="loss",
+            opening=Opening(eco="A40", name="Englund Gambit", ply=ply),
+        )
+        for game_id, line, ply in _TIE_GAMES
+    ]
+    from_sql, from_coach = _both_producers(games, tmp_path / "faced-tie.db")
+
+    key: _Key = ("white", "A40", "Englund Gambit")
+    for rows in (from_sql, from_coach):
+        row = rows[key]
+        assert row.games == 2
+        assert row.faced is False  # ties are chosen, never faced
+    assert from_sql[key].faced == from_coach[key].faced
 
 
 def test_storage_and_coach_build_the_same_repertoire(tmp_path: Path) -> None:

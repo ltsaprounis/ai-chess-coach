@@ -135,15 +135,35 @@ player has only ever faced.
 - `opening_moves` and `player_moves` carry the denominators behind the
   two ACPL columns, so a consumer rolling rows up can stay
   move-weighted (see below).
+- `OpeningStats.faced` marks the rows whose name describes the
+  **opponent's** choice. Per game, the classification's `Opening.ply`
+  is the 1-based ply of the book move that fixed the name — White
+  moves are odd plies, Black moves even — so the name is
+  opponent-named iff that parity belongs to the opponent: an even
+  `ply` when the player is White, an odd one when Black. The Englund
+  is named by 1...e5 (ply 2), so a White player's Englund rows are
+  faced; the Pirc is named by 1...d6 (ply 2), so a Black player's
+  Pirc rows are chosen. Transpositions can reach one name at
+  different plies, so per row the flag is a **strict majority** over
+  the group's games: `faced` iff opponent-named games × 2 > `games`;
+  ties are chosen. Like the rest of these semantics the rule is
+  implemented twice — by storage over classified rows and by this
+  component over analyzed games — against this one statement, and
+  `test_repertoire_agreement.py` keeps the two honest.
 
 **Family rollup.** Consumers (this component's prompt, and the
-Dashboard) collapse rows by **(color, system)**, labelling the family
-with its most-played member's name root — the name up to the first
-colon. Keying on the player's own moves is what makes the rollup
-correct where a name-based key is not: it keeps the London and the
-Torre apart though both are named "Queen's Pawn Game", and it gathers
-every Pirc under one heading though the opponent's setup splits the
-lichess names a dozen ways.
+Dashboard) partition rows by `faced` **before** rolling up. The
+chosen partition collapses by **(color, system)**, labelling the
+family with its most-played member's name root — the name up to the
+first colon. Keying on the player's own moves is what makes the
+rollup correct where a name-based key is not: it keeps the London and
+the Torre apart though both are named "Queen's Pawn Game", and it
+gathers every Pirc under one heading though the opponent's setup
+splits the lichess names a dozen ways. The faced partition collapses
+by **(color, name root)** instead: for faced lines the name *is* the
+opponent's choice, while the player's own system varies with their
+replies, so keying it on `system` would split one opposing gambit
+across as many families as the player has tried answers to it.
 
 Records sum. **Both ACPL columns re-weight by moves**, not by games
 and not by analyzed games: a family's `opening_acpl` is
@@ -152,19 +172,29 @@ likewise over `player_moves`. Weighting a rollup by game count would
 rebuild the mean-of-per-game-means at family level, one step above the
 row where it was just removed, and it is why the rows carry their
 denominators. Rows whose ACPL is `None` contribute nothing to either
-sum or denominator.
+sum or denominator. These summing rules are identical in both
+partitions — only the rollup key differs.
 
 Note `analyzed_games` means slightly different things either side:
 a genuine sub-count of `games` in storage's SQL, and necessarily equal
 to `games` in the coach's, which is only ever handed analyzed games.
 It is a coverage figure for the Dashboard, never an ACPL denominator.
 
-**Sample floor and sort.** The main table requires **5+ games**;
-everything below collapses into a single long-tail line stating how
-many lines and games it covers. Rows sort by **impact** — games ×
+**Sample floor and sort.** The main tables require **5+ games**,
+applied per partition; below-floor families from *both* partitions
+fold into the color section's single long-tail line stating how many
+lines and games it covers. Rows sort by **impact** — games ×
 win-rate deficit — not by raw win rate, which floats every 0-1-0
 singleton above every genuine problem. Each row shows a score
 percentage, not only W-L-D.
+
+**Rendering the split.** Each color section renders two sub-tables:
+"Systems you chose" (the chosen partition, keyed and labelled as
+above) and "What you face as White" / "as Black" (the faced
+partition, keyed by name root and rendered with `first_moves` so the
+player's reply is visible alongside the opponent's line). The chosen
+table is the player's repertoire; the faced table is the coaching
+target for "learn a response", never "stop playing this".
 
 ### Judgment counts carry their denominator
 
@@ -216,8 +246,9 @@ already carry.
 
 `render_prompt` renders the report into a fixed markdown template —
 the student and window, the phase table with denominators, the trend,
-how games end, the repertoire split by color, error patterns, then the
-turning points — and closes with the instruction block. The template
+how games end, the repertoire split by color (each color as the two
+sub-tables above: systems chosen, then lines faced), error patterns,
+then the turning points — and closes with the instruction block. The template
 is a user-visible artifact (the UI shows it with a copy button), so it
 is snapshot-tested; `PROMPT_VERSION` moves with it.
 
@@ -226,8 +257,9 @@ demands **one** biggest lever rather than a flat list of co-equal
 weaknesses, and carries the rules the data alone cannot enforce:
 
 - **Attribution.** An opening is the student's only where the
-  repertoire lists it under their color as a system they chose. Never
-  advise dropping an opening they only face — recommend a response.
+  repertoire lists it under their color in "Systems you chose". Never
+  advise dropping a line from the "What you face" table — recommend a
+  response to it.
 - **Citation.** Refer to positions by date and move number, never by
   list position.
 - **Register.** The explain prompt's style contract applies here too:

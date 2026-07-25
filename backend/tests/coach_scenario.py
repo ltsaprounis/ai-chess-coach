@@ -10,11 +10,14 @@ as a readable diff of `testdata/coach_prompt.md`:
 - the **Englund** is played *at* this student, never by them (finding
   1). It has enough games to clear the sample floor and be named, so
   the prompt has to get the attribution right rather than dodge it by
-  burying the line in the long tail.
-- the **London** and the **Pirc** are the student's own systems, the
-  Pirc split across two lichess names that must roll up into one
-  family (finding 2), beside a two-game Ruy that must not (finding 2's
-  sample floor).
+  burying the line in the long tail. It is `faced` (named by the
+  opponent's own move) and above the floor, so it must appear under
+  "What you face as White" and nowhere in "Systems you chose"
+  (docs/fixes-2026-07/03-faced-openings.md).
+- the **London** and the **Pirc** are the student's own systems --
+  `faced` is False for both -- the Pirc split across two lichess names
+  that must roll up into one family (finding 2), beside a two-game Ruy
+  that must not (finding 2's sample floor).
 - no game reaches an **endgame**, so any aggregate that averages in
   per-game zeros reports a healthy endgame the student never played
   (finding 4).
@@ -34,7 +37,14 @@ from collections.abc import Sequence
 from chess_coach.domain import AnalyzedGame, Color, Opening, Result, TimeClass
 from tests.factories import make_analyzed
 
-LONDON = Opening(eco="D02", name="Queen's Pawn Game: Accelerated London System", ply=4)
+# ply=3: White's own 2.Bf4, the early bishop development that makes this
+# "Accelerated" rather than plain London -- the student's own move, so
+# `faced` must resolve False (chosen), matching "the student's own
+# systems" below.
+LONDON = Opening(eco="D02", name="Queen's Pawn Game: Accelerated London System", ply=3)
+# ply=4: Black's 2...Nc6, the move that (with the earlier ...e5) fixes
+# this as the Englund proper rather than another line in the complex --
+# the opponent's move, so `faced` must resolve True (docs/06-coach.md).
 ENGLUND = Opening(eco="A40", name="Englund Gambit Complex: Englund Gambit", ply=4)
 PIRC = Opening(eco="B07", name="Pirc Defense: Classical Variation", ply=8)
 PIRC_AUSTRIAN = Opening(eco="B09", name="Pirc Defense: Austrian Attack", ply=8)

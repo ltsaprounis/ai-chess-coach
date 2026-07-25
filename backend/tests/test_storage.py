@@ -257,6 +257,72 @@ def test_opening_stats_splits_by_color(db: Db) -> None:
     }
 
 
+ENGLUND = Opening(eco="A40", name="Englund Gambit", ply=2)
+LONDON = Opening(eco="D02", name="London System", ply=3)
+
+
+def test_opening_stats_faced_true_for_englund_as_white(db: Db) -> None:
+    """The Englund is named by 1...e5 (ply 2, Black's move) — a White
+    player's Englund rows are opponent-named, i.e. faced (docs/06-coach.md,
+    "Repertoire: keyed by the side the player had")."""
+    upsert_games(db, [make_game(id="w1", color="white", san_moves=["d4", "e5"])])
+    set_opening(db, "w1", ENGLUND)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.faced is True
+
+
+def test_opening_stats_faced_is_false_for_a_chosen_system(db: Db) -> None:
+    """The London is named at ply 3 (White's own move) — a White
+    player's London rows are player-named, i.e. chosen, never faced."""
+    upsert_games(db, [make_game(id="w1", color="white", san_moves=["d4", "d5", "Bf4"])])
+    set_opening(db, "w1", LONDON)
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.faced is False
+
+
+def test_opening_stats_faced_follows_majority_across_transpositions(db: Db) -> None:
+    """Transpositions can reach one (color, eco, name) group at different
+    plies; `faced` follows the strict majority of the group's games, not
+    any single game's parity."""
+    upsert_games(
+        db,
+        [
+            make_game(id="w1", color="white", san_moves=["d4", "e5"]),
+            make_game(id="w2", color="white", san_moves=["d4", "Nf6", "c4", "e5"]),
+            make_game(id="w3", color="white", san_moves=["d4", "d5", "c4"]),
+        ],
+    )
+    # Two games classify at an even, opponent's ply; one at an odd, the
+    # player's own ply. 2 of 3 is a strict majority, so the row is faced.
+    set_opening(db, "w1", Opening(eco="A40", name="Englund Gambit", ply=2))
+    set_opening(db, "w2", Opening(eco="A40", name="Englund Gambit", ply=4))
+    set_opening(db, "w3", Opening(eco="A40", name="Englund Gambit", ply=3))
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.games == 3
+    assert stat.faced is True
+
+
+def test_opening_stats_faced_ties_are_chosen(db: Db) -> None:
+    """An even split between opponent-named and player-named games is not
+    a strict majority, so the row is chosen, never faced."""
+    upsert_games(
+        db,
+        [
+            make_game(id="w1", color="white", san_moves=["d4", "e5"]),
+            make_game(id="w2", color="white", san_moves=["d4", "d5"]),
+        ],
+    )
+    set_opening(db, "w1", Opening(eco="A40", name="Englund Gambit", ply=2))
+    set_opening(db, "w2", Opening(eco="A40", name="Englund Gambit", ply=1))
+
+    (stat,) = opening_stats(db, "testuser")
+    assert stat.games == 2
+    assert stat.faced is False
+
+
 def test_opening_stats_system_and_first_moves_as_white(db: Db) -> None:
     game = make_game(
         id="w1", color="white", san_moves=["d4", "Nf6", "Nf3", "d5", "Bg5"]

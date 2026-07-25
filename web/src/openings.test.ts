@@ -12,6 +12,7 @@ function opening(
   return {
     eco: "X00",
     first_moves: partial.system,
+    faced: false,
     games: 0,
     wins: 0,
     losses: 0,
@@ -200,6 +201,162 @@ describe("groupByFamily", () => {
     ]);
     expect(family?.avgCpLoss).toBeNull();
     expect(family?.openingAcpl).toBeNull();
+  });
+});
+
+describe("groupByFamily — faced partition", () => {
+  it("keeps a chosen row and a faced row apart even when they share color and name root", () => {
+    // Both are "French Defense" as White, which would collide under a
+    // single (color, name-root) key — the partition-then-roll-up order
+    // must keep them as two separate families regardless.
+    const families = groupByFamily([
+      opening({
+        name: "French Defense: Advance Variation",
+        color: "white",
+        system: "1.e4",
+        games: 6,
+        wins: 4,
+        losses: 2,
+      }),
+      opening({
+        name: "French Defense: Tarrasch",
+        color: "white",
+        system: "1.d4 2.Nd2",
+        faced: true,
+        games: 9,
+        wins: 3,
+        losses: 6,
+      }),
+    ]);
+
+    expect(families).toHaveLength(2);
+    const chosen = families.find((f) => !f.faced);
+    const faced = families.find((f) => f.faced);
+    expect(chosen?.family).toBe("French Defense");
+    expect(faced?.family).toBe("French Defense");
+    expect(chosen?.games).toBe(6);
+    expect(faced?.games).toBe(9);
+  });
+
+  it("merges faced rows sharing a name root even though the player's reply (system) differs", () => {
+    // A White player facing the Englund by two different replies must
+    // see one "what you face" family, not two split by their own moves
+    // — the faced partition keys on name root, never `system`.
+    const families = groupByFamily([
+      opening({
+        name: "Englund Gambit",
+        color: "white",
+        system: "1.d4 2.dxe5 3.Nf3",
+        faced: true,
+        games: 5,
+        wins: 4,
+        losses: 1,
+      }),
+      opening({
+        name: "Englund Gambit: Declined",
+        color: "white",
+        system: "1.d4 2.Nf3",
+        faced: true,
+        games: 3,
+        wins: 3,
+      }),
+    ]);
+
+    expect(families).toHaveLength(1);
+    const [family] = families;
+    expect(family?.faced).toBe(true);
+    expect(family?.games).toBe(8);
+    expect(family?.wins).toBe(7);
+    expect(family?.losses).toBe(1);
+    // `system` is display-only here (the most-played member's reply),
+    // never the rollup key — the two rows above both feed one family
+    // despite disagreeing on it.
+    expect(family?.system).toBe("1.d4 2.dxe5 3.Nf3");
+  });
+
+  it("carries the exact (eco, name) member rows that fed a family", () => {
+    const families = groupByFamily([
+      opening({
+        eco: "A40",
+        name: "Englund Gambit",
+        color: "white",
+        system: "1.d4 2.dxe5 3.Nf3",
+        faced: true,
+        games: 5,
+      }),
+      opening({
+        eco: "A41",
+        name: "Englund Gambit: Declined",
+        color: "white",
+        system: "1.d4 2.Nf3",
+        faced: true,
+        games: 3,
+      }),
+    ]);
+
+    const [family] = families;
+    expect(family?.members).toHaveLength(2);
+    expect(family?.members).toEqual(
+      expect.arrayContaining([
+        { eco: "A40", name: "Englund Gambit" },
+        { eco: "A41", name: "Englund Gambit: Declined" },
+      ]),
+    );
+  });
+
+  it("also carries member rows for a chosen family (single member)", () => {
+    const [family] = groupByFamily([
+      opening({
+        eco: "C50",
+        name: "Italian Game",
+        color: "white",
+        system: "1.e4 2.Nf3 3.Bc4",
+        games: 4,
+      }),
+    ]);
+    expect(family?.members).toEqual([{ eco: "C50", name: "Italian Game" }]);
+  });
+
+  it("partitions a mixed set of chosen and faced rows into separate, correctly keyed families", () => {
+    const families = groupByFamily([
+      // Two chosen rows, same (color, system) — must merge.
+      opening({
+        name: "Italian Game: Two Knights",
+        color: "white",
+        system: "1.e4 2.Nf3 3.Bc4",
+        games: 4,
+        wins: 3,
+        losses: 1,
+      }),
+      opening({
+        name: "Italian Game: Giuoco Piano",
+        color: "white",
+        system: "1.e4 2.Nf3 3.Bc4",
+        games: 2,
+        wins: 1,
+        losses: 1,
+      }),
+      // One faced row, different color — its own family, unaffected by
+      // the chosen rows above.
+      opening({
+        name: "Queen's Gambit Declined: Orthodox",
+        color: "black",
+        system: "1...d5 2...e6 3...Nf6",
+        faced: true,
+        games: 7,
+        losses: 5,
+        draws: 2,
+      }),
+    ]);
+
+    expect(families).toHaveLength(2);
+    const chosen = families.find((f) => !f.faced);
+    const faced = families.find((f) => f.faced);
+    expect(chosen?.games).toBe(6);
+    expect(chosen?.color).toBe("white");
+    expect(faced?.games).toBe(7);
+    expect(faced?.color).toBe("black");
+    expect(faced?.family).toBe("Queen's Gambit Declined");
   });
 });
 

@@ -330,9 +330,12 @@ def _opening_stats(
     games: list[AnalyzedGame], summaries: list[_GameSummary]
 ) -> list[OpeningStats]:
     groups: dict[tuple[Color, str, str], list[int]] = defaultdict(list)
+    plies: dict[tuple[Color, str, str], list[int]] = defaultdict(list)
     for i, g in enumerate(games):
         if g.opening is not None:
-            groups[(g.color, g.opening.eco, g.opening.name)].append(i)
+            key = (g.color, g.opening.eco, g.opening.name)
+            groups[key].append(i)
+            plies[key].append(g.opening.ply)
 
     stats: list[OpeningStats] = []
     for (color, eco, name), indices in groups.items():
@@ -343,6 +346,8 @@ def _opening_stats(
         total_moves = sum(s.player_moves for s in member_summaries)
         total_loss = sum(s.player_loss for s in member_summaries)
         system, first_moves = _representative_lines(members, color)
+        group_plies = plies[(color, eco, name)]
+        opponent_named = sum(1 for ply in group_plies if _is_opponent_named(ply, color))
         stats.append(
             OpeningStats(
                 eco=eco,
@@ -350,6 +355,12 @@ def _opening_stats(
                 color=color,
                 system=system,
                 first_moves=first_moves,
+                # Strict majority over the group's games; ties are chosen
+                # (docs/06-coach.md, "Repertoire: keyed by the side the
+                # player had"). Mirrors storage's `_is_opponent_named` +
+                # majority computation exactly;
+                # test_repertoire_agreement.py keeps the two honest.
+                faced=opponent_named * 2 > len(group_plies),
                 games=len(members),
                 wins=sum(g.result == "win" for g in members),
                 losses=sum(g.result == "loss" for g in members),
@@ -371,6 +382,15 @@ def _opening_stats(
         )
     stats.sort(key=lambda s: (-_impact(s.games, s.wins, s.draws), -s.games, s.eco))
     return stats
+
+
+def _is_opponent_named(ply: int, color: Color) -> bool:
+    """True iff the book move that fixed the name (`Opening.ply`) was the
+    opponent's -- White moves are odd plies, Black even (docs/06-coach.md,
+    "Repertoire: keyed by the side the player had"). Mirrors storage's
+    predicate exactly; test_repertoire_agreement.py keeps the two honest.
+    """
+    return (color == "white") == (ply % 2 == 0)
 
 
 def _impact(games: int, wins: int, draws: int) -> float:

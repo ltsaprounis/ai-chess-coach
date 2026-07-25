@@ -34,27 +34,37 @@ function sortValue(family: OpeningFamily, key: RepSortKey): string | number {
 }
 
 type Props = {
-  /** "As White" / "As Black". */
+  /** E.g. "Systems you chose as White" / "What you face as Black". */
   title: string;
-  /** This color's families, already grouped by (color, system) —
-   *  unfiltered, so the component can tell "no games this color" from
-   *  "none meet the games threshold". */
+  /** This color-and-partition's families, already grouped — chosen by
+   *  (color, system), faced by (color, name root) — unfiltered, so the
+   *  component can tell "no games this color" from "none meet the
+   *  games threshold". */
   families: OpeningFamily[];
   minGames: number;
   familyLink: (family: OpeningFamily) => string;
+  /** True for a "what you face" table: the system/line column reads as
+   *  "their line (your reply)" and leads with the opponent's line
+   *  since `system` there is only the player's most-played *reply*,
+   *  not the rollup key. Default false (a "systems you chose" table,
+   *  where `system` is the family's own rollup key and leads). */
+  faced?: boolean;
 };
 
 /**
- * One color's repertoire — system played, the line as answered, W-L-D
- * and both ACPL figures. The system is its own column and the line is
- * shown as secondary text beneath it (docs/08-frontend.md): an opening
- * name alone cannot show who chose what, but a move sequence can.
+ * One color-and-partition's repertoire — system played (or, in a
+ * faced table, the opponent's line and the player's commonest reply
+ * to it), W-L-D and both ACPL figures. The system is its own column
+ * and the line is shown as secondary text beneath it
+ * (docs/08-frontend.md): an opening name alone cannot show who chose
+ * what, but a move sequence can.
  */
 export default function RepertoireTable({
   title,
   families,
   minGames,
   familyLink,
+  faced = false,
 }: Props) {
   const rep = useTableSort<RepSortKey>("winRate", "asc", REP_DESC);
 
@@ -95,7 +105,11 @@ export default function RepertoireTable({
                   sortDir={rep.sortDir}
                   onSort={rep.onSort}
                 />
-                <th>System (line as played)</th>
+                <th>
+                  {faced
+                    ? "Their line (your reply)"
+                    : "System (line as played)"}
+                </th>
                 <SortableTh
                   column="games"
                   label="Games"
@@ -136,13 +150,28 @@ export default function RepertoireTable({
             </thead>
             <tbody>
               {sorted.map((family) => (
-                <tr key={`${family.color} ${family.system}`}>
+                <tr
+                  key={
+                    family.faced
+                      ? `${family.color} faced ${family.family}`
+                      : `${family.color} chosen ${family.system}`
+                  }
+                >
                   <td>
                     <Link to={familyLink(family)}>{family.family}</Link>
                   </td>
                   <td>
-                    <div>{family.system}</div>
-                    <div className="rep-line">{family.firstMoves}</div>
+                    {faced ? (
+                      <>
+                        <div>{family.firstMoves}</div>
+                        <div className="rep-line">{family.system}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div>{family.system}</div>
+                        <div className="rep-line">{family.firstMoves}</div>
+                      </>
+                    )}
                   </td>
                   <td>{family.games}</td>
                   <td>{family.analyzedGames}</td>
