@@ -1,6 +1,6 @@
 """Storage component — see docs/03-storage.md."""
 
-from chess_coach.storage.analyses import list_analyses, save_analysis
+from chess_coach.storage.analyses import save_analysis
 from chess_coach.storage.db import Db, open_db
 from chess_coach.storage.explanations import get_explanation, save_explanation
 from chess_coach.storage.games import (
@@ -33,7 +33,6 @@ __all__ = [
     "get_game",
     "get_report",
     "latest_game_time",
-    "list_analyses",
     "list_analyzed_games",
     "list_games",
     "list_players",

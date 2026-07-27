@@ -86,8 +86,8 @@ def load_config(
     """Read the YAML config, apply defaults, and merge env secrets.
 
     A missing file means all defaults. Fails fast with `ConfigError`
-    on invalid YAML/values, on secrets placed in the file, and on a
-    missing API key for a provider some coach agent requires.
+    on invalid YAML/values (including a coach `provider` that is not
+    an implemented `LlmProvider`) and on secrets placed in the file.
     """
     path = DEFAULT_CONFIG_PATH if path is None else path
     env = os.environ if env is None else env
@@ -110,13 +110,9 @@ def load_config(
     except ValidationError as exc:
         raise ConfigError(f"{path} is invalid:\n{exc}") from exc
 
+    # Reserved for the planned API-backed providers; no shipped
+    # provider reads it (both ride local CLI logins).
     config.anthropic_api_key = env.get("ANTHROPIC_API_KEY")
-    needs_key = any(a.provider == "anthropic" for a in config.coach.agents)
-    if needs_key and not config.anthropic_api_key:
-        raise ConfigError(
-            "a coach agent uses provider 'anthropic' but the "
-            "ANTHROPIC_API_KEY environment variable is not set"
-        )
     return config
 
 

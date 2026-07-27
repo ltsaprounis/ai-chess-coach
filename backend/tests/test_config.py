@@ -132,19 +132,19 @@ def test_legacy_llm_key_gets_migration_hint(tmp_path: Path) -> None:
         load_config(path, env=KEY_ENV)
 
 
-def test_anthropic_agent_requires_api_key(tmp_path: Path) -> None:
+def test_unimplemented_provider_rejected_at_load(tmp_path: Path) -> None:
+    # `LlmProvider` lists implemented providers only, so a planned
+    # one fails config validation instead of blowing up at startup.
     path = write(
         tmp_path,
         "coach:\n"
         "  agents:\n"
-        "    - id: claude\n"
-        "      label: Claude\n"
         "    - id: api\n"
         "      label: API Claude\n"
         "      provider: anthropic\n",
     )
-    with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
-        load_config(path, env={})
+    with pytest.raises(ConfigError, match="github-copilot"):
+        load_config(path, env=KEY_ENV)
 
 
 def test_example_config_in_repo_root_is_valid() -> None:

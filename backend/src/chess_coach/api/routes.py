@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from chess_coach.api.runs import AnalysisRun
+from chess_coach.api.runs import MAX_FINISHED_RUNS, AnalysisRun, evict_finished
 from chess_coach.coach import (
     PROMPT_VERSION,
     CoachProvider,
@@ -277,6 +277,11 @@ async def analyze_player(
         # running player still 409s as usual.
         return AnalyzeResult(queued=0, remaining=remaining)
 
+    # Bound the registry before adding this run: a long-lived process that
+    # analyzes many distinct usernames (the player switcher) would
+    # otherwise keep every finished run forever, since a dict entry is
+    # only ever replaced by that same username starting another run.
+    evict_finished(runs, keep=MAX_FINISHED_RUNS)
     run = AnalysisRun(len(games))
     runs[user] = run
     opts = EngineOptions(depth=cfg.engine.depth, thresholds=cfg.thresholds)
@@ -304,7 +309,7 @@ async def _run_analysis(
         *(analyze_one(game) for game in games), return_exceptions=True
     )
     failures = [r for r in results if isinstance(r, BaseException)]
-    run.finished = True
+    run.mark_finished()
     if failures:
         logger.error(
             "analysis run: %d of %d game(s) failed: %r",

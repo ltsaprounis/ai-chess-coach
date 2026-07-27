@@ -296,7 +296,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "claude-agent-sdk" | "github-copilot" | "anthropic" | "azure-foundry";
+            provider: "claude-agent-sdk" | "github-copilot";
             /** Model */
             model: string;
         };

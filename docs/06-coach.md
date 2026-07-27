@@ -359,8 +359,11 @@ weaknesses, and carries the rules the data alone cannot enforce:
 - **Planned — `anthropic`** (the API SDK; needs `ANTHROPIC_API_KEY`)
   and **`azure-foundry`** (the Azure AI Foundry demo, via the
   Anthropic SDK's `AnthropicFoundry` client). Each is one new class
-  behind `create_provider` and owns its own tool loop for `explain`;
-  selecting one before it ships raises a clear `CoachProviderError`.
+  behind `create_provider` and owns its own tool loop for `explain`.
+  Neither is selectable yet: `domain.LlmProvider` lists implemented
+  providers only, so config rejects them at load. Shipping one means
+  adding its Literal value together with its `create_provider`
+  branch — `assert_never` in the factory keeps the two in step.
 
 ## Dependencies
 

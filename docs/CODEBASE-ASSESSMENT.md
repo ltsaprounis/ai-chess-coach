@@ -3,6 +3,13 @@
 _Review date: 2026-07-24 · Reviewer: Claude (full-repo read, no
 sub-agents) · Scope: all 132 tracked files (backend, web, docs, CI)._
 
+> **Status (2026-07-27, `assessment-fixes` branch):** every finding
+> is resolved or deliberately closed. 1, 3, 6, 7, 8, 10 fixed on
+> that branch; 2 and 5 had already been fixed by the coach-report
+> rework; 4 was deleted in the repo-root cleanup; 9 remains the
+> documented accepted trade-off. Details below are the original
+> 2026-07-24 snapshot, kept as-is.
+
 ## Executive summary
 
 This is an unusually well-built codebase. The architecture the docs

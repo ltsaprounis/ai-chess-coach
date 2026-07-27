@@ -831,14 +831,6 @@ async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
     assert not options.mcp_servers
 
 
-def test_unimplemented_providers_raise_clearly() -> None:
-    with pytest.raises(CoachProviderError, match="not implemented") as excinfo:
-        create_provider(LlmConfig(provider="anthropic"))
-    # Both shipping providers are suggested now that github-copilot joined
-    # claude-agent-sdk.
-    assert "'claude-agent-sdk' or 'github-copilot'" in str(excinfo.value)
-
-
 def test_provider_satisfies_protocol() -> None:
     provider: CoachProvider = create_provider(LlmConfig())
     assert isinstance(provider, ClaudeAgentSdkProvider)

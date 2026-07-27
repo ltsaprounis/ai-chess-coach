@@ -54,11 +54,13 @@ The retired top-level `llm:` key fails fast with a migration hint
 pointing at `coach.agents`.
 
 Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
-is required only when some agent's `provider` is `anthropic`. The
-default provider (`claude-agent-sdk`) authenticates via the local
-Claude Code login, so the default setup needs no environment at all.
-`load_config` fails fast with `ConfigError` when the file is invalid
-or a required secret is missing for a selected provider; a missing
+is read into `anthropic_api_key` but no shipped provider uses it —
+it is reserved for the planned API-backed `anthropic` provider. Both
+shipped providers (`claude-agent-sdk`, `github-copilot`) authenticate
+via their local CLI logins, so the default setup needs no environment
+at all. `load_config` fails fast with `ConfigError` when the file is
+invalid — including a `provider` naming an unimplemented provider,
+since `domain.LlmProvider` lists implemented ones only; a missing
 file at the default path just means all defaults.
 
 ## Dependencies
@@ -74,4 +76,5 @@ file at the default path just means all defaults.
 1. Pydantic models with defaults so an empty `{}` file works.
 2. `load_config` (read YAML, validate, merge env secrets).
 3. Ship a commented `coach.config.example.yaml` in the repo root.
-4. Unit tests: defaults, invalid values, missing API key error.
+4. Unit tests: defaults, invalid values, unimplemented-provider
+   rejection.

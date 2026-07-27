@@ -7,6 +7,13 @@ skipped with a warning rather than raised. The raw per-player result
 code is also kept verbatim as `Game.termination` — the win/draw/loss
 collapse discards how a game actually ended (timeout vs. resigned vs.
 checkmated), which is coaching signal in its own right.
+
+Games with a `SetUp`/`FEN` header (a non-standard starting position,
+e.g. some chess.com daily challenges) are dropped here too: every
+downstream consumer replays `san_moves` from `chess.Board()`, the
+standard start, so a custom-position game would silently mis-replay
+everywhere else. Stored `Game`s are guaranteed to start from the
+standard position.
 """
 
 import io
@@ -60,10 +67,14 @@ def normalize_game(raw: RawGame, username: str) -> Game | None:
         )
         return None
 
-    san_moves = _san_moves(raw.pgn)
-    if san_moves is None:
+    parsed = chess.pgn.read_game(io.StringIO(raw.pgn))
+    if parsed is None or parsed.errors:
         logger.warning("unparseable PGN in game %s; skipping", raw.uuid)
         return None
+    if _has_custom_start(parsed):
+        logger.warning("game %s starts from a custom position; skipping", raw.uuid)
+        return None
+    san_moves = _san_moves(parsed)
 
     accuracy: float | None = None
     if raw.accuracies is not None:
@@ -97,10 +108,18 @@ def _classify_result(code: str) -> Result | None:
     return None
 
 
-def _san_moves(pgn: str) -> list[str] | None:
-    game = chess.pgn.read_game(io.StringIO(pgn))
-    if game is None or game.errors:
-        return None
+def _has_custom_start(game: chess.pgn.Game) -> bool:
+    """True when the PGN's headers set a non-standard starting position.
+
+    `SetUp "1"` paired with a `FEN` header is chess.com's standard
+    signal for a custom-position game; a bare `FEN` header (no `SetUp`)
+    is treated the same way rather than trusted to be the standard
+    position by coincidence.
+    """
+    return "FEN" in game.headers or game.headers.get("SetUp") == "1"
+
+
+def _san_moves(game: chess.pgn.Game) -> list[str]:
     moves: list[str] = []
     board = game.board()
     for move in game.mainline_moves():

@@ -32,29 +32,6 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
         )
 
 
-def list_analyses(db: Db, username: str) -> list[GameAnalysis]:
-    rows = db.execute(
-        """
-        SELECT a.game_id, a.depth, a.evals, a.overall_acpl,
-               a.acpl_by_phase, a.judgment_counts
-        FROM analyses AS a JOIN games AS g ON g.id = a.game_id
-        WHERE g.username = ?
-        """,
-        (username,),
-    ).fetchall()
-    return [
-        analysis_from_json(
-            game_id=row["game_id"],
-            depth=row["depth"],
-            evals_json=row["evals"],
-            overall_acpl=row["overall_acpl"],
-            acpl_json=row["acpl_by_phase"],
-            counts_json=row["judgment_counts"],
-        )
-        for row in rows
-    ]
-
-
 def analysis_from_json(
     game_id: str,
     depth: int,

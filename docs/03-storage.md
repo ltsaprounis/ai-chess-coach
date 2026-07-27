@@ -118,7 +118,6 @@ def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
 # Analysis repo
 def save_analysis(db: Db, analysis: GameAnalysis) -> None
-def list_analyses(db: Db, username: str) -> list[GameAnalysis]
 
 # Explanation cache (coach move explanations are expensive; the API
 # layer reads before generating and writes after — one per
