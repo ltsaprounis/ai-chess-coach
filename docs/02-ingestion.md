@@ -33,6 +33,16 @@ uses the same API and informed the normalization rules below.
   (chess.com treats them case-insensitively).
 - Keep only `rules == "chess"` — variants (bughouse, threecheck,
   kingofthehill, chess960 for v1) are skipped.
+- Keep only games starting from the standard position. A `rules ==
+  "chess"` game can still carry a `SetUp`/`FEN` PGN header (chess.com
+  custom-position games, e.g. some daily challenges); any such game is
+  dropped. `SetUp "1"` paired with `FEN` is the conventional pairing,
+  but a bare `FEN` header is treated the same way. **Invariant:**
+  every stored `Game` starts from the standard position — downstream
+  replay (engine analysis, coach context/report) always rebuilds the
+  board from `chess.Board()` rather than honoring a PGN's `FEN`
+  header, and relies on ingestion having already dropped anything
+  that would make that replay wrong.
 - The per-player `result` code maps to `win | draw | loss`:
   - win: `win`
   - draw: `agreed`, `repetition`, `stalemate`, `insufficient`,

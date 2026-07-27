@@ -1,5 +1,6 @@
 """App factory — the composition root (docs/07-api.md)."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,9 +53,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # fresh clickable link each time the app (re)starts.
         print(f"\nAI Chess Coach → http://localhost:{cfg.server.port}\n", flush=True)
         yield
-        for run in runs.values():
-            if run.task is not None:
-                run.task.cancel()
+        tasks = [run.task for run in runs.values() if run.task is not None]
+        for task in tasks:
+            task.cancel()
+        # Await the cancellations before touching the pool/DB: a task can
+        # be mid-`analyse` when cancelled, and pool.close() below calls
+        # engine.quit() on the same workers — without this, teardown races
+        # a still-unwinding task (GUIDELINES.md: every asyncio.Task is
+        # awaited or tracked and cancelled on shutdown).
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if app.state.pool is not None:
             await app.state.pool.close()
         app.state.db.close()

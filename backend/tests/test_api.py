@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 import chess_coach.api.app as app_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
+from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import CoachProviderError, ExplainEvent, PositionAnalystFn
 from chess_coach.config import (
     AppConfig,
@@ -97,6 +98,12 @@ class StubPool:
         # guard. threading.Event (bridged via to_thread) because tests
         # release it from the TestClient thread, not the app's loop.
         self.analyze_release: threading.Event | None = None
+        # Narrows which games analyze_release gates: empty (the default)
+        # means every game blocks, matching the original all-or-nothing
+        # behavior above. A test that needs one run to stay active while
+        # others complete normally (e.g. the runs-registry eviction
+        # sweep) lists just the game id(s) it wants held.
+        self.held_game_ids: set[str] = set()
 
     async def analyze_game(
         self,
@@ -104,7 +111,9 @@ class StubPool:
         opts: EngineOptions,
         on_progress: ProgressCallback | None = None,
     ) -> GameAnalysis:
-        if self.analyze_release is not None:
+        if self.analyze_release is not None and (
+            not self.held_game_ids or game.id in self.held_game_ids
+        ):
             await asyncio.to_thread(self.analyze_release.wait)
         total = max(1, len(game.san_moves))
         if on_progress is not None:
@@ -452,6 +461,26 @@ def wait_until_analyzed(client: TestClient, username: str, expected: int) -> Non
     raise AssertionError(f"never reached {expected} analyzed games")
 
 
+def wait_until_run_finished(client: TestClient, username: str) -> None:
+    """Poll a zero-limit probe until `username`'s run flips to finished.
+
+    A probe never mutates `runs` when there's nothing left to enqueue
+    (docs/07-api.md), so this is safe to call repeatedly without
+    disturbing whatever registry state a test is asserting on -- unlike
+    `wait_until_analyzed`, it is synchronized on the run's own `finished`
+    flag (via the same 409-vs-202 check `analyze_player` itself uses)
+    rather than on the DB write that happens a step earlier, which is
+    what the runs-registry eviction sweep needs: the sweep only counts a
+    run as finished once this would return.
+    """
+    for _ in range(200):
+        probe = post(client, f"/api/players/{username}/analyze", json={"limit": 0})
+        if probe.status_code == 202:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"{username}'s run never finished")
+
+
 def test_analyze_runs_and_persists(client: TestClient, db_path: Path) -> None:
     seed(
         db_path,
@@ -688,6 +717,133 @@ def test_analyze_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> 
 def test_progress_stream_404s_without_a_run(client: TestClient) -> None:
     response = get(client, "/api/players/testuser/analyze/progress")
     assert response.status_code == 404
+
+
+async def test_shutdown_awaits_cancelled_analysis_tasks_before_closing_the_pool(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GUIDELINES.md: every asyncio.Task is awaited or tracked and
+    cancelled on shutdown. A run still mid-analysis at shutdown must
+    actually finish unwinding its cancellation -- not just have
+    `.cancel()` called on it -- before pool.close() runs, since close()
+    quits the same engine workers a task can be mid-`analyse` on
+    (CODEBASE-ASSESSMENT.md finding 1). Drives the lifespan directly
+    (rather than through TestClient) so the test controls exactly when
+    the run task starts and observes ordering without any HTTP layer in
+    between.
+    """
+    order: list[str] = []
+
+    class RecordingPool:
+        async def close(self) -> None:
+            order.append("pool_close")
+
+    async def fake_create_pool(bin_path: Path, workers: int) -> RecordingPool:
+        return RecordingPool()
+
+    def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
+        return StubProvider()
+
+    monkeypatch.setattr(app_module, "create_pool", fake_create_pool)
+    monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
+
+    async def blocked_forever() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # A real analysis task has real cleanup between the
+            # cancellation landing and the coroutine actually returning
+            # (the engine call unwinding). Another await point here
+            # stands in for that, so an implementation that cancels but
+            # never awaits the task can't accidentally pass: it would
+            # reach pool_close before the event loop ever gets back here.
+            await asyncio.sleep(0)
+            order.append("task_cancelled")
+            raise
+
+    fake_bin = tmp_path / "stockfish"
+    fake_bin.touch()
+    config = AppConfig(
+        engine=EngineConfig(bin_path=fake_bin),
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
+    )
+
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        run = AnalysisRun(games_total=1)
+        run.task = asyncio.create_task(blocked_forever())
+        cast(dict[str, AnalysisRun], app.state.runs)["testuser"] = run
+        await asyncio.sleep(0)  # let the task actually start awaiting
+
+    assert order == ["task_cancelled", "pool_close"]
+
+
+def test_runs_registry_never_evicts_an_active_run(
+    client: TestClient,
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_registry: dict[str, object],
+) -> None:
+    """The eviction sweep (CODEBASE-ASSESSMENT.md finding 6) only ever
+    touches finished runs: a run whose task is still going must stay
+    queryable -- and keep guarding the one-run-per-player 409 -- no
+    matter how many other runs finish and get swept around it."""
+    monkeypatch.setattr(routes, "MAX_FINISHED_RUNS", 1)
+    seed(
+        db_path,
+        [make_game(id="blocked-1", username="blockeduser", end_time=1)]
+        + [
+            make_game(id=f"g-{n}", username=f"user{n}", end_time=n) for n in range(2, 5)
+        ],
+    )
+    pool = stub_pool(stub_registry)
+    pool.analyze_release = threading.Event()
+    pool.held_game_ids = {"blocked-1"}
+    try:
+        held = post(client, "/api/players/blockeduser/analyze")
+        assert held.status_code == 202
+
+        # Finish runs for more users than the keep=1 cap just handed to
+        # the sweep, so it fires repeatedly around the still-active run.
+        for n in range(2, 5):
+            response = post(client, f"/api/players/user{n}/analyze")
+            assert response.status_code == 202
+            wait_until_run_finished(client, f"user{n}")
+
+        # Still active: 409 (not "gone, so this starts a fresh run")
+        # proves the registry entry survived every sweep above.
+        assert post(client, "/api/players/blockeduser/analyze").status_code == 409
+    finally:
+        pool.analyze_release.set()
+    wait_until_run_finished(client, "blockeduser")
+
+
+def test_runs_registry_evicts_the_oldest_finished_run_past_the_cap(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once more finished runs pile up than the cap, the sweep drops the
+    oldest one first -- proving `evict_finished` is actually wired into
+    `analyze_player`, not just correct in isolation (see test_runs.py for
+    the unit-level coverage of the eviction rule itself)."""
+    monkeypatch.setattr(routes, "MAX_FINISHED_RUNS", 2)
+    seed(
+        db_path,
+        [make_game(id=f"g-{n}", username=f"user{n}", end_time=n) for n in range(1, 5)],
+    )
+
+    for n in range(1, 5):
+        response = post(client, f"/api/players/user{n}/analyze")
+        assert response.status_code == 202
+        wait_until_run_finished(client, f"user{n}")
+
+    # user1 finished first, so it's the oldest -- evicted once user4's
+    # run pushed the finished count to 3 > keep=2.
+    assert get(client, "/api/players/user1/analyze/progress").status_code == 404
+    # The two most recently finished runs are still queryable.
+    assert get(client, "/api/players/user3/analyze/progress").status_code == 200
+    assert get(client, "/api/players/user4/analyze/progress").status_code == 200
 
 
 def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> None:

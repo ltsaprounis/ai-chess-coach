@@ -25,9 +25,10 @@ Result = Literal["win", "loss", "draw"]
 TimeClass = Literal["bullet", "blitz", "rapid", "daily"]
 Judgment = Literal["best", "good", "inaccuracy", "mistake", "blunder"]
 Phase = Literal["opening", "middlegame", "endgame"]
-LlmProvider = Literal[
-    "claude-agent-sdk", "github-copilot", "anthropic", "azure-foundry"
-]
+# Implemented providers only: config validates against this Literal,
+# so a value here must have a working class behind create_provider.
+# Planned (anthropic, azure-foundry) join when they ship.
+LlmProvider = Literal["claude-agent-sdk", "github-copilot"]
 
 
 class Thresholds(BaseModel):

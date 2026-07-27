@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, assert_never, cast
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -520,15 +520,14 @@ def _render_lines(lines: list[EvalLine]) -> str:
 
 
 def create_provider(cfg: LlmConfig, api_key: str | None = None) -> CoachProvider:
-    """Factory over the seam; claude-agent-sdk and github-copilot ship today.
+    """Factory over the seam; every `LlmProvider` value has a class here.
 
-    `api_key` is reserved for the anthropic / azure-foundry providers.
+    `assert_never` keeps that true: adding a value to the domain
+    Literal without a branch here fails pyright. `api_key` is unused
+    today — reserved for the planned API-backed providers.
     """
     if cfg.provider == "claude-agent-sdk":
         return ClaudeAgentSdkProvider(model=cfg.model, system_prompt=SYSTEM_PROMPT)
     if cfg.provider == "github-copilot":
         return CopilotSdkProvider(model=cfg.model, system_prompt=SYSTEM_PROMPT)
-    raise CoachProviderError(
-        f"llm provider {cfg.provider!r} is not implemented yet — "
-        "set llm.provider to 'claude-agent-sdk' or 'github-copilot'"
-    )
+    assert_never(cfg.provider)

@@ -19,7 +19,6 @@ from chess_coach.storage import (
     get_game,
     get_report,
     latest_game_time,
-    list_analyses,
     list_analyzed_games,
     list_games,
     list_players,
@@ -156,7 +155,7 @@ def test_analysis_round_trip(db: Db) -> None:
     detail = get_game(db, "game-1")
     assert detail is not None
     assert detail.analysis == analysis
-    assert list_analyses(db, "testuser") == [analysis]
+    assert [g.analysis for g in list_analyzed_games(db, "testuser")] == [analysis]
 
 
 def test_games_needing_analysis_limit_takes_newest(db: Db) -> None:

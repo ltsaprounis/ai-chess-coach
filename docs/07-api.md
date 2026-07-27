@@ -20,8 +20,14 @@ wires them together behind an HTTP API and owns all orchestration
    (SPA fallback: unknown non-API paths serve index.html so
    client-side routes survive refreshes and deep links).
 
-Shutdown closes the pool and the DB. Instances live on `app.state`,
-injected into routes via FastAPI dependencies.
+Shutdown cancels any in-flight analysis-run tasks and awaits them
+before closing the pool and the DB. Instances live on `app.state`,
+injected into routes via FastAPI dependencies. Analysis runs are
+tracked in-process, one per username: a new run replaces that user's
+previous one, and once finished runs exceed a cap
+(`MAX_FINISHED_RUNS`) the oldest are swept when the next run
+registers — `analyze/progress` for a swept run 404s like any unknown
+run. Active runs are never swept.
 
 ## HTTP API (the contract for [08-frontend.md](08-frontend.md))
 
