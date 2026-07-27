@@ -801,8 +801,9 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
 async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no analyst, complete() must degrade to exactly today's
-    behavior: one turn, no MCP server, no tools wired up at all."""
+    """With no analyst, complete() is one turn, no MCP server, and the
+    same built-in-tool lockdown as every other provider path — a
+    coaching run must never reach Claude Code's file or shell tools."""
     captured: dict[str, object] = {}
 
     def fake_query(
@@ -827,7 +828,8 @@ async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
     options = captured["options"]
     assert isinstance(options, ClaudeAgentOptions)
     assert options.max_turns == 1
-    assert options.tools is None
+    assert options.tools == []  # built-ins locked down, like explain()
+    assert options.allowed_tools == []
     assert not options.mcp_servers
 
 

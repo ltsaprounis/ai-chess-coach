@@ -104,10 +104,16 @@ class ClaudeAgentSdkProvider:
         self, prompt: str, analyst: PositionAnalystFn | None = None
     ) -> str:
         if analyst is None:
+            # Same built-in-tool lockdown as every other provider path:
+            # a coaching completion must never reach Claude Code's file
+            # or shell tools, and with max_turns=1 a stray tool call
+            # would burn the only turn and come back empty anyway.
             options = ClaudeAgentOptions(
                 model=self._model,
                 max_turns=1,
                 system_prompt=self._system_prompt,
+                tools=[],
+                allowed_tools=[],
             )
         else:
             # Same MCP-server mechanics as explain() below, under the
