@@ -180,10 +180,11 @@ def list_players(db: Db) -> list[PlayerSummary]:
 
 def latest_game_time(db: Db, username: str) -> int | None:
     """End time of the newest stored game — the sync cutoff."""
-    row = db.execute(
+    # Aggregate queries always return exactly one row.
+    (row,) = db.execute(
         "SELECT MAX(end_time) AS latest FROM games WHERE username = ?",
         (username,),
-    ).fetchone()
+    ).fetchall()
     latest = row["latest"]
     return None if latest is None else int(latest)
 
@@ -262,14 +263,14 @@ def count_games_needing_analysis(
     clauses, params = _needing_analysis_clauses(
         username, depth, since=since, until=until, time_class=time_class
     )
-    row = db.execute(
+    (row,) = db.execute(
         f"""
         SELECT COUNT(*) AS n FROM games AS g
         LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE {" AND ".join(clauses)}
         """,
         params,
-    ).fetchone()
+    ).fetchall()
     return int(row["n"])
 
 
@@ -348,13 +349,13 @@ def count_games(
     if time_class is not None:
         clauses.append("g.time_class = ?")
         params.append(time_class)
-    row = db.execute(
+    (row,) = db.execute(
         f"""
         SELECT COUNT(*) AS n FROM games AS g
         WHERE {" AND ".join(clauses)}
         """,
         params,
-    ).fetchone()
+    ).fetchall()
     return int(row["n"])
 
 

@@ -910,14 +910,17 @@ def test_report_survives_close_and_reopen(tmp_path: Path) -> None:
     second.close()
 
 
-def test_concurrent_write_transactions_serialize(db: Db) -> None:
-    """Writers from different threads must not corrupt each other.
+def test_concurrent_statements_serialize(db: Db) -> None:
+    """Threads sharing the one connection must not corrupt each other.
 
-    Serialized sqlite3 protects single calls on the shared connection,
-    not transactions: without Db's write lock, two threads inside
-    `with db:` at once interleave their BEGIN/COMMIT and abort with
-    InterfaceError — exactly what an analysis run's saves racing a
-    sync's upserts did once both moved off the event loop.
+    Serialized sqlite3 protects single C calls, not usage patterns:
+    concurrent `with db:` transactions interleave BEGIN/COMMIT and
+    abort with InterfaceError, and reads racing another thread's
+    statements corrupt pysqlite's statement cache — observed as
+    interpreter segfaults at connection close. This mixes writer and
+    reader threads, the exact shape of an analysis run's threadpooled
+    saves racing a polling client's list reads; without Db's
+    statement-level lock it fails (or crashes the process outright).
     """
     upsert_games(db, [make_game(id=f"g-{n}") for n in range(50)])
     errors: list[Exception] = []
@@ -929,7 +932,16 @@ def test_concurrent_write_transactions_serialize(db: Db) -> None:
         except Exception as exc:  # any sqlite error fails the test
             errors.append(exc)
 
-    threads = [threading.Thread(target=save_all) for _ in range(4)]
+    def read_all() -> None:
+        try:
+            for _ in range(50):
+                list_analyzed_games(db, "testuser")
+        except Exception as exc:  # any sqlite error fails the test
+            errors.append(exc)
+
+    threads = [threading.Thread(target=save_all) for _ in range(2)] + [
+        threading.Thread(target=read_all) for _ in range(2)
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -969,7 +981,7 @@ def test_two_perspectives_of_one_game_coexist(db: Db) -> None:
 
 def test_upsert_keeps_the_uuid_behind_the_perspective_id(db: Db) -> None:
     upsert_games(db, [make_game(id="uuid-9:alice", username="alice")])
-    row = db.execute("SELECT chesscom_uuid FROM games").fetchone()
+    (row,) = db.execute("SELECT chesscom_uuid FROM games").fetchall()
     assert row["chesscom_uuid"] == "uuid-9"
 
 
@@ -1064,7 +1076,7 @@ def test_migration_006_rewrites_legacy_rows_to_perspective_ids(
     assert detail is not None
     assert detail.analysis is not None  # the analyses row followed the id
     assert get_explanation(migrated, "uuid-1:alice", 1, "coach-a") == "push the pawn"
-    row = migrated.execute("SELECT chesscom_uuid FROM games").fetchone()
+    (row,) = migrated.execute("SELECT chesscom_uuid FROM games").fetchall()
     assert row["chesscom_uuid"] == "uuid-1"
     migrated.close()
 

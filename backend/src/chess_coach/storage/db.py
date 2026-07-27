@@ -11,30 +11,63 @@ from typing import Self
 _SqlParams = Sequence[object] | Mapping[str, object]
 
 
-class Db:
-    """The one shared connection, plus the lock its writers need.
+class FetchedRows:
+    """A statement's rows, materialized while the connection lock was
+    held — the live cursor never escapes the lock, so no other thread
+    can race its stepping or the statement cache behind it."""
 
-    CPython's serialized sqlite3 (threadsafety 3) makes each *call* on
-    a shared connection thread-safe, but a transaction is several
-    calls: two threads entering `with db:` at once interleave their
-    BEGIN/COMMIT and abort with "bad parameter or other API misuse".
-    The context manager therefore holds a lock for the whole write
-    transaction — writers serialize, reads stay lock-free (safe per
-    call, exactly as before).
+    def __init__(self, rows: list[sqlite3.Row]) -> None:
+        self._rows = rows
+        self._next = 0
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        remaining = self._rows[self._next :]
+        self._next = len(self._rows)
+        return remaining
+
+    def fetchone(self) -> sqlite3.Row | None:
+        if self._next >= len(self._rows):
+            return None
+        row = self._rows[self._next]
+        self._next += 1
+        return row
+
+
+class Db:
+    """The one shared connection, plus the lock that makes sharing safe.
+
+    CPython's serialized sqlite3 (threadsafety 3) guards each C-level
+    call, but that is not enough for a connection shared across
+    FastAPI's worker threads: a transaction is several calls (two
+    threads inside `with db:` interleave BEGIN/COMMIT and abort with
+    "bad parameter or other API misuse"), and even a lone read races
+    another thread's statements in pysqlite's per-connection statement
+    cache — observed as interpreter segfaults at connection close once
+    writes moved off the event loop. So one re-entrant lock serializes
+    *everything*: each statement runs and is fully fetched under it
+    (`FetchedRows`), and the context manager holds it across a whole
+    write transaction, commit included. Re-entrant, so statements
+    inside `with db:` nest under the transaction's hold.
     """
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
-        self._write_lock = threading.Lock()
+        self._lock = threading.RLock()
 
-    def execute(self, sql: str, parameters: _SqlParams = ()) -> sqlite3.Cursor:
-        return self._connection.execute(sql, parameters)
+    def execute(self, sql: str, parameters: _SqlParams = ()) -> FetchedRows:
+        with self._lock:
+            cursor = self._connection.execute(sql, parameters)
+            # description is None for statements that return no rows
+            # (INSERT/UPDATE), where fetchall would raise.
+            rows = cursor.fetchall() if cursor.description is not None else []
+            return FetchedRows(rows)
 
-    def executemany(self, sql: str, parameters: Iterable[_SqlParams]) -> sqlite3.Cursor:
-        return self._connection.executemany(sql, parameters)
+    def executemany(self, sql: str, parameters: Iterable[_SqlParams]) -> None:
+        with self._lock:
+            self._connection.executemany(sql, parameters)
 
     def __enter__(self) -> Self:
-        self._write_lock.acquire()
+        self._lock.acquire()
         self._connection.__enter__()
         return self
 
@@ -49,10 +82,11 @@ class Db:
         try:
             return self._connection.__exit__(exc_type, exc, traceback)
         finally:
-            self._write_lock.release()
+            self._lock.release()
 
     def close(self) -> None:
-        self._connection.close()
+        with self._lock:
+            self._connection.close()
 
 
 def open_db(db_path: Path) -> Db:
