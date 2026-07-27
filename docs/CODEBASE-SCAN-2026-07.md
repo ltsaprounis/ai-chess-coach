@@ -5,12 +5,18 @@ migrations, `scripts/backfill.py`, and every non-test file in `web/src/`,
 plus mechanical checks (import-linter, grep for env reads and
 cross-component imports) and a run of the quality gates.
 
-Status (2026-07-27): findings 1, 2, 3, 4 and 8 are fixed and merged
-to main (`scan-fixes` and `perspective-ids`, one commit per fix; each
-fixed section below names its commit). Finding 1's fix is the
-perspective-id scheme — the rejected deeper remodel is recorded in
+Status (2026-07-27): every finding except 12 and 14 is fixed on main,
+one commit per fix (each fixed section below names its commit).
+Finding 1's fix is the perspective-id scheme — the rejected deeper
+remodel is recorded in
 [future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
-Open: findings 5, 6, 7 and 9-14.
+Finding 12 has a planned design
+([future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md)),
+deferred until the explain prompt next changes; finding 14 stays open
+as a packaging note gated by the GPL distribution decision. Landing
+the fixes also surfaced and fixed two issues the scan missed: the
+shared connection needed transaction- and then statement-level
+serialization once storage work moved onto threads (`f0a3a70`).
 
 ## Summary
 
@@ -33,17 +39,19 @@ Findings, most severe first:
 4. **Robustness** — a crashed Stockfish process is recycled into the
    engine pool and poisons its slot until restart. **Fixed.**
 5. **Robustness** — `/eval` SSE has no mid-stream error event (unlike
-   `/explain`).
+   `/explain`). **Fixed.**
 6. **Architecture** — `sync_player` does DB writes and opening
    classification on the event loop; large re-syncs stall every
    concurrent request and SSE stream. **Fixed.**
 7. **Consistency** — the no-analyst Claude provider path doesn't lock
    down built-in tools the way every other provider path does.
+   **Fixed.**
 8. Plus seven smaller opportunities (perf of `opening_stats`, missing
    `ge=0` guards on `/games` paging, explanation cache lacking a prompt
    version, analyze-by-id ownership, packaging-fragile default paths,
    an explain stream that can end without `done`, no timeout on the
-   Copilot idle wait).
+   Copilot idle wait). **All fixed** except the prompt version
+   (planned, see the status note) and the packaging paths.
 
 ---
 
@@ -122,6 +130,10 @@ instead of requeueing it.
 
 ### 5. `/eval` has no mid-stream error event
 
+**Fixed** in `dafb117`: the stream ends with a terminal
+`engine_error` event and the frontend closes on it — without which
+EventSource's auto-reconnect would re-run the failing search forever.
+
 `explain_move` catches `CoachProviderError` mid-stream and emits an
 `error` SSE event (`routes.py:477`); `eval_position`'s `stream()`
 (`routes.py:375`) has no equivalent for `EngineError`, so a mid-search
@@ -132,6 +144,9 @@ asymmetry means the client can't distinguish "engine failed" from
 
 ### 6. `useExplain` can stick at "Explaining…" on truncated streams
 
+**Fixed** in `1c857e6`: an unexpected end-of-stream dispatches an
+error; a deliberate abort stays silent.
+
 `web/src/useExplain.ts:118` — if the response body ends without a
 `done`/`error` event (server restart mid-explanation), the reader
 returns and the hook exits without dispatching, leaving the panel in
@@ -139,6 +154,9 @@ returns and the hook exits without dispatching, leaving the panel in
 unexpected EOF.
 
 ### 7. No timeout on the Copilot idle wait
+
+**Fixed** in `f530b24`: both session waits sit under a generous
+per-event stall timeout surfacing as `CoachProviderError`.
 
 `CopilotSdkProvider.complete` awaits `idle.wait()`
 (`backend/src/chess_coach/coach/providers.py:351`) with no timeout; a
@@ -171,6 +189,9 @@ batch upserts belong there too. (Smaller instances of the same thing:
 
 ### 9. No-analyst Claude completions don't lock down built-in tools
 
+**Fixed** in `a937819`: the degraded path passes the same
+`tools=[]`/`allowed_tools=[]` lockdown as every other provider path.
+
 `ClaudeAgentSdkProvider.complete` with `analyst=None`
 (`providers.py:107-111`) sets only `model`/`max_turns=1`/
 `system_prompt` — unlike the analyst branch and `explain()`, which
@@ -183,6 +204,9 @@ degraded path predictable and consistent.
 
 ### 10. `/games` paging lacks the negative-limit guard
 
+**Fixed** in `9284e16`: `ge=0` on the query params (a 422 at the
+edge) and on `GameFilters` itself.
+
 `AnalyzeRequest.limit` documents why it needs `ge=0` (SQLite reads a
 negative LIMIT as unlimited — `routes.py:186`), but
 `GameFilters.limit`/`offset` (`storage/games.py:28`) and the
@@ -193,6 +217,13 @@ analyze body already has.
 ## Opportunities
 
 ### 11. `opening_stats` re-parses every eval blob per request
+
+**Fixed** in `65c3698`: `save_analysis` derives the four
+player/opening aggregates once at save time and migration 007
+backfills existing rows, so the endpoint sums four integers per
+analyzed game. Landing it made a latent shared-connection race
+near-deterministic, fixed in `f0a3a70` (statement-level
+serialization on `Db`).
 
 `storage/games.py:449-461` JSON-parses the full `evals` list of every
 analyzed game in scope on each `/openings` call, which the Dashboard
@@ -217,6 +248,9 @@ content fingerprints instead of hand-bumped strings —
 [future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md).
 
 ### 13. `analyze` by game id skips ownership and dedupe
+
+**Fixed** in `8de61cf`: ids dedupe and must belong to the path's
+player.
 
 `routes.py:232-240`: the `game_ids` path resolves ids with no check
 that the game belongs to `{username}`, and doesn't dedupe — a
