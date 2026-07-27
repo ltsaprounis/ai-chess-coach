@@ -44,6 +44,16 @@ export function useLiveEval(fen: string | null): LiveEvalState {
         stream.close();
         setState((previous) => ({ ...previous, done: true }));
       });
+      // Mid-search engine death, reported by the server as a terminal
+      // event (named engine_error, not error — EventSource reserves
+      // that type for its own network failures). Close and show the
+      // same "engine unavailable" state as a pre-eval failure; without
+      // this the clean stream end would trigger an auto-reconnect that
+      // re-runs the failing search forever.
+      stream.addEventListener("engine_error", () => {
+        stream.close();
+        setState((previous) => ({ ...previous, error: true }));
+      });
       stream.onerror = () => {
         stream.close();
         setState((previous) =>

@@ -360,6 +360,17 @@ async def analyze_progress(username: str, runs: RunsDep) -> EventSourceResponse:
     return EventSourceResponse(stream())
 
 
+class EvalError(BaseModel):
+    """Mid-stream `engine_error` SSE payload — too late for an
+    HTTPException once events are on the wire. Deliberately not named
+    `error`: an EventSource client cannot tell a server-sent `error`
+    event apart from the browser's own network-error event, which
+    shares that type.
+    """
+
+    message: str
+
+
 @router.get("/eval")
 async def eval_position(
     pool: PoolDep,
@@ -388,9 +399,21 @@ async def eval_position(
     async def stream() -> AsyncIterator[dict[str, str]]:
         # aclosing: a client disconnect closes this generator, which
         # must close the engine stream so the worker frees promptly.
-        async with aclosing(evals) as events:
-            async for event in events:
-                yield {"event": "eval", "data": event.model_dump_json()}
+        try:
+            async with aclosing(evals) as events:
+                async for event in events:
+                    yield {"event": "eval", "data": event.model_dump_json()}
+        except EngineError as exc:
+            # Mirrors explain_move's mid-stream error event: the search
+            # died after events were already on the wire, so the client
+            # gets a terminal event instead of a bare connection drop
+            # (which EventSource would answer by reconnecting and
+            # re-running the same failing search).
+            yield {
+                "event": "engine_error",
+                "data": EvalError(message=str(exc)).model_dump_json(),
+            }
+            return
         yield {"event": "done", "data": ""}
 
     return EventSourceResponse(stream())

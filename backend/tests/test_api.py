@@ -93,6 +93,9 @@ class StubPool:
         self.stream_eval_calls: list[tuple[str, int, int]] = []
         self.eval_lines_calls: list[tuple[str, int, int]] = []
         self.eval_lines_error: Exception | None = None
+        # When set, the live-eval stream raises it after its first
+        # snapshot — an engine dying mid-search.
+        self.stream_eval_error: Exception | None = None
         # When set, analyze_game blocks until the event fires, so a test
         # can hold a run open and exercise the one-run-per-player 409
         # guard. threading.Event (bridged via to_thread) because tests
@@ -127,8 +130,7 @@ class StubPool:
         self.stream_eval_calls.append((fen, depth, multipv))
         return self._live_evals(depth)
 
-    @staticmethod
-    async def _live_evals(depth: int) -> AsyncIterator[LiveEval]:
+    async def _live_evals(self, depth: int) -> AsyncIterator[LiveEval]:
         # The final event echoes the requested depth so tests can see
         # what the route resolved (default and clamping).
         yield LiveEval(
@@ -136,6 +138,8 @@ class StubPool:
                 EvalLine(multipv=1, depth=1, eval_cp=20, eval_mate=None, pv_san=["e4"])
             ]
         )
+        if self.stream_eval_error is not None:
+            raise self.stream_eval_error
         yield LiveEval(
             lines=[
                 EvalLine(
@@ -1315,6 +1319,25 @@ def test_eval_400s_on_invalid_fen(client: TestClient) -> None:
     response = get(client, "/api/eval", params={"fen": "not a fen"})
     assert response.status_code == 400
     assert "invalid FEN" in response.json()["error"]["message"]
+
+
+def test_eval_reports_mid_stream_engine_failure_as_terminal_event(
+    client: TestClient, stub_registry: dict[str, object]
+) -> None:
+    """An engine dying mid-search must end the stream with a terminal
+    `engine_error` event — not a bare connection drop, which an
+    EventSource client answers by reconnecting and re-running the same
+    failing search (docs/CODEBASE-SCAN-2026-07.md, finding 5)."""
+    stub_pool(stub_registry).stream_eval_error = EngineError("engine died")
+
+    response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
+
+    assert response.status_code == 200
+    body = response.text
+    assert "event: eval" in body  # the pre-crash snapshot still arrived
+    assert "event: engine_error" in body
+    assert "engine died" in body
+    assert "event: done" not in body
 
 
 def test_eval_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> None:
