@@ -6,7 +6,11 @@ stdlib `sqlite3` module (WAL mode, synchronous) — no ORM. Storage is
 deliberately sync; FastAPI runs sync code in its threadpool, so the
 shared connection is opened with `check_same_thread=False` — safe
 only because CPython's sqlite3 is serialized (`threadsafety == 3`,
-asserted at open).
+asserted at open). Serialized mode covers single calls, not
+transactions, so `Db` is a thin wrapper over the connection whose
+context manager holds a write lock for the whole `with db:` block —
+concurrent writers (analysis saves racing a sync's upserts) serialize
+instead of interleaving their BEGIN/COMMIT; reads stay lock-free.
 
 ## Schema
 

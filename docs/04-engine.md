@@ -72,6 +72,14 @@ All engine start-up and protocol failures surface as `EngineError`,
 the typed exception callers (the [API layer](07-api.md)) catch and
 map; raw `chess.engine` errors never escape this component.
 
+A worker whose call raised `EngineError` is retired, never recycled —
+its process may be dead, and a dead engine back in the queue would
+fail every later checkout of that slot until the server restarts. The
+pool closes the retired worker (best effort) and spawns a replacement
+at the next checkout; if that respawn fails, the call fails fast and
+the empty slot stays available for the attempt after. `create_pool`
+wires the respawner; `AnalysisPool.close` covers respawned workers.
+
 `stream_eval` powers the live analysis board: it parses the FEN
 eagerly (raising `ValueError` on an invalid one, before any engine
 work), borrows a pool worker (waiting if all are busy analyzing),
