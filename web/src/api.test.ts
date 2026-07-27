@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   explainUrl,
+  HttpError,
   type OpeningStats,
   queryString,
   score,
@@ -173,6 +174,50 @@ describe("api.allGames", () => {
     expect(games).toHaveLength(50_000);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     warnSpy.mockRestore();
+  });
+});
+
+describe("api.analyze", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the page's current window/time-class filters for a scoped request", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ queued: 5, remaining: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.analyze("alice", { since: 1_700_000_000, time_class: "rapid" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/analyze",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ since: 1_700_000_000, time_class: "rapid" }),
+      }),
+    );
+  });
+
+  it("throws an HttpError carrying the response status (e.g. 409, a run already active)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: "a run is already active" } }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await api.analyze("alice", { limit: 10 });
+      expect.unreachable("expected api.analyze to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).status).toBe(409);
+      expect((error as HttpError).message).toBe("a run is already active");
+    }
   });
 });
 

@@ -14,6 +14,7 @@ export type SyncResult =
 export type OpeningStats =
   paths["/api/players/{username}/openings"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type Color = OpeningStats["color"];
+export type AnalyzeRequest = components["schemas"]["AnalyzeRequest"];
 export type AnalyzeResult =
   paths["/api/players/{username}/analyze"]["post"]["responses"]["202"]["content"]["application/json"];
 export type GameAnalysis = NonNullable<GameDetail["analysis"]>;
@@ -79,12 +80,31 @@ export function queryString(
   return entries.length === 0 ? "" : `?${new URLSearchParams(entries)}`;
 }
 
+/**
+ * Thrown by `json()` for any non-2xx response. `status` lets callers
+ * branch on a specific code — e.g. the Coach page treats a 409 from
+ * `POST /analyze` ("a run is already active for this player",
+ * docs/07-api.md) as "attach to progress", not a failure.
+ */
+export class HttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? `HTTP ${response.status}`);
+    throw new HttpError(
+      response.status,
+      body?.error?.message ?? `HTTP ${response.status}`,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -192,9 +212,21 @@ export const api = {
     json(await fetch("/api/coach/agents")),
   players: async (): Promise<PlayerSummary[]> =>
     json(await fetch("/api/players")),
+  /**
+   * `since`/`until`/`time_class` scope the bulk (non-`gameIds`) path —
+   * both the enqueue and `remaining` — so "analyze this window" is
+   * expressible; the Coach page's "Analyze the rest" action uses them
+   * with the same filters `/report` and `/coach` were sent.
+   */
   analyze: async (
     username: string,
-    options: { gameIds?: string[]; limit?: number } = {},
+    options: {
+      gameIds?: string[];
+      limit?: number;
+      since?: number;
+      until?: number;
+      time_class?: TimeClass;
+    } = {},
   ): Promise<AnalyzeResult> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/analyze`, {
@@ -203,7 +235,10 @@ export const api = {
         body: JSON.stringify({
           game_ids: options.gameIds,
           limit: options.limit,
-        }),
+          since: options.since,
+          until: options.until,
+          time_class: options.time_class,
+        } satisfies AnalyzeRequest),
       }),
     ),
 };

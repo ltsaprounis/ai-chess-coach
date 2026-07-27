@@ -1,9 +1,11 @@
 # 07 — Analysis coverage: state it, then let the user fix it
 
-**Status: wave 5 (`c2f9f2c`) shipped the report/prompt slice with
-doc 04's follow-up. Wave 6 (`0c836f0`) shipped the analyze-endpoint
-filters + the backfill CLI (slices 2-3). The Coach-page warning
-(slice 4) remains.**
+**Status: complete. Wave 5 (`c2f9f2c`) shipped the report/prompt
+slice with doc 04's follow-up; wave 6 (`0c836f0`) the
+analyze-endpoint filters + backfill CLI; wave 7 (2026-07-27) the
+Coach-page warning — verified live (blitz 22/4,325 and rapid-6mo
+450/1,025 both render; chaining stops on failed runs and lost
+streams).**
 
 ## Symptom
 

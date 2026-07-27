@@ -21,7 +21,7 @@ feature doc so implementers don't guess.
 | 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 | shipped `8c340d4`; live run 2026-07-27 exposed the FEN gap → wave-5 follow-up |
 | 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 | shipped `f90f97e` |
 | 6 | [06-player-profile.md](06-player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | parked — a later iteration |
-| 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | waves 5-6 shipped (`c2f9f2c`, `0c836f0`); Coach-page warning remains |
+| 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | complete: waves 5-7 (`c2f9f2c`, `0c836f0`, Coach-page warning 2026-07-27) |
 
 ## Decisions already made
 
@@ -80,8 +80,10 @@ slices.
   bump ("2026-07-fen-coverage"), one readable diff.
 - **Wave 6 (shipped `0c836f0`):** 07's analyze-endpoint window
   filters (storage-dev → api-dev) + the backfill CLI (main
-  session — an HTTP-only client, owned by no component). The
-  Coach-page coverage warning is the remaining 07 slice after this.
+  session — an HTTP-only client, owned by no component).
+- **Wave 7 (shipped 2026-07-27):** 07's Coach-page coverage warning
+  + "Analyze the rest" chaining (frontend-dev). Closes item 7; the
+  iteration's only open item is 06, parked.
 
 `PROMPT_VERSION` bumps in waves 2, 3 and 5; each bump invalidates
 the report cache by design. That is expected, not a regression.

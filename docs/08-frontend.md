@@ -109,7 +109,29 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    button (the manual-use fallback). The same time-window and
    time-control controls the Dashboard uses scope the request, so the
    advice covers the period the student is looking at rather than
-   every game they have ever played. Advice is cached server-side per
+   every game they have ever played. The page reads `games_analyzed`
+   and `games_in_scope` off `GET /report` for the same filters —
+   server-truth counts, never recomputed client-side (`coverageGap` in
+   `coachCoverage.ts`) — and shows one line: a plain "N games
+   analyzed" once coverage is full (or `games_in_scope` is `null`,
+   meaning no scope info), or, while `games_analyzed < games_in_scope`,
+   a warning ("N of M games in this window are analyzed — advice will
+   only cover the analyzed games") with an "Analyze the rest" action.
+   That action posts the page's current `since`/`time_class` to
+   `POST /analyze` and tracks progress with the same SSE hook
+   (`useAnalysisProgress`) the Games page's analyze bar uses; a 409
+   (a run already active for this player, e.g. started from Games or
+   a backfill CLI run) attaches to that progress instead of showing an
+   error. Because each run caps at `engine.analyze_limit`, when a run
+   finishes **cleanly** the page re-reads the report and, if a gap
+   remains, fires another run automatically while the user stays on
+   the page; a failed run or a lost progress stream stops the chain
+   instead (`shouldChainAfterRun` in `coachCoverage.ts`) — a
+   persistently-failing game would otherwise re-fire forever with no
+   backoff — and the user resumes manually with "Analyze the rest".
+   Leaving the page also stops the chain (the server-side run
+   continues regardless). Coverage reaching full clears the warning
+   and the plain generate flow stands. Advice is cached server-side per
    (player, agent, window, prompt version): a cached result renders
    immediately, labelled with when it was generated and over how many
    games, with a "Regenerate" action (`refresh: true`) — the same
