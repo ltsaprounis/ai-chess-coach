@@ -1531,3 +1531,33 @@ def test_games_list_rejects_negative_paging(client: TestClient) -> None:
     for params in ({"limit": "-1"}, {"offset": "-1"}):
         response = get(client, "/api/players/testuser/games", params=params)
         assert response.status_code == 422
+
+
+def test_analyze_game_ids_skips_other_players_games_and_duplicates(
+    client: TestClient, db_path: Path
+) -> None:
+    """The game_ids path must only analyze the named player's games —
+    a run registered under one username must not run another player's
+    games — and a repeated id must not be analyzed twice (scan finding
+    13, docs/CODEBASE-SCAN-2026-07.md)."""
+    seed(
+        db_path,
+        [
+            make_game(id="mine", username="testuser"),
+            make_game(id="theirs", username="rival", opponent="testuser"),
+        ],
+    )
+
+    response = post(
+        client,
+        "/api/players/testuser/analyze",
+        json={"game_ids": ["mine", "mine", "theirs", "ghost"]},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["queued"] == 1
+    wait_until_analyzed(client, "testuser", 1)
+    rival_analyzed: Any = get(
+        client, "/api/players/rival/games", params={"analyzed": "true"}
+    ).json()
+    assert rival_analyzed == []

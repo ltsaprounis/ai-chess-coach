@@ -245,11 +245,20 @@ async def analyze_player(
         )
 
     if body is not None and body.game_ids:
-        games: list[Game] = [
-            game
-            for game_id in body.game_ids
-            if (game := get_game(db, game_id)) is not None
-        ]
+        # Resolve ids defensively: unknown ids and other players' games
+        # are dropped — a run registered under {username} must only
+        # ever analyze that player's games — and duplicates collapse so
+        # a repeated id isn't analyzed (and billed in engine time)
+        # twice.
+        games: list[Game] = []
+        seen: set[str] = set()
+        for game_id in body.game_ids:
+            if game_id in seen:
+                continue
+            seen.add(game_id)
+            game = get_game(db, game_id)
+            if game is not None and game.username == user:
+                games.append(game)
         remaining = max(
             0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
         )
