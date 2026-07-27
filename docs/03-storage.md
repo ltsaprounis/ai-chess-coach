@@ -71,8 +71,21 @@ def get_game(db: Db, game_id: str) -> GameDetail | None
 def list_players(db: Db) -> list[PlayerSummary]  # saved-players picker
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int,
-                           limit: int | None = None) -> list[Game]
-def count_games_needing_analysis(db, username: str, depth: int) -> int
+                           limit: int | None = None, *,
+                           since: int | None = None,
+                           until: int | None = None,
+                           time_class: TimeClass | None = None
+                           ) -> list[Game]
+def count_games_needing_analysis(db, username: str, depth: int, *,
+                                 since: int | None = None,
+                                 until: int | None = None,
+                                 time_class: TimeClass | None = None
+                                 ) -> int
+#   The optional window/time-class kwargs scope both functions the
+#   same way as list_analyzed_games/count_games (since inclusive,
+#   until exclusive), so an "analyze this window" run and its
+#   remaining count describe the same games. Newest-first order and
+#   the depth semantics are unchanged.
 def games_missing_opening(db: Db, username: str) -> list[Game]
 def list_analyzed_games(db, username: str, *, since: int | None = None,
                         until: int | None = None,

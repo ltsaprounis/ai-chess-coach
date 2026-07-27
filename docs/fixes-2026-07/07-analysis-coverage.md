@@ -1,7 +1,9 @@
 # 07 — Analysis coverage: state it, then let the user fix it
 
-**Status: wave 5 ships the report/prompt slice (with doc 04's
-follow-up); the analyze-endpoint and Coach-page slices follow.**
+**Status: wave 5 (`c2f9f2c`) shipped the report/prompt slice with
+doc 04's follow-up. Wave 6 in progress: analyze-endpoint filters +
+the backfill CLI (slices 2-3). The Coach-page warning (slice 4)
+remains.**
 
 ## Symptom
 
@@ -26,13 +28,21 @@ themselves (06-coach.md) — and the composition still misled:
 
 ## Decision: state coverage everywhere, then make backfill aimable
 
-No committed backfill script — a script would be a second, unowned
-path into the system (direct DB reads plus API orchestration outside
-the components), redundant the day the slices below land. One-off
-backfills run as throwaways against the live API; the durable path
-is the endpoint filter plus the UI action.
+Backfill has two consumers of one endpoint (decision revised
+2026-07-27; the first cut said "no committed script"). The Coach
+page's button covers small gaps — the run continues server-side if
+the tab closes. But archive-scale jobs (4,300 unanalyzed blitz
+games) need what no browser owns: chaining batches past
+`engine.analyze_limit` for hours, and keeping the machine awake. So
+a committed CLI exists under conditions that keep it from becoming
+a second path into the system: it is an **HTTP client only** — no
+sqlite reads, no `chess_coach` imports, every decision delegated to
+the filtered analyze endpoint below — living in
+`backend/scripts/backfill.py` with a `make backfill` target that
+wraps `caffeinate` on macOS. The original objection was to a
+DB-poking orchestrator; this is a loop over the public API.
 
-Three slices:
+Four slices:
 
 1. **Report states its coverage** (wave 5, with doc 04's follow-up).
    `PlayerReport` gains `requested_since` / `requested_until` /
@@ -46,8 +56,20 @@ Three slices:
 2. **`POST /analyze` gains `since`/`until`/`time_class`** so
    "analyze this window" is expressible. Extends the body model;
    `limit` and `game_ids` behave as today; same window semantics as
-   everything else (since inclusive, until exclusive). api-dev.
-3. **The Coach page warns before generating** when coverage is
+   everything else (since inclusive, until exclusive). The filters
+   scope both the enqueue and `remaining`. A request that resolves
+   to zero games starts **no run** and still answers 202 — which
+   makes `limit=0` a free probe ("how much is left in this scope?")
+   and `queued=0, remaining=0` the backfill's termination signal.
+   Storage's `games_needing_analysis` / `count_games_needing_analysis`
+   gain the same kwargs. storage-dev, then api-dev.
+3. **The backfill CLI** (`backend/scripts/backfill.py`, main
+   session — it is a client, owned by no component): stdlib-only,
+   POSTs slice 2's endpoint in a loop — 202 starts a batch, 409
+   means one is still running (poll again), `queued=0, remaining=0`
+   means done. `--dry-run` uses the `limit=0` probe. `make backfill`
+   wraps it in `caffeinate -dims` on Darwin.
+4. **The Coach page warns before generating** when coverage is
    partial ("450 of 1,025 games in this window are analyzed") with
    an "Analyze the rest" action driving slice 2, progress via the
    existing SSE stream. The warning reads the `PlayerReport` fields
@@ -83,7 +105,7 @@ Three slices:
   pass it plus the requested bounds to `build_report`.
 - `PlayerReport`'s new optional fields change the OpenAPI schema:
   regenerate `web/` types (`pnpm gen:api`); no UI consumption until
-  slice 3.
+  slice 4.
 - The routes always pass `games_in_scope` — a filter-less request
   still states "N of M" over the full history; `requested_since`/
   `requested_until` are passed only when the request carried them
@@ -93,11 +115,45 @@ Three slices:
   a scoped request finds fewer analyzed games than stored ones; a
   filter-less request still passes the full-history count.
 
+## Slices (wave 6)
+
+### storage-dev
+
+- `games_needing_analysis` and `count_games_needing_analysis` gain
+  `*, since=None, until=None, time_class=None` with the same window
+  semantics as everything else (since inclusive, until exclusive);
+  the newest-first order and depth semantics are unchanged.
+- Tests: window edges, time-class filter, and that the two
+  functions agree on a mixed fixture (len of one = the other).
+
+### api-dev (after storage-dev)
+
+- `AnalyzeRequest` gains `since`/`until`/`time_class`; the bulk
+  path passes them to both storage calls so `queued` and
+  `remaining` describe the same scope. `game_ids` ignores them.
+- Zero resolved games → no run started, still 202 (the `limit=0`
+  probe and the termination signal).
+- Tests: scoped enqueue picks only in-scope games; `remaining`
+  is in-scope; `limit=0` starts no run and reports `remaining`;
+  zero-game result leaves no 409-blocking run behind.
+
+### main session — backfill CLI (after api-dev)
+
+- `backend/scripts/backfill.py` + `make backfill`, per slice 3
+  above. Stdlib-only; every count comes from the API.
+
 ## Acceptance
 
 Wave 5: both gates green; snapshot diff shows only the student
 section coverage lines, the turning-point FEN lines, and the
 Verification reword; report cache behavior unchanged (the version
-bump invalidates old entries by design). Slices 2–3: a partial
-window shows the warning, the action analyzes exactly the window's
-remainder, and the warning disappears at full coverage.
+bump invalidates old entries by design).
+
+Wave 6: both gates green; a scoped analyze request enqueues only
+in-scope games and reports in-scope `remaining`; `--dry-run`
+touches nothing; the CLI drains a multi-batch backfill to
+`queued=0, remaining=0` unattended.
+
+Slice 4 (later): a partial window shows the warning, the action
+analyzes exactly the window's remainder, and the warning disappears
+at full coverage.

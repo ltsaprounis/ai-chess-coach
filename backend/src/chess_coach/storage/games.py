@@ -185,31 +185,87 @@ def latest_game_time(db: Db, username: str) -> int | None:
     return None if latest is None else int(latest)
 
 
+def _needing_analysis_clauses(
+    username: str,
+    depth: int,
+    *,
+    since: int | None,
+    until: int | None,
+    time_class: TimeClass | None,
+) -> tuple[list[str], list[object]]:
+    """WHERE clauses shared by `games_needing_analysis` and its counter.
+
+    Mirrors `list_analyzed_games`/`count_games`'s window semantics
+    exactly (`since` inclusive, `until` exclusive) so a scoped analyze
+    run and its remaining count describe the same games.
+    """
+    clauses = ["g.username = ?", "(a.game_id IS NULL OR a.depth < ?)"]
+    params: list[object] = [username, depth]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
+    return clauses, params
+
+
 def games_needing_analysis(
-    db: Db, username: str, depth: int, limit: int | None = None
+    db: Db,
+    username: str,
+    depth: int,
+    limit: int | None = None,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
 ) -> list[Game]:
-    """Newest games with no analysis, or one shallower than `depth`."""
+    """Newest games with no analysis, or one shallower than `depth`.
+
+    `since`/`until` (epoch seconds; `since` inclusive, `until`
+    exclusive) restrict to a time window; `time_class` restricts to one
+    time control. All default to the full history. Newest-first order
+    and the depth semantics are unchanged.
+    """
+    clauses, params = _needing_analysis_clauses(
+        username, depth, since=since, until=until, time_class=time_class
+    )
     rows = db.execute(
-        """
+        f"""
         SELECT g.* FROM games AS g
         LEFT JOIN analyses AS a ON a.game_id = g.id
-        WHERE g.username = ? AND (a.game_id IS NULL OR a.depth < ?)
+        WHERE {" AND ".join(clauses)}
         ORDER BY g.end_time DESC
         LIMIT ?
         """,
-        (username, depth, -1 if limit is None else limit),
+        [*params, -1 if limit is None else limit],
     ).fetchall()
     return [Game.model_validate(_game_fields(row)) for row in rows]
 
 
-def count_games_needing_analysis(db: Db, username: str, depth: int) -> int:
+def count_games_needing_analysis(
+    db: Db,
+    username: str,
+    depth: int,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> int:
+    """Count of `games_needing_analysis`'s scope, same filters."""
+    clauses, params = _needing_analysis_clauses(
+        username, depth, since=since, until=until, time_class=time_class
+    )
     row = db.execute(
-        """
+        f"""
         SELECT COUNT(*) AS n FROM games AS g
         LEFT JOIN analyses AS a ON a.game_id = g.id
-        WHERE g.username = ? AND (a.game_id IS NULL OR a.depth < ?)
+        WHERE {" AND ".join(clauses)}
         """,
-        (username, depth),
+        params,
     ).fetchone()
     return int(row["n"])
 

@@ -32,7 +32,7 @@ injected into routes via FastAPI dependencies.
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging). Rows are slim `GameSummary` (no pgn/full moves — see docs/03-storage.md), so the frontend can page through the whole archive |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
-| POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining |
+| POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
@@ -56,6 +56,11 @@ unexpected to 500.
   events fan out to open SSE connections (sse-starlette). A missing
   engine binary is not fatal at startup — analyze returns 503 with a
   `make engine` hint; one run per player at a time (409 otherwise).
+  Archive-scale backfills ride this endpoint too:
+  `backend/scripts/backfill.py` (`make backfill`) loops scoped
+  requests until `queued=0, remaining=0`, treating 409 as "batch
+  still running". It is an HTTP client only — it never touches the
+  DB or imports components (docs/fixes-2026-07/07-analysis-coverage.md).
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report. That exclusion must
   never be silent: both `/report` and `/coach` pass `build_report`

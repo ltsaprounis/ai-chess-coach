@@ -189,6 +189,103 @@ def test_games_needing_analysis_respects_depth(db: Db) -> None:
     assert games_needing_analysis(db, "testuser", 16) == []
 
 
+def test_games_needing_analysis_time_window_edges(db: Db) -> None:
+    """Mirrors `list_analyzed_games`'s window semantics: `since`
+    inclusive, `until` exclusive."""
+    upsert_games(
+        db,
+        [make_game(id="old", end_time=100), make_game(id="recent", end_time=200)],
+    )
+
+    def ids(*, since: int | None = None, until: int | None = None) -> list[str]:
+        return [
+            g.id
+            for g in games_needing_analysis(
+                db, "testuser", 16, since=since, until=until
+            )
+        ]
+
+    assert ids() == ["recent", "old"]  # newest first
+    assert ids(since=150) == ["recent"]
+    assert ids(until=150) == ["old"]
+    assert ids(since=200) == ["recent"]  # since is inclusive
+    assert ids(until=200) == ["old"]  # until is exclusive
+
+    assert count_games_needing_analysis(db, "testuser", 16, since=150) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, until=150) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, since=200) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, until=200) == 1
+
+
+def test_games_needing_analysis_time_class_filter(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="rapid", time_class="rapid"),
+            make_game(id="blitz", time_class="blitz"),
+        ],
+    )
+
+    assert [
+        g.id for g in games_needing_analysis(db, "testuser", 16, time_class="rapid")
+    ] == ["rapid"]
+    assert count_games_needing_analysis(db, "testuser", 16, time_class="rapid") == 1
+    assert count_games_needing_analysis(db, "testuser", 16, time_class="blitz") == 1
+
+
+def test_games_needing_analysis_and_count_agree_on_a_mixed_fixture(db: Db) -> None:
+    """A mix of analyzed/unanalyzed games in and out of a scoped window:
+    the list's length and the dedicated count must describe the same
+    scope, with no `limit` to truncate either side."""
+    upsert_games(
+        db,
+        [
+            make_game(id="old-unanalyzed", end_time=50, time_class="rapid"),
+            make_game(id="old-analyzed", end_time=60, time_class="rapid"),
+            make_game(id="in-window-unanalyzed", end_time=150, time_class="rapid"),
+            make_game(id="in-window-analyzed", end_time=160, time_class="rapid"),
+            make_game(id="in-window-shallow", end_time=170, time_class="rapid"),
+            make_game(id="in-window-other-class", end_time=180, time_class="blitz"),
+            make_game(id="future-unanalyzed", end_time=300, time_class="rapid"),
+        ],
+    )
+    save_analysis(db, make_analysis(game_id="old-analyzed", depth=16))
+    save_analysis(db, make_analysis(game_id="in-window-analyzed", depth=16))
+    save_analysis(db, make_analysis(game_id="in-window-shallow", depth=8))
+
+    found = games_needing_analysis(
+        db, "testuser", 16, since=100, until=200, time_class="rapid"
+    )
+    count = count_games_needing_analysis(
+        db, "testuser", 16, since=100, until=200, time_class="rapid"
+    )
+
+    assert {g.id for g in found} == {
+        "in-window-unanalyzed",
+        "in-window-shallow",
+    }
+    assert len(found) == count
+
+
+def test_games_needing_analysis_filters_compose_with_limit(db: Db) -> None:
+    """`limit` applies after the window/time-class scoping, not before."""
+    upsert_games(
+        db,
+        [
+            make_game(id="out-of-window", end_time=50, time_class="rapid"),
+            make_game(id="wrong-class", end_time=150, time_class="blitz"),
+            make_game(id="in-scope-1", end_time=160, time_class="rapid"),
+            make_game(id="in-scope-2", end_time=170, time_class="rapid"),
+            make_game(id="in-scope-3", end_time=180, time_class="rapid"),
+        ],
+    )
+
+    result = games_needing_analysis(
+        db, "testuser", 16, limit=2, since=100, until=200, time_class="rapid"
+    )
+    assert [g.id for g in result] == ["in-scope-3", "in-scope-2"]
+
+
 def test_opening_stats_aggregates_records_most_played_first(db: Db) -> None:
     upsert_games(
         db,

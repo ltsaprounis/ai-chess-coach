@@ -269,6 +269,12 @@ export interface components {
             game_ids?: string[] | null;
             /** Limit */
             limit?: number | null;
+            /** Since */
+            since?: number | null;
+            /** Until */
+            until?: number | null;
+            /** Time Class */
+            time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
         };
         /** AnalyzeResult */
         AnalyzeResult: {

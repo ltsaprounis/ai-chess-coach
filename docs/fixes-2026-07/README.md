@@ -21,7 +21,7 @@ feature doc so implementers don't guess.
 | 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 | shipped `8c340d4`; live run 2026-07-27 exposed the FEN gap → wave-5 follow-up |
 | 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 | shipped `f90f97e` |
 | 6 | [06-player-profile.md](06-player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | parked — a later iteration |
-| 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | wave 5 in progress (report/prompt slice, with 04's live-run follow-up) |
+| 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | wave 5 shipped `c2f9f2c` (report/prompt slice); wave 6 in progress (analyze filters + backfill CLI); Coach-page warning remains |
 
 ## Decisions already made
 
@@ -73,12 +73,15 @@ slices.
 - **Wave 4 (parked — a later iteration):** 06. Reuses 03's
   aggregation and 04's provider path; do not start it before both
   settle, and not in this iteration.
-- **Wave 5:** 04's live-run follow-up (turning-point FENs,
-  affirmative verification rule) + 07's report/prompt slice
-  (coverage statement). One wave because both edit
-  `coach/prompt.py` and the snapshot: one `PROMPT_VERSION` bump
-  ("2026-07-fen-coverage"), one readable diff. 07's
-  analyze-endpoint and Coach-page slices follow separately.
+- **Wave 5 (shipped `c2f9f2c`):** 04's live-run follow-up
+  (turning-point FENs, affirmative verification rule) + 07's
+  report/prompt slice (coverage statement). One wave because both
+  edit `coach/prompt.py` and the snapshot: one `PROMPT_VERSION`
+  bump ("2026-07-fen-coverage"), one readable diff.
+- **Wave 6:** 07's analyze-endpoint window filters (storage-dev →
+  api-dev) + the backfill CLI (main session — an HTTP-only client,
+  owned by no component). The Coach-page coverage warning is the
+  remaining 07 slice after this.
 
 `PROMPT_VERSION` bumps in waves 2, 3 and 5; each bump invalidates
 the report cache by design. That is expected, not a regression.

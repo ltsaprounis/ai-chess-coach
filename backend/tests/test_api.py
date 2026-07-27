@@ -1,6 +1,7 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
 import asyncio
+import threading
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from pathlib import Path
@@ -91,6 +92,11 @@ class StubPool:
         self.stream_eval_calls: list[tuple[str, int, int]] = []
         self.eval_lines_calls: list[tuple[str, int, int]] = []
         self.eval_lines_error: Exception | None = None
+        # When set, analyze_game blocks until the event fires, so a test
+        # can hold a run open and exercise the one-run-per-player 409
+        # guard. threading.Event (bridged via to_thread) because tests
+        # release it from the TestClient thread, not the app's loop.
+        self.analyze_release: threading.Event | None = None
 
     async def analyze_game(
         self,
@@ -98,6 +104,8 @@ class StubPool:
         opts: EngineOptions,
         on_progress: ProgressCallback | None = None,
     ) -> GameAnalysis:
+        if self.analyze_release is not None:
+            await asyncio.to_thread(self.analyze_release.wait)
         total = max(1, len(game.san_moves))
         if on_progress is not None:
             on_progress(Progress(game_id=game.id, ply=total, total_plies=total))
@@ -519,6 +527,149 @@ def test_analyze_limit_is_capped_by_config(client: TestClient, db_path: Path) ->
     # Asking for 999 still yields at most the configured cap of 2.
     response = post(client, "/api/players/testuser/analyze", json={"limit": 999})
     assert response.json() == {"queued": 2, "remaining": 2}
+
+
+def test_analyze_scoped_request_enqueues_only_in_scope_games(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-in-1", end_time=10, time_class="rapid"),
+            make_game(id="g-in-2", end_time=12, time_class="rapid"),
+            make_game(id="g-in-3", end_time=14, time_class="rapid"),
+            make_game(id="g-before", end_time=5, time_class="rapid"),  # out of window
+            make_game(id="g-blitz", end_time=13, time_class="blitz"),  # wrong class
+        ],
+    )
+
+    # since inclusive, until exclusive: [10, 15) rapid -> 3 in-scope games.
+    # config analyze_limit is 2 (see the `client` fixture), so one is left.
+    response = post(
+        client,
+        "/api/players/testuser/analyze",
+        json={"since": 10, "until": 15, "time_class": "rapid"},
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 2, "remaining": 1}
+
+    wait_until_analyzed(client, "testuser", 2)
+    analyzed: Any = get(
+        client, "/api/players/testuser/games", params={"analyzed": "true"}
+    ).json()
+    # Newest-first within scope: neither the out-of-window game nor the
+    # wrong-time-class game was touched.
+    assert [g["id"] for g in analyzed] == ["g-in-3", "g-in-2"]
+
+
+def test_analyze_zero_limit_is_a_probe_that_starts_no_run(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1), make_game(id="g-2", end_time=2)],
+    )
+
+    response = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+    assert response.status_code == 202
+    assert response.json() == {"queued": 0, "remaining": 2}
+
+    # No run was started by the probe, so a real request right after
+    # succeeds instead of 409ing against a run that was never started.
+    response = post(client, "/api/players/testuser/analyze")
+    assert response.status_code == 202
+    assert response.json() == {"queued": 2, "remaining": 0}
+
+
+def test_analyze_409s_while_a_run_is_active_including_probes(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """The one-run-per-player guard is protocol: the backfill CLI reads
+    409 as "batch still running", so it must fire for real requests AND
+    for limit-0 probes while a run is active."""
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1), make_game(id="g-2", end_time=2)],
+    )
+    pool = stub_pool(stub_registry)
+    pool.analyze_release = threading.Event()
+    try:
+        response = post(client, "/api/players/testuser/analyze", json={"limit": 1})
+        assert response.status_code == 202
+        assert response.json()["queued"] == 1
+
+        # While the batch is held open, both a real request and a probe
+        # hit the guard.
+        assert post(client, "/api/players/testuser/analyze").status_code == 409
+        probe = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+        assert probe.status_code == 409
+    finally:
+        pool.analyze_release.set()
+
+    # Released: the run finishes and a probe soon answers 202 again,
+    # reporting the game the limited batch did not cover.
+    for _ in range(200):
+        probe = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+        if probe.status_code == 202:
+            break
+        time.sleep(0.02)
+    assert probe.status_code == 202
+    assert probe.json() == {"queued": 0, "remaining": 1}
+
+
+def test_analyze_negative_limit_is_rejected(client: TestClient, db_path: Path) -> None:
+    """SQLite reads a negative LIMIT as unlimited, which would bypass
+    the engine.analyze_limit cap — pydantic must reject it instead."""
+    seed(db_path, [make_game(id="g-1", end_time=1)])
+    response = post(client, "/api/players/testuser/analyze", json={"limit": -1})
+    assert response.status_code == 422
+
+
+def test_analyze_fully_analyzed_scope_returns_zero_and_zero(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1, time_class="rapid")],
+        analyzed={"g-1"},
+    )
+
+    response = post(
+        client, "/api/players/testuser/analyze", json={"time_class": "rapid"}
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 0, "remaining": 0}
+
+    # No 409-blocking run was left behind by the zero-game result.
+    assert get(client, "/api/players/testuser/analyze/progress").status_code == 404
+
+
+def test_analyze_game_ids_request_ignores_scope_fields(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-blitz", end_time=1, time_class="blitz"),
+            make_game(id="g-rapid", end_time=2, time_class="rapid"),
+        ],
+    )
+
+    # time_class="rapid" would exclude g-blitz on the bulk path, but an
+    # explicit game_ids list ignores the scope fields entirely.
+    response = post(
+        client,
+        "/api/players/testuser/analyze",
+        json={"game_ids": ["g-blitz"], "time_class": "rapid"},
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 1, "remaining": 1}
+
+    wait_until_analyzed(client, "testuser", 1)
+    analyzed: Any = get(
+        client, "/api/players/testuser/games", params={"analyzed": "true"}
+    ).json()
+    assert [g["id"] for g in analyzed] == ["g-blitz"]
 
 
 def test_analyze_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> None:

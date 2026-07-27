@@ -31,6 +31,18 @@ serve:
 	cd web && pnpm build
 	$(MAKE) dev-api
 
+# Archive-scale analysis backfill via the HTTP API (needs `make
+# dev-api` running). Wraps caffeinate on macOS so overnight jobs
+# survive the lid. Usage:
+#   make backfill ARGS="<user> --since 2026-01-27 --time-class rapid"
+.PHONY: backfill
+backfill:
+	@cd backend && if [ "$$(uname -s)" = "Darwin" ]; then \
+		caffeinate -dims uv run python scripts/backfill.py $(ARGS); \
+	else \
+		uv run python scripts/backfill.py $(ARGS); \
+	fi
+
 .PHONY: gen-api
 gen-api:
 	cd backend && uv run python -c "import json; \

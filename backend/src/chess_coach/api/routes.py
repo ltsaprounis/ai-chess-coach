@@ -7,7 +7,7 @@ from contextlib import aclosing
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -185,12 +185,26 @@ def game_detail(game_id: str, db: DbDep) -> GameDetail:
 
 class AnalyzeRequest(BaseModel):
     game_ids: list[str] | None = None
-    limit: int | None = None  # bulk path only; capped by config
+    # Bulk path only; capped by config. ge=0 because SQLite reads a
+    # negative LIMIT as "unlimited", which would bypass the cap; 0 is
+    # the documented no-op probe.
+    limit: int | None = Field(default=None, ge=0)
+    # Bulk-path scope only (ignored when game_ids is set); same window
+    # semantics as everywhere else (since inclusive, until exclusive).
+    # Passed to both the enqueue and the remaining count so they always
+    # describe the same scope.
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
 
 
 class AnalyzeResult(BaseModel):
     queued: int
-    remaining: int  # unanalyzed games not covered by this run
+    # Unanalyzed games not covered by this run. Exact on the bulk
+    # path; the game_ids path subtracts the whole resolved list, so
+    # re-analyzing already-analyzed games under-counts by that many
+    # (floored at 0) — an accepted approximation.
+    remaining: int
 
 
 @router.post("/players/{username}/analyze", status_code=202)
@@ -221,15 +235,48 @@ async def analyze_player(
             for game_id in body.game_ids
             if (game := get_game(db, game_id)) is not None
         ]
+        remaining = max(
+            0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
+        )
     else:
+        since = body.since if body is not None else None
+        until = body.until if body is not None else None
+        time_class = body.time_class if body is not None else None
         limit = cfg.engine.analyze_limit
         if body is not None and body.limit is not None:
             limit = min(body.limit, cfg.engine.analyze_limit)
-        games = games_needing_analysis(db, user, cfg.engine.depth, limit)
+        games = games_needing_analysis(
+            db,
+            user,
+            cfg.engine.depth,
+            limit,
+            since=since,
+            until=until,
+            time_class=time_class,
+        )
+        remaining = max(
+            0,
+            count_games_needing_analysis(
+                db,
+                user,
+                cfg.engine.depth,
+                since=since,
+                until=until,
+                time_class=time_class,
+            )
+            - len(games),
+        )
 
-    remaining = max(
-        0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
-    )
+    if not games:
+        # Nothing to enqueue: answer 202 without touching `runs`, so no
+        # run is started and no 409-blocking state is left behind. This
+        # makes `limit: 0` a free probe and `queued=0, remaining=0` the
+        # backfill's termination signal, per
+        # docs/fixes-2026-07/07-analysis-coverage.md. The active-run
+        # 409 guard above already ran, so a probe against a genuinely
+        # running player still 409s as usual.
+        return AnalyzeResult(queued=0, remaining=remaining)
+
     run = AnalysisRun(len(games))
     runs[user] = run
     opts = EngineOptions(depth=cfg.engine.depth, thresholds=cfg.thresholds)
