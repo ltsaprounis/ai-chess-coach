@@ -1,5 +1,6 @@
 """Storage component tests (docs/03-storage.md)."""
 
+import json
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -1065,4 +1066,74 @@ def test_migration_006_rewrites_legacy_rows_to_perspective_ids(
     assert get_explanation(migrated, "uuid-1:alice", 1, "coach-a") == "push the pawn"
     row = migrated.execute("SELECT chesscom_uuid FROM games").fetchone()
     assert row["chesscom_uuid"] == "uuid-1"
+    migrated.close()
+
+
+def test_migration_007_backfills_aggregates_from_stored_evals(
+    tmp_path: Path,
+) -> None:
+    """Analyses saved before the aggregate columns existed: migration
+    007 must derive player/opening move counts and losses from the
+    stored evals (player plies by color parity, opening as ply <= 20),
+    so opening_stats over legacy rows matches what save_analysis would
+    have computed."""
+    evals = json.dumps(
+        [
+            # White player: plies 1 and 21 are theirs, ply 2 is not;
+            # only ply 1 is opening phase.
+            {
+                "ply": 1,
+                "san": "e4",
+                "eval_cp": 0,
+                "eval_mate": None,
+                "best_move": "e2e4",
+                "cp_loss": 10,
+                "judgment": "best",
+            },
+            {
+                "ply": 2,
+                "san": "e5",
+                "eval_cp": 0,
+                "eval_mate": None,
+                "best_move": "e7e5",
+                "cp_loss": 99,
+                "judgment": "best",
+            },
+            {
+                "ply": 21,
+                "san": "h4",
+                "eval_cp": 0,
+                "eval_mate": None,
+                "best_move": "g1f3",
+                "cp_loss": 30,
+                "judgment": "best",
+            },
+        ]
+    )
+    path = tmp_path / "legacy-aggregates.sqlite3"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(_LEGACY_V5_SCHEMA)
+    legacy.execute(
+        "INSERT INTO games (id, username, color, pgn, san_moves,"
+        " time_control, time_class, result, end_time, opponent,"
+        " player_rating, opponent_rating, opening_eco, opening_name,"
+        " opening_ply) VALUES ('uuid-1', 'alice', 'white', '1. e4 *',"
+        " '[\"e4\", \"e5\"]', '600', 'rapid', 'win', 100, 'bob', 1500,"
+        " 1490, 'C60', 'Ruy Lopez', 5)"
+    )
+    legacy.execute(
+        "INSERT INTO analyses (game_id, depth, evals, acpl_by_phase,"
+        " judgment_counts) VALUES ('uuid-1', 16, ?, '{}', '{}')",
+        (evals,),
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = open_db(path)  # applies migrations 006 and 007
+    (stat,) = opening_stats(migrated, "alice")
+    assert stat.analyzed_games == 1
+    assert stat.player_moves == 2  # plies 1 and 21; ply 2 is black's
+    assert stat.opening_moves == 1  # only ply 1 is <= OPENING_PLIES
+    assert stat.avg_cp_loss == 20.0  # (10 + 30) / 2
+    assert stat.opening_acpl == 10.0
     migrated.close()

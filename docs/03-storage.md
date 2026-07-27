@@ -32,7 +32,13 @@ analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),
   depth INTEGER, evals TEXT,         -- JSON list[MoveEval]
   overall_acpl REAL,                 -- the game's own mean cp loss
-  acpl_by_phase TEXT, judgment_counts TEXT
+  acpl_by_phase TEXT, judgment_counts TEXT,
+  -- per-perspective aggregates, derived from evals by save_analysis:
+  -- player-ply counts and summed losses (whole game and opening
+  -- phase), so opening_stats sums four integers per analyzed game
+  -- instead of re-parsing every evals blob per request
+  player_moves INTEGER, player_loss INTEGER,
+  opening_moves INTEGER, opening_loss INTEGER
 );
 explanations (                       -- cached coach move explanations
   game_id TEXT NOT NULL REFERENCES games(id),
@@ -120,8 +126,9 @@ def opening_stats(db, username: str, *, since: int | None = None,
 #   fetch, aggregated in Python). Returned
 #   most-played first (the coach's implementation sorts by impact
 #   instead; both are re-sorted by their consumers).
-#   ACPL comes from the per-move `analyses.evals`, not from
-#   `overall_acpl`, so the columns stay move-weighted.
+#   ACPL sums the per-perspective aggregate columns save_analysis
+#   derives from the per-move `analyses.evals` — never `overall_acpl`
+#   (a per-game mean), so the columns stay move-weighted.
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
 # Analysis repo

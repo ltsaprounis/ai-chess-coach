@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from chess_coach.domain import (
-    OPENING_PLIES,
     AnalyzedGame,
     Color,
     Game,
@@ -21,7 +20,7 @@ from chess_coach.domain import (
     Result,
     TimeClass,
 )
-from chess_coach.storage.analyses import analysis_from_json
+from chess_coach.storage.analyses import analysis_from_json, is_player_ply
 from chess_coach.storage.db import Db
 
 
@@ -389,11 +388,12 @@ def opening_stats(
     the game, and without color the table would merge the openings the
     player chose with the ones their opponents chose against them (see
     docs/06-coach.md, "Repertoire: keyed by the side the player had").
-    Grouping and the `system`/`first_moves` strings need only the SQL
-    columns; the two ACPL columns need per-move data that only exists
-    in `analyses.evals`, so those are finished in Python rather than in
-    SQL. `opening_acpl`/`avg_cp_loss` are None until a group has at
-    least one analyzed game.
+    The two ACPL columns sum the per-perspective aggregates
+    `save_analysis` derives from the evals at save time (four integers
+    per analyzed game) — never the evals themselves, whose per-request
+    JSON parse used to dominate this endpoint at archive scale.
+    `opening_acpl`/`avg_cp_loss` are None until a group has at least
+    one analyzed game.
 
     `faced` marks rows whose name describes the opponent's choice: per
     game, opponent-named iff `opening_ply`'s parity belongs to the
@@ -417,7 +417,10 @@ def opening_stats(
         f"""
         SELECT g.id AS id, g.color AS color, g.opening_eco AS eco,
                g.opening_name AS name, g.opening_ply AS opening_ply,
-               g.result AS result, g.san_moves AS san_moves, a.evals AS evals
+               g.result AS result, g.san_moves AS san_moves,
+               a.game_id IS NOT NULL AS analyzed,
+               a.player_moves AS player_moves, a.player_loss AS player_loss,
+               a.opening_moves AS opening_moves, a.opening_loss AS opening_loss
         FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
         WHERE {" AND ".join(clauses)}
         """,
@@ -451,18 +454,13 @@ def _opening_group_stats(key: _OpeningKey, rows: list[sqlite3.Row]) -> OpeningSt
     opening_loss = 0
     opening_moves = 0
     for row in rows:
-        if row["evals"] is None:
+        if not row["analyzed"]:
             continue
         analyzed_games += 1
-        for move_eval in json.loads(row["evals"]):
-            if not _is_player_ply(move_eval["ply"], color):
-                continue
-            cp_loss = move_eval["cp_loss"]
-            total_loss += cp_loss
-            total_moves += 1
-            if move_eval["ply"] <= OPENING_PLIES:
-                opening_loss += cp_loss
-                opening_moves += 1
+        total_loss += row["player_loss"]
+        total_moves += row["player_moves"]
+        opening_loss += row["opening_loss"]
+        opening_moves += row["opening_moves"]
 
     return OpeningStats(
         eco=eco,
@@ -515,7 +513,7 @@ def _most_played_line(rows: list[sqlite3.Row], color: Color) -> tuple[str, ...]:
     )
     for line in game_ids_by_line:
         player_seq = tuple(
-            san for ply, san in enumerate(line, start=1) if _is_player_ply(ply, color)
+            san for ply, san in enumerate(line, start=1) if is_player_ply(ply, color)
         )
         lines_by_player_seq[player_seq].append(line)
 
@@ -544,11 +542,6 @@ def _most_played_line(rows: list[sqlite3.Row], color: Color) -> tuple[str, ...]:
     return min(candidates, key=lambda line: min(game_ids_by_line[line]))
 
 
-def _is_player_ply(ply: int, color: Color) -> bool:
-    """Plies alternate white/black starting at 1 (white's first move)."""
-    return ply % 2 == 1 if color == "white" else ply % 2 == 0
-
-
 def _is_opponent_named(row: sqlite3.Row, color: Color) -> bool:
     """True iff `opening_ply`'s parity belongs to the opponent (06-coach.md,
     "Repertoire: keyed by the side the player had")."""
@@ -564,7 +557,7 @@ def _format_own_moves(line: Sequence[str], color: Color, count: int = 3) -> str:
     separator = "." if color == "white" else "..."
     parts: list[str] = []
     for ply, san in enumerate(line, start=1):
-        if not _is_player_ply(ply, color):
+        if not is_player_ply(ply, color):
             continue
         move_number = (ply + 1) // 2 if color == "white" else ply // 2
         parts.append(f"{move_number}{separator}{san}")
