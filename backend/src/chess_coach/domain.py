@@ -60,6 +60,10 @@ class CoachAgent(LlmConfig):
 
 
 class Game(BaseModel):
+    # Perspective id, minted by ingestion as "{chess.com uuid}:{username}":
+    # every other field here is one player's view of the game, so a game
+    # between two tracked players is stored once per side and the uuid
+    # alone cannot be the identity (docs/02-ingestion.md).
     id: str
     username: str
     color: Color

@@ -16,13 +16,17 @@ instead of interleaving their BEGIN/COMMIT; reads stay lock-free.
 
 ```sql
 games (
+  -- one row per (game, perspective): id is ingestion's perspective id
+  -- "{uuid}:{username}" (docs/02-ingestion.md), so a game between two
+  -- tracked players stores once per side instead of colliding
   id TEXT PRIMARY KEY, username TEXT NOT NULL, color TEXT,
   pgn TEXT, san_moves TEXT,          -- JSON array
   time_control TEXT, time_class TEXT, result TEXT, end_time INTEGER,
   opponent TEXT, player_rating INTEGER, opponent_rating INTEGER,
   accuracy REAL,             -- chess.com's own, nullable
   termination TEXT,          -- raw per-player result code, nullable
-  opening_eco TEXT, opening_name TEXT, opening_ply INTEGER
+  opening_eco TEXT, opening_name TEXT, opening_ply INTEGER,
+  chesscom_uuid TEXT         -- the raw uuid; groups perspective rows
 );
 analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),

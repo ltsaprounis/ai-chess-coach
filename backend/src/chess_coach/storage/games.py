@@ -39,7 +39,7 @@ class GameFilters(BaseModel):
 _INSERT_COLUMNS = (
     "id, username, color, pgn, san_moves, time_control, time_class, "
     "result, end_time, opponent, player_rating, opponent_rating, accuracy, "
-    "termination"
+    "termination, chesscom_uuid"
 )
 
 
@@ -61,6 +61,10 @@ def upsert_games(db: Db, games: list[Game]) -> None:
             game.opponent_rating,
             game.accuracy,
             game.termination,
+            # Ingestion mints ids as "{uuid}:{username}" (usernames
+            # cannot contain ':', docs/02-ingestion.md); the raw uuid is
+            # kept so perspective rows of one game stay groupable.
+            game.id.rsplit(":", 1)[0],
         )
         for game in games
     ]
@@ -68,7 +72,7 @@ def upsert_games(db: Db, games: list[Game]) -> None:
         db.executemany(
             f"""
             INSERT INTO games ({_INSERT_COLUMNS})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 pgn = excluded.pgn,
                 san_moves = excluded.san_moves,

@@ -9,8 +9,10 @@ same data, and plans their rework;
 [fixes-2026-07/](fixes-2026-07/README.md) is the follow-up fix
 iteration to that rework; and
 [CODEBASE-SCAN-2026-07.md](CODEBASE-SCAN-2026-07.md) is the July 2026
-whole-codebase scan, with its open findings. Each component below has
-its own build plan. Components are decoupled: the API layer is the
+whole-codebase scan, with its open findings; and
+[future-improvements/](future-improvements/) holds designs that were
+evaluated and deliberately deferred, with the reasoning. Each
+component below has its own build plan. Components are decoupled: the API layer is the
 only module that composes them, and everything else communicates through
 the shared domain types and plain function interfaces.
 [GUIDELINES.md](GUIDELINES.md) holds the cross-cutting engineering

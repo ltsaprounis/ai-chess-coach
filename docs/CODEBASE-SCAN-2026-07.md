@@ -6,7 +6,12 @@ plus mechanical checks (import-linter, grep for env reads and
 cross-component imports) and a run of the quality gates.
 
 Status: findings 2, 3, 4 and 8 are fixed on the `scan-fixes` branch
-this report landed with (one commit per fix); the rest are open.
+this report landed with (one commit per fix). Finding 1 is fixed on
+the follow-up `perspective-ids` branch via perspective game ids
+(migration 006; a full re-sync per player backfills the previously
+dropped copies) — the rejected deeper remodel is recorded in
+[future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
+The remaining findings are open.
 
 ## Summary
 
