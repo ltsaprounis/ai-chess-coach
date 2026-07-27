@@ -1,5 +1,6 @@
 """Storage component tests (docs/03-storage.md)."""
 
+import sqlite3
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -935,3 +936,133 @@ def test_concurrent_write_transactions_serialize(db: Db) -> None:
 
     assert errors == []
     assert len(list_analyzed_games(db, "testuser")) == 50
+
+
+# --- perspective ids (migration 006, scan finding 1) -----------------------
+
+
+def test_two_perspectives_of_one_game_coexist(db: Db) -> None:
+    """A game between two tracked players stores once per side: distinct
+    perspective ids, so the second player's sync can no longer collide
+    with the first's row and silently drop their copy."""
+    upsert_games(
+        db,
+        [
+            make_game(
+                id="uuid-9:alice", username="alice", color="white", opponent="bob"
+            ),
+            make_game(id="uuid-9:bob", username="bob", color="black", opponent="alice"),
+        ],
+    )
+    save_analysis(db, make_analysis(game_id="uuid-9:alice"))
+
+    assert [g.id for g in list_games(db, "alice", GameFilters())] == ["uuid-9:alice"]
+    assert [g.id for g in list_games(db, "bob", GameFilters())] == ["uuid-9:bob"]
+    # Analyses (and everything keyed on game id) hang off the
+    # perspective, not the shared game.
+    alice = get_game(db, "uuid-9:alice")
+    bob = get_game(db, "uuid-9:bob")
+    assert alice is not None and alice.analysis is not None
+    assert bob is not None and bob.analysis is None
+
+
+def test_upsert_keeps_the_uuid_behind_the_perspective_id(db: Db) -> None:
+    upsert_games(db, [make_game(id="uuid-9:alice", username="alice")])
+    row = db.execute("SELECT chesscom_uuid FROM games").fetchone()
+    assert row["chesscom_uuid"] == "uuid-9"
+
+
+# The shapes migrations 001-005 leave behind, so migration 006's rewrite
+# can run against genuinely legacy rows (uuid-keyed, no chesscom_uuid).
+_LEGACY_V5_SCHEMA = """
+CREATE TABLE games (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    color TEXT NOT NULL,
+    pgn TEXT NOT NULL,
+    san_moves TEXT NOT NULL,
+    time_control TEXT NOT NULL,
+    time_class TEXT NOT NULL,
+    result TEXT NOT NULL,
+    end_time INTEGER NOT NULL,
+    opponent TEXT NOT NULL,
+    player_rating INTEGER NOT NULL,
+    opponent_rating INTEGER NOT NULL,
+    accuracy REAL,
+    opening_eco TEXT,
+    opening_name TEXT,
+    opening_ply INTEGER,
+    termination TEXT
+);
+CREATE INDEX idx_games_username_end_time ON games (username, end_time DESC);
+CREATE TABLE analyses (
+    game_id TEXT PRIMARY KEY REFERENCES games (id) ON DELETE CASCADE,
+    depth INTEGER NOT NULL,
+    evals TEXT NOT NULL,
+    acpl_by_phase TEXT NOT NULL,
+    judgment_counts TEXT NOT NULL,
+    overall_acpl REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE explanations (
+    game_id TEXT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+    ply INTEGER NOT NULL,
+    agent_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (game_id, ply, agent_id)
+);
+CREATE TABLE reports (
+    username TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    since INTEGER NOT NULL,
+    until INTEGER NOT NULL,
+    time_class TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    advice TEXT NOT NULL,
+    games_analyzed INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (username, agent_id, since, until, time_class, prompt_version)
+);
+PRAGMA user_version = 5;
+"""
+
+
+def test_migration_006_rewrites_legacy_rows_to_perspective_ids(
+    tmp_path: Path,
+) -> None:
+    """A database written before perspective ids: uuid-keyed rows (and
+    their analyses/explanations) must come out keyed "{uuid}:{username}"
+    with the raw uuid preserved in chesscom_uuid."""
+    path = tmp_path / "legacy.sqlite3"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(_LEGACY_V5_SCHEMA)
+    legacy.execute(
+        "INSERT INTO games (id, username, color, pgn, san_moves,"
+        " time_control, time_class, result, end_time, opponent,"
+        " player_rating, opponent_rating) VALUES ('uuid-1', 'alice',"
+        " 'white', '1. e4 *', '[\"e4\"]', '600', 'rapid', 'win', 100,"
+        " 'bob', 1500, 1490)"
+    )
+    legacy.execute(
+        "INSERT INTO analyses (game_id, depth, evals, acpl_by_phase,"
+        " judgment_counts) VALUES ('uuid-1', 16, '[]', '{}', '{}')"
+    )
+    legacy.execute(
+        "INSERT INTO explanations (game_id, ply, agent_id, text,"
+        " created_at) VALUES ('uuid-1', 1, 'coach-a', 'push the pawn', 1)"
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = open_db(path)  # applies only migration 006
+    assert [g.id for g in list_games(migrated, "alice", GameFilters())] == [
+        "uuid-1:alice"
+    ]
+    detail = get_game(migrated, "uuid-1:alice")
+    assert detail is not None
+    assert detail.analysis is not None  # the analyses row followed the id
+    assert get_explanation(migrated, "uuid-1:alice", 1, "coach-a") == "push the pawn"
+    row = migrated.execute("SELECT chesscom_uuid FROM games").fetchone()
+    assert row["chesscom_uuid"] == "uuid-1"
+    migrated.close()

@@ -29,8 +29,14 @@ uses the same API and informed the normalization rules below.
 
 ## Normalization rules
 
-- `id` = the game's `uuid`; usernames are lowercased everywhere
-  (chess.com treats them case-insensitively).
+- `id` = `{uuid}:{username}` — a *perspective* id, one per (game,
+  side). Every other `Game` field is one player's view, so a game
+  between two tracked players is stored once per side; the bare uuid
+  as identity made the second player's sync collide with the first's
+  row and silently drop their copy. chess.com usernames cannot
+  contain `:`, so the uuid stays recoverable with `rsplit(":", 1)`
+  (storage also keeps it in `games.chesscom_uuid`). Usernames are
+  lowercased everywhere (chess.com treats them case-insensitively).
 - Keep only `rules == "chess"` — variants (bughouse, threecheck,
   kingofthehill, chess960 for v1) are skipped.
 - Keep only games starting from the standard position. A `rules ==

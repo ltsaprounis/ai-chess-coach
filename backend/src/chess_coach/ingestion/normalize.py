@@ -81,7 +81,13 @@ def normalize_game(raw: RawGame, username: str) -> Game | None:
         accuracy = raw.accuracies.white if color == "white" else raw.accuracies.black
 
     return Game(
-        id=raw.uuid,
+        # Perspective id, not the bare uuid: every other field here is
+        # one player's view of the game, so a game between two tracked
+        # players must store once per side — the uuid alone would make
+        # the second player's sync collide with the first's row.
+        # Usernames cannot contain ':', so the uuid stays recoverable
+        # with rsplit(":", 1) (docs/02-ingestion.md).
+        id=f"{raw.uuid}:{user}",
         username=user,
         color=color,
         pgn=raw.pgn,

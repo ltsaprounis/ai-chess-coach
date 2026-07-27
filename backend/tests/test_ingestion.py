@@ -34,6 +34,11 @@ def fixture(name: str) -> object:
     return json.loads((TESTDATA / name).read_text())
 
 
+def pid(uuid: str, username: str = "testuser") -> str:
+    """The perspective id ingestion mints: `{uuid}:{username}`."""
+    return f"{uuid}:{username}"
+
+
 def make_mock_client(requested: list[str] | None = None) -> httpx.AsyncClient:
     routes = {
         ARCHIVES_URL: fixture("archives.json"),
@@ -52,13 +57,14 @@ def make_mock_client(requested: list[str] | None = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def make_single_game_client(pgn: str) -> httpx.AsyncClient:
+def make_single_game_client(pgn: str, username: str = "TestUser") -> httpx.AsyncClient:
     """A mock client whose one archive month holds a single game.
 
     Isolated from the shared archive fixtures (other tests assert exact
     contents against those), so a hand-built PGN — a custom starting
     position or a variant of one — can be dropped in without disturbing
-    them.
+    them. `username` picks whose archive is being served; the game
+    itself is always TestUser (white) vs Hikaru (black).
     """
     month_payload = {
         "games": [
@@ -74,8 +80,9 @@ def make_single_game_client(pgn: str) -> httpx.AsyncClient:
             }
         ]
     }
+    archives_url = f"https://api.chess.com/pub/player/{username.lower()}/games/archives"
     routes = {
-        ARCHIVES_URL: {"archives": [JUNE_URL]},
+        archives_url: {"archives": [JUNE_URL]},
         JUNE_URL: month_payload,
     }
 
@@ -97,9 +104,11 @@ async def batch_ids(
     ]
 
 
-async def all_games(client: httpx.AsyncClient) -> dict[str, Game]:
+async def all_games(
+    client: httpx.AsyncClient, username: str = "TestUser"
+) -> dict[str, Game]:
     games = [
-        game async for batch in sync_games("TestUser", client=client) for game in batch
+        game async for batch in sync_games(username, client=client) for game in batch
     ]
     return {game.id: game for game in games}
 
@@ -121,8 +130,13 @@ async def test_sync_yields_one_batch_per_month_skipping_bad_games() -> None:
         ids = await batch_ids("TestUser", None, client)
     # Variant, unknown-result, and malformed entries are dropped.
     assert ids == [
-        ["g-may-1"],
-        ["g-june-timeout", "g-june-resigned", "g-june-1", "g-june-5"],
+        [pid("g-may-1")],
+        [
+            pid("g-june-timeout"),
+            pid("g-june-resigned"),
+            pid("g-june-1"),
+            pid("g-june-5"),
+        ],
     ]
 
 
@@ -130,17 +144,17 @@ async def test_normalization_maps_colors_results_and_accuracy() -> None:
     async with make_mock_client() as client:
         games = await all_games(client)
 
-    white_win = games["g-june-1"]
+    white_win = games[pid("g-june-1")]
     assert (white_win.username, white_win.opponent) == ("testuser", "hikaru")
     assert (white_win.color, white_win.result) == ("white", "win")
     assert white_win.accuracy == 92.5
     assert white_win.san_moves == ["e4", "e5", "Nf3", "Nc6", "Bb5"]
 
-    black_draw = games["g-june-5"]
+    black_draw = games[pid("g-june-5")]
     assert (black_draw.color, black_draw.result) == ("black", "draw")
     assert black_draw.accuracy is None
 
-    assert games["g-may-1"].result == "loss"
+    assert games[pid("g-may-1")].result == "loss"
 
 
 async def test_sync_games_drops_custom_starting_position() -> None:
@@ -166,7 +180,22 @@ async def test_sync_games_keeps_standard_starting_position() -> None:
     standard_pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0"
     async with make_single_game_client(standard_pgn) as client:
         games = await all_games(client)
-    assert games["g-custom"].san_moves == ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    assert games[pid("g-custom")].san_moves == ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+
+
+async def test_perspective_ids_keep_both_tracked_players_separate() -> None:
+    """One game, synced from each player's own archive: the two copies
+    get distinct ids, so the second player's sync can no longer collide
+    with the first's stored row and silently drop their perspective
+    (docs/CODEBASE-SCAN-2026-07.md, finding 1)."""
+    standard_pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0"
+    async with make_single_game_client(standard_pgn) as client:
+        as_white = await all_games(client)
+    async with make_single_game_client(standard_pgn, username="Hikaru") as client:
+        as_black = await all_games(client, username="Hikaru")
+
+    assert as_white[pid("g-custom")].color == "white"
+    assert as_black[pid("g-custom", "hikaru")].color == "black"
 
 
 async def test_termination_keeps_the_raw_code_behind_result() -> None:
@@ -174,15 +203,15 @@ async def test_termination_keeps_the_raw_code_behind_result() -> None:
         games = await all_games(client)
 
     # win, draw, and loss all keep their raw per-player code verbatim.
-    assert games["g-june-1"].termination == "win"
-    assert games["g-june-5"].termination == "repetition"
-    assert games["g-may-1"].termination == "checkmated"
+    assert games[pid("g-june-1")].termination == "win"
+    assert games[pid("g-june-5")].termination == "repetition"
+    assert games[pid("g-may-1")].termination == "checkmated"
 
     # The win/draw/loss collapse otherwise hides *how* a loss happened;
     # timeout and resignation both map to result="loss" but must remain
     # distinguishable via termination.
-    timeout_loss = games["g-june-timeout"]
-    resigned_loss = games["g-june-resigned"]
+    timeout_loss = games[pid("g-june-timeout")]
+    resigned_loss = games[pid("g-june-resigned")]
     assert timeout_loss.result == "loss"
     assert resigned_loss.result == "loss"
     assert timeout_loss.termination == "timeout"
@@ -194,14 +223,21 @@ async def test_since_skips_whole_months_without_fetching_them() -> None:
     requested: list[str] = []
     async with make_mock_client(requested) as client:
         ids = await batch_ids("TestUser", JUNE_START, client)
-    assert ids == [["g-june-timeout", "g-june-resigned", "g-june-1", "g-june-5"]]
+    assert ids == [
+        [
+            pid("g-june-timeout"),
+            pid("g-june-resigned"),
+            pid("g-june-1"),
+            pid("g-june-5"),
+        ]
+    ]
     assert MAY_URL not in requested
 
 
 async def test_since_filters_games_inside_a_month() -> None:
     async with make_mock_client() as client:
         ids = await batch_ids("TestUser", 1_780_300_000, client)
-    assert ids == [["g-june-5"]]
+    assert ids == [[pid("g-june-5")]]
 
 
 async def test_retries_on_429_then_succeeds() -> None:
