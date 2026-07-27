@@ -117,6 +117,17 @@ export function useExplain(): {
           while (true) {
             const { value, done: streamDone } = await reader.read();
             if (streamDone) {
+              // The body ended without a terminal done/error event
+              // (server restarted mid-explanation): surface it, or the
+              // panel sits in "streaming" with a disabled button
+              // forever. A deliberate abort (new click, unmount) is
+              // not an error.
+              if (!controller.signal.aborted) {
+                dispatch({
+                  type: "error",
+                  message: "explanation stream ended unexpectedly — try again",
+                });
+              }
               return;
             }
             buffer += decoder.decode(value, { stream: true });
