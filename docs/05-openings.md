@@ -30,7 +30,10 @@ class OpeningBook:
    memory as a plain dict.
 2. `classify` replays the game's moves (capped at 30 plies), computes
    each position's EPD, and returns the deepest position present in
-   the map, with `ply` = where the game left book.
+   the map, with `ply` = the 1-based ply of the deepest matched book
+   move — the move that fixed the name, *not* the first out-of-book
+   ply. The distinction matters: `OpeningStats.faced` hangs on this
+   ply's parity (docs/06-coach.md), and an off-by-one would flip it.
 
 ## Dependencies
 

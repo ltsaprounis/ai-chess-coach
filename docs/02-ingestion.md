@@ -21,7 +21,8 @@ No authentication required. Two endpoints:
 Politeness: requests are serial (the API dislikes parallel bursts),
 with retry + backoff on 429 and a `User-Agent` header (requests
 without one get throttled). A 404 on archives means unknown username
-and raises a typed `UnknownUserError`.
+and raises a typed `UnknownUserError`; other transport failures
+surface as the base `IngestionError`, also exported.
 
 Prior art: `~/repos/chess-guess` (`src/etl/ingest.py`, `process.py`)
 uses the same API and informed the normalization rules below.
@@ -38,6 +39,11 @@ uses the same API and informed the normalization rules below.
     `50move`, `timevsinsufficient`
   - loss: `checkmated`, `timeout`, `resigned`, `lose`, `abandoned`
   - unknown codes log a warning and skip the game.
+- The raw code is **also kept verbatim** as `Game.termination`. The
+  win/draw/loss collapse discards the difference between losing on
+  time, resigning and being mated, which is among the most actionable
+  signals a coach has; keeping the code costs one column and makes
+  "38% of your losses are on the clock" answerable.
 - `accuracies.{white,black}`, when present, is kept on the `Game` as
   `accuracy` — a free sanity check against our own engine numbers.
 
@@ -47,7 +53,12 @@ uses the same API and informed the normalization rules below.
 async def get_archives(username: str) -> list[str]
 
 # Yields one batch per monthly archive, newest month last.
-# `since` (epoch seconds) skips months older than the last sync.
+# `since` (epoch seconds) skips months older than the last sync and
+# drops individual games at or before it — a normal sync never
+# re-fetches a stored game. `since=None` therefore doubles as the
+# full re-sync path: it re-fetches the entire archive, and storage's
+# idempotent upsert backfills columns added after games were stored
+# (the API layer's `sync?full=true`).
 async def sync_games(
     username: str, since: int | None = None
 ) -> AsyncIterator[list[Game]]

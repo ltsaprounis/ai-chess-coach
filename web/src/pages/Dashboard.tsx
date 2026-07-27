@@ -1,64 +1,52 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, score } from "../api.ts";
+import { api, type PlayerReport, score } from "../api.ts";
+import type { BarDatum } from "../components/BarChart.tsx";
 import BarChart from "../components/BarChart.tsx";
 import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
 import Layout from "../components/Layout.tsx";
 import MonthlyActivityChart from "../components/MonthlyActivityChart.tsx";
+import MonthlyMetricChart from "../components/MonthlyMetricChart.tsx";
 import RatingChart from "../components/RatingChart.tsx";
-import SortableTh from "../components/SortableTh.tsx";
+import RepertoireTable from "../components/RepertoireTable.tsx";
+import StatsFilters from "../components/StatsFilters.tsx";
 import { groupByFamily, type OpeningFamily } from "../openings.ts";
 import {
   latestRatings,
   monthlyActivity,
   ratingSeries,
+  splitPhases,
   type Tally,
   tally,
   tallyByColor,
 } from "../stats.ts";
-import { compareValues, useTableSort } from "../useTableSort.ts";
+import { useStatsFilters } from "../useStatsFilters.ts";
 
-const PHASES = ["opening", "middlegame", "endgame"] as const;
 const JUDGMENTS = ["best", "good", "inaccuracy", "mistake", "blunder"] as const;
-
-// Time windows the dashboard can scope to; `days: null` is all-time.
-const WINDOWS = [
-  { label: "All time", days: null },
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-  { label: "Last 6 months", days: 182 },
-  { label: "Last year", days: 365 },
-] as const;
-
-const DAY_SECONDS = 86_400;
-const ALL_CLASSES = "all";
-
-type RepSortKey = "family" | "games" | "analyzed" | "winRate" | "cpLoss";
-
-// Numeric repertoire columns read best high-to-low first.
-const REP_DESC: ReadonlySet<RepSortKey> = new Set(["games", "analyzed"]);
-
-function repSortValue(family: OpeningFamily, key: RepSortKey): string | number {
-  switch (key) {
-    case "family":
-      return family.family.toLowerCase();
-    case "games":
-      return family.games;
-    case "analyzed":
-      return family.analyzedGames;
-    case "winRate":
-      return score(family);
-    case "cpLoss":
-      // No analysis sorts to the bottom of a low-to-high (ascending) sort.
-      return family.avgCpLoss ?? Number.POSITIVE_INFINITY;
-  }
-}
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
 const colorRate = (record: Tally): string =>
   record.games === 0 ? "—" : percent(score(record));
+
+/** A win/loss/draw record's score, or "—" with no games — shared by
+ *  the opponent-strength tiles below. */
+const recordRate = (record: {
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+}): string => (record.games === 0 ? "—" : percent(score(record)));
+
+/** Rounds to the nearest integer, prefixing "+" only for a genuinely
+ *  positive result — a value that rounds to zero from either side
+ *  (e.g. -0.4 or 0.4) reads as plain "0", not an arbitrarily signed
+ *  zero. */
+const signedRound = (value: number): string => {
+  const rounded = Math.round(value);
+  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+};
 
 function Tile({ value, label }: { value: string | number; label: string }) {
   return (
@@ -69,54 +57,62 @@ function Tile({ value, label }: { value: string | number; label: string }) {
   );
 }
 
+/** Termination rows grouped by result, each row's share of that
+ *  result's games — "38% of losses on the clock" needs the loss total
+ *  as its denominator, not the whole game count. */
+function terminationRows(
+  report: PlayerReport,
+): (PlayerReport["terminations"][number] & { share: number })[] {
+  const totals = new Map<string, number>();
+  for (const row of report.terminations) {
+    totals.set(row.result, (totals.get(row.result) ?? 0) + row.games);
+  }
+  return [...report.terminations]
+    .sort((a, b) => a.result.localeCompare(b.result) || b.games - a.games)
+    .map((row) => ({
+      ...row,
+      share: Math.round((row.games / (totals.get(row.result) ?? 1)) * 100),
+    }));
+}
+
+function errorExampleLabel(
+  pattern: PlayerReport["error_patterns"][number],
+): string {
+  const parts: string[] = [];
+  if (
+    pattern.example_end_time !== null &&
+    pattern.example_end_time !== undefined
+  ) {
+    parts.push(new Date(pattern.example_end_time * 1000).toLocaleDateString());
+  }
+  if (
+    pattern.example_move_number !== null &&
+    pattern.example_move_number !== undefined
+  ) {
+    parts.push(`move ${pattern.example_move_number}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "view game";
+}
+
 export default function Dashboard() {
   const { username = "" } = useParams();
-  const [windowDays, setWindowDays] = useState<number | null>(null);
-  const [pickedClass, setPickedClass] = useState<string | null>(null);
   const [minGames, setMinGames] = useState(5);
-
-  // Cutoff recomputed only when the window changes, so it stays stable
-  // across renders (a fresh Date.now() each render would thrash the
-  // report/openings query keys).
-  const since = useMemo(
-    () =>
-      windowDays === null
-        ? undefined
-        : Math.floor(Date.now() / 1000) - windowDays * DAY_SECONDS,
-    [windowDays],
-  );
 
   const games = useQuery({
     queryKey: ["allGames", username],
     queryFn: () => api.allGames(username),
   });
 
-  // The whole games archive is fetched once; the window is applied
-  // client-side, then the time control on top of it.
-  const windowByTime = useMemo(() => {
-    const all = games.data ?? [];
-    return since === undefined
-      ? all
-      : all.filter((game) => game.end_time >= since);
-  }, [games.data, since]);
-
-  // Time controls present in the window, most-played first.
-  const classOptions = useMemo(
-    () => latestRatings(windowByTime),
-    [windowByTime],
-  );
-
-  // Resolve the selected control: explicit "all", a control that's
-  // present, else the most-played one — so the default view mixes
-  // controls only when the user asks for it.
-  const timeClass =
-    pickedClass === ALL_CLASSES
-      ? ALL_CLASSES
-      : (classOptions.find((entry) => entry.timeClass === pickedClass)
-          ?.timeClass ??
-        classOptions[0]?.timeClass ??
-        ALL_CLASSES);
-  const classParam = timeClass === ALL_CLASSES ? undefined : timeClass;
+  const {
+    windowDays,
+    setWindowDays,
+    setPickedClass,
+    windowByTime,
+    classOptions,
+    timeClass,
+    since,
+    classParam,
+  } = useStatsFilters(games.data ?? []);
 
   const openings = useQuery({
     queryKey: ["openings", username, windowDays, timeClass],
@@ -159,16 +155,15 @@ export default function Dashboard() {
     analyzed === null
       ? "—"
       : ((count ?? 0) / analyzed.games_analyzed).toFixed(1);
-  const phaseData =
-    analyzed === null
-      ? []
-      : PHASES.filter(
-          (phase) => analyzed.acpl_by_phase[phase] !== undefined,
-        ).map((phase) => ({
-          label: phase,
-          value: analyzed.acpl_by_phase[phase] ?? 0,
-        }));
-  const judgmentData =
+
+  const { phaseData, emptyPhases } = useMemo(
+    () =>
+      analyzed === null
+        ? { phaseData: [], emptyPhases: [] }
+        : splitPhases(analyzed.phases),
+    [analyzed],
+  );
+  const judgmentData: BarDatum[] =
     analyzed === null
       ? []
       : JUDGMENTS.map((judgment) => ({
@@ -177,27 +172,69 @@ export default function Dashboard() {
           color: JUDGMENT_COLORS[judgment],
         }));
 
-  // Collapse the fine ECO variations into families, keep those with a
-  // meaningful sample, and sort by the chosen column (worst win rate
-  // first by default), ties broken by more games (more signal).
-  const rep = useTableSort<RepSortKey>("winRate", "asc", REP_DESC);
-  const families = useMemo(() => {
-    const grouped = groupByFamily(openings.data ?? []).filter(
-      (family) => family.games >= minGames,
-    );
-    grouped.sort((a, b) => {
-      const cmp = compareValues(
-        repSortValue(a, rep.sortKey),
-        repSortValue(b, rep.sortKey),
-      );
-      const primary = rep.sortDir === "asc" ? cmp : -cmp;
-      return primary !== 0 ? primary : b.games - a.games;
-    });
-    return grouped;
-  }, [openings.data, minGames, rep.sortKey, rep.sortDir]);
+  const terminations = useMemo(
+    () => (analyzed === null ? [] : terminationRows(analyzed)),
+    [analyzed],
+  );
 
-  const familyLink = (name: string): string => {
-    const params = new URLSearchParams({ family: name });
+  const monthlyAcpl = useMemo(
+    () =>
+      analyzed === null
+        ? []
+        : analyzed.months.map((m) => ({ month: m.month, value: m.acpl })),
+    [analyzed],
+  );
+  const monthlyBlunderRate = useMemo(
+    () =>
+      analyzed === null
+        ? []
+        : analyzed.months.map((m) => ({
+            month: m.month,
+            value: m.blunder_rate === null ? null : m.blunder_rate * 100,
+          })),
+    [analyzed],
+  );
+
+  // Collapse the fine ECO variations into families, partitioned by
+  // `faced` before rolling up (docs/06-coach.md "Family rollup") —
+  // chosen by (color, system), faced by (color, name root) — split by
+  // color and partition for the four repertoire tables below.
+  const allFamilies = useMemo(
+    () => groupByFamily(openings.data ?? []),
+    [openings.data],
+  );
+  const whiteChosen = useMemo(
+    () => allFamilies.filter((f) => f.color === "white" && !f.faced),
+    [allFamilies],
+  );
+  const whiteFaced = useMemo(
+    () => allFamilies.filter((f) => f.color === "white" && f.faced),
+    [allFamilies],
+  );
+  const blackChosen = useMemo(
+    () => allFamilies.filter((f) => f.color === "black" && !f.faced),
+    [allFamilies],
+  );
+  const blackFaced = useMemo(
+    () => allFamilies.filter((f) => f.color === "black" && f.faced),
+    [allFamilies],
+  );
+
+  // Freezes the family's exact member (eco, name) rows into the link
+  // so the Games page can drill through to exactly the games this row
+  // counted, transpositions included — matching by re-deriving the
+  // system from each game's moves only ever caught the family's
+  // representative line (docs/fixes-2026-07/03-faced-openings.md).
+  const familyLink = (family: OpeningFamily): string => {
+    const params = new URLSearchParams();
+    params.set("family", family.family);
+    params.set("color", family.color);
+    if (family.faced) {
+      params.set("faced", "true");
+    }
+    for (const member of family.members) {
+      params.append("opening", `${member.eco}|${member.name}`);
+    }
     if (classParam !== undefined) {
       params.set("time_class", classParam);
     }
@@ -222,39 +259,13 @@ export default function Dashboard() {
 
       {hasAnyGames && (
         <div className="filters">
-          <label>
-            Time window{" "}
-            <select
-              aria-label="time window"
-              value={windowDays ?? ""}
-              onChange={(event) =>
-                setWindowDays(
-                  event.target.value === "" ? null : Number(event.target.value),
-                )
-              }
-            >
-              {WINDOWS.map((window) => (
-                <option key={window.label} value={window.days ?? ""}>
-                  {window.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Time control{" "}
-            <select
-              aria-label="time control"
-              value={timeClass}
-              onChange={(event) => setPickedClass(event.target.value)}
-            >
-              <option value={ALL_CLASSES}>All classes</option>
-              {classOptions.map((entry) => (
-                <option key={entry.timeClass} value={entry.timeClass}>
-                  {entry.timeClass} ({entry.games})
-                </option>
-              ))}
-            </select>
-          </label>
+          <StatsFilters
+            windowDays={windowDays}
+            setWindowDays={setWindowDays}
+            timeClass={timeClass}
+            setPickedClass={setPickedClass}
+            classOptions={classOptions}
+          />
           <span className="agent-note">
             {stats.overall.games} game{stats.overall.games === 1 ? "" : "s"}
             {classParam !== undefined ? ` · ${classParam}` : " · all classes"}
@@ -337,6 +348,13 @@ export default function Dashboard() {
                   data={phaseData}
                   label="average centipawn loss by phase"
                 />
+                {emptyPhases.length > 0 && (
+                  <p className="panel-empty">
+                    {emptyPhases
+                      .map((phase) => `No ${phase} moves`)
+                      .join(" · ")}
+                  </p>
+                )}
               </div>
               <div>
                 <h3>Judgment distribution</h3>
@@ -353,11 +371,110 @@ export default function Dashboard() {
         </section>
       )}
 
+      {hasScopedGames && analyzed !== null && (
+        <section>
+          <h2>Trend</h2>
+          <p>
+            ACPL and blunder rate by month — the rating chart already shows
+            form.
+          </p>
+          <div className="chart-row">
+            <div>
+              <h3>ACPL by month</h3>
+              <MonthlyMetricChart
+                data={monthlyAcpl}
+                label="average centipawn loss by month"
+              />
+            </div>
+            <div>
+              <h3>Blunder rate by month</h3>
+              <MonthlyMetricChart
+                data={monthlyBlunderRate}
+                label="blunder rate by month"
+                formatValue={(value) => `${value.toFixed(1)}%`}
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {hasScopedGames && analyzed !== null && (
+        <section>
+          <h2>How games end</h2>
+          <p>
+            Each result split by termination — a loss on the clock needs
+            different work than a loss on the board.
+          </p>
+          {terminations.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Result</th>
+                    <th>Termination</th>
+                    <th>Games</th>
+                    <th>Share of that result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {terminations.map((row) => (
+                    <tr key={`${row.result}-${row.termination}`}>
+                      <td className={`result-${row.result}`}>{row.result}</td>
+                      <td>{row.termination}</td>
+                      <td>{row.games}</td>
+                      <td>{row.share}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="panel-empty">No termination data yet.</p>
+          )}
+        </section>
+      )}
+
+      {hasScopedGames && analyzed !== null && (
+        <section>
+          <h2>Opponent strength</h2>
+          {analyzed.opponents !== null ? (
+            <div className="tiles">
+              <Tile
+                value={signedRound(analyzed.opponents.avg_rating_diff)}
+                label="avg rating edge (you vs opponents)"
+              />
+              <Tile
+                value={recordRate(analyzed.opponents.vs_stronger)}
+                label={`vs stronger (${analyzed.opponents.vs_stronger.games})`}
+              />
+              <Tile
+                value={recordRate(analyzed.opponents.vs_similar)}
+                label={`vs similar (${analyzed.opponents.vs_similar.games})`}
+              />
+              <Tile
+                value={recordRate(analyzed.opponents.vs_weaker)}
+                label={`vs weaker (${analyzed.opponents.vs_weaker.games})`}
+              />
+            </div>
+          ) : (
+            <p className="panel-empty">
+              Not enough analyzed games to compare opponent strength.
+            </p>
+          )}
+        </section>
+      )}
+
       <section>
-        <h2>Repertoire — worst first</h2>
+        <h2>Repertoire</h2>
         <p>
-          Openings grouped into families, worst-scoring first — the ones to work
-          on. Avg CP loss covers the analyzed games only.
+          Split by the color you had, then split again into the systems you
+          chose and what you faced — an opponent's choice is not your
+          repertoire. In the "chose" tables the system column is your own first
+          moves; in the "face" tables it's your commonest reply to their line.
+          The secondary line beneath it is the most common continuation, both
+          sides answering. Opening ACPL covers the opening phase only;
+          whole-game ACPL covers the full game and is not opening advice on its
+          own.
         </p>
         <div className="filters">
           <label>
@@ -366,19 +483,13 @@ export default function Dashboard() {
               type="number"
               min={1}
               className="limit-input"
-              aria-label="minimum games per family"
+              aria-label="minimum games per system"
               value={minGames}
               onChange={(event) =>
                 setMinGames(Math.max(1, Number(event.target.value) || 1))
               }
             />
           </label>
-          {openings.isSuccess && (
-            <span className="agent-note">
-              {families.length} famil{families.length === 1 ? "y" : "ies"} with{" "}
-              {minGames}+ games
-            </span>
-          )}
         </div>
 
         {openings.isPending && <p>Loading…</p>}
@@ -386,78 +497,78 @@ export default function Dashboard() {
         {openings.isSuccess && openings.data.length === 0 && (
           <p>No classified games match these filters.</p>
         )}
-        {openings.isSuccess &&
-          openings.data.length > 0 &&
-          families.length === 0 && (
-            <p className="panel-empty">
-              No opening family has {minGames}+ games — lower the threshold.
-            </p>
-          )}
-        {families.length > 0 && (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <SortableTh
-                    column="family"
-                    label="Opening family"
-                    sortKey={rep.sortKey}
-                    sortDir={rep.sortDir}
-                    onSort={rep.onSort}
-                  />
-                  <SortableTh
-                    column="games"
-                    label="Games"
-                    sortKey={rep.sortKey}
-                    sortDir={rep.sortDir}
-                    onSort={rep.onSort}
-                  />
-                  <SortableTh
-                    column="analyzed"
-                    label="Analyzed"
-                    sortKey={rep.sortKey}
-                    sortDir={rep.sortDir}
-                    onSort={rep.onSort}
-                  />
-                  <th>W-L-D</th>
-                  <SortableTh
-                    column="winRate"
-                    label="Win rate"
-                    sortKey={rep.sortKey}
-                    sortDir={rep.sortDir}
-                    onSort={rep.onSort}
-                  />
-                  <SortableTh
-                    column="cpLoss"
-                    label="Avg CP loss"
-                    sortKey={rep.sortKey}
-                    sortDir={rep.sortDir}
-                    onSort={rep.onSort}
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {families.map((family) => (
-                  <tr key={family.family}>
-                    <td>
-                      <Link to={familyLink(family.family)}>
-                        {family.family}
-                      </Link>
-                    </td>
-                    <td>{family.games}</td>
-                    <td>{family.analyzedGames}</td>
-                    <td>
-                      {family.wins}-{family.losses}-{family.draws}
-                    </td>
-                    <td>{Math.round(score(family) * 100)}%</td>
-                    <td>{family.avgCpLoss ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {openings.isSuccess && openings.data.length > 0 && (
+          <>
+            <RepertoireTable
+              title="Systems you chose as White"
+              families={whiteChosen}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+            <RepertoireTable
+              title="What you face as White"
+              faced
+              families={whiteFaced}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+            <RepertoireTable
+              title="Systems you chose as Black"
+              families={blackChosen}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+            <RepertoireTable
+              title="What you face as Black"
+              faced
+              families={blackFaced}
+              minGames={minGames}
+              familyLink={familyLink}
+            />
+          </>
         )}
       </section>
+
+      {hasScopedGames && analyzed !== null && (
+        <section>
+          <h2>Recurring mistakes</h2>
+          {analyzed.error_patterns.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Pattern</th>
+                    <th>Count</th>
+                    <th>% of blunders</th>
+                    <th>Example</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analyzed.error_patterns.map((pattern) => (
+                    <tr key={pattern.pattern}>
+                      <td>{pattern.label}</td>
+                      <td>{pattern.count}</td>
+                      <td>{Math.round(pattern.share_of_blunders * 100)}%</td>
+                      <td>
+                        {pattern.example_game_id !== null &&
+                        pattern.example_game_id !== undefined ? (
+                          <Link to={`/games/${pattern.example_game_id}`}>
+                            {errorExampleLabel(pattern)}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="panel-empty">No tagged error patterns yet.</p>
+          )}
+        </section>
+      )}
     </Layout>
   );
 }

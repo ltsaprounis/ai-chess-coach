@@ -2,6 +2,7 @@ import type { MonthActivity } from "../stats.ts";
 import {
   axisScale,
   DRAW_COLOR,
+  formatMonth,
   GRID_COLOR,
   LOSS_COLOR,
   MUTED_COLOR,
@@ -21,14 +22,6 @@ const SERIES = [
   { key: "draws", label: "draws", color: DRAW_COLOR },
   { key: "losses", label: "losses", color: LOSS_COLOR },
 ] as const;
-
-function formatMonth(key: string): string {
-  const [year = 0, month = 1] = key.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(undefined, {
-    month: "short",
-    year: "2-digit",
-  });
-}
 
 type Props = {
   data: MonthActivity[];

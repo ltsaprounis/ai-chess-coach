@@ -129,3 +129,45 @@ async def test_illegal_san_raises() -> None:
 
     with pytest.raises(chess.IllegalMoveError):
         await analyze_game(game, OPTS, evaluate)
+
+
+# The engine tags every move it judges with a phase; the coach
+# re-derives the same tags when it aggregates raw evals into a report,
+# because the two components cannot import each other (docs/README.md
+# decoupling rule 1). Both read the boundaries from `domain`, but each
+# applies them itself, so this asserts the two implementations stay in
+# step — the drift would be silent, and it would land squarely on the
+# endgame numbers that COACH-REPORT-IMPROVEMENTS.md finding 4 is about.
+#
+# Reaching past both public surfaces is deliberate: what needs pinning
+# is the rule itself, at its boundaries, and no pair of public calls
+# isolates that as cheaply or as legibly.
+PHASE_CASES = [
+    # (fen, ply, expected) — the opening cutoff is a ply count, so the
+    # first two cases share a position and differ only in ply.
+    (chess.STARTING_FEN, 20, "opening"),
+    (chess.STARTING_FEN, 21, "middlegame"),
+    # Rook + bishop + 5 pawns = 13 a side: exactly the endgame cutoff.
+    ("r1b1k3/ppppp3/8/8/8/8/PPPPP3/R1B1K3 w - - 0 30", 21, "endgame"),
+    # One pawn more each — 14 a side, one point too many.
+    ("r1b1k3/pppppp2/8/8/8/8/PPPPPP2/R1B1K3 w - - 0 30", 21, "middlegame"),
+    # Asymmetric: white is down to 13 but black still has a queen, so
+    # it is not an endgame for either of them.
+    ("r1bqk3/ppppp3/8/8/8/8/PPPPP3/R1B1K3 w - - 0 30", 21, "middlegame"),
+]
+
+
+@pytest.mark.parametrize(("fen", "ply", "expected"), PHASE_CASES)
+def test_phase_rule_matches_coach(fen: str, ply: int, expected: str) -> None:
+    # Both are private by design — each is one component's own reading
+    # of a shared rule, not a surface anyone else should call.
+    from chess_coach.coach.report import (
+        _phase as coach_phase,  # pyright: ignore[reportPrivateUsage]
+    )
+    from chess_coach.engine.analysis import (
+        _phase as engine_phase,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    board = chess.Board(fen)
+    assert engine_phase(ply, board) == expected
+    assert coach_phase(ply, board) == expected

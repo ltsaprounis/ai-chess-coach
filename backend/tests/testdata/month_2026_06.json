@@ -1,6 +1,28 @@
 {
   "games": [
     {
+      "uuid": "g-june-timeout",
+      "url": "https://www.chess.com/game/live/8",
+      "pgn": "1. e4 e5 *",
+      "time_control": "60",
+      "time_class": "bullet",
+      "rules": "chess",
+      "end_time": 1780280000,
+      "white": {"username": "TestUser", "rating": 1500, "result": "timeout"},
+      "black": {"username": "Fabiano", "rating": 1520, "result": "win"}
+    },
+    {
+      "uuid": "g-june-resigned",
+      "url": "https://www.chess.com/game/live/9",
+      "pgn": "1. d4 d5 *",
+      "time_control": "180",
+      "time_class": "blitz",
+      "rules": "chess",
+      "end_time": 1780290000,
+      "white": {"username": "Levon", "rating": 1540, "result": "win"},
+      "black": {"username": "TestUser", "rating": 1495, "result": "resigned"}
+    },
+    {
       "uuid": "g-june-1",
       "url": "https://www.chess.com/game/live/2",
       "pgn": "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0",

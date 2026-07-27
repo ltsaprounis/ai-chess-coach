@@ -19,10 +19,14 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    result / time-class / analyzed-state filters and an opponent search
    applied client-side, click-to-sort column headers, and prev/next
    paging. A "Sync new games" button pulls fresh games for the player
-   (`POST /sync`, incremental) and refreshes the derived caches. A
-   separate analyze bar (kept out of the filter row) posts to `/analyze`
-   — "Analyze latest N" or "Analyze selected" via row checkboxes — with
-   the progress bar fed by the SSE endpoint.
+   (`POST /sync`, incremental) and refreshes the derived caches. Beside
+   it, a low-emphasis "Full re-sync" action (`POST /sync?full=true`)
+   re-fetches the whole archive to backfill columns — currently
+   `termination` — added after older games were stored; both buttons
+   disable while either sync is pending, and it can be slow on a large
+   archive. A separate analyze bar (kept out of the filter row) posts
+   to `/analyze` — "Analyze latest N" or "Analyze selected" via row
+   checkboxes — with the progress bar fed by the SSE endpoint.
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
@@ -55,13 +59,45 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    win rate by color, current rating per time class, ACPL, blunder
    rate), rating-over-time and monthly-activity charts from
    `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
-   judgment charts from `GET /players/{u}/report`, and the
-   sortable worst-first repertoire table from
-   `GET /players/{u}/openings` (collapsed client-side into opening
-   families with a min-games threshold, showing analyzed coverage — see
-   `openings.ts`); a family links through to the Games page filtered to
-   it. Both the Games and repertoire tables use the shared
-   `useTableSort` hook + `SortableTh` header for click-to-sort columns.
+   judgment charts plus the termination breakdown and the monthly
+   ACPL/blunder-rate trend from `GET /players/{u}/report`, and the
+   sortable repertoire table from `GET /players/{u}/openings`
+   (collapsed client-side into opening families with a min-games
+   threshold, showing analyzed coverage — see `openings.ts`); a family
+   links through to the Games page filtered to it. Both the Games and
+   repertoire tables use the shared `useTableSort` hook + `SortableTh`
+   header for click-to-sort columns.
+
+   The repertoire is **split by the color the player had**, and
+   within each color **split again into chosen vs faced** — the
+   systems the player picked first, then a "What you face" table of
+   the lines opponents picked against them — mirroring the coach
+   prompt. The system (their own first moves) and the line as played
+   are shown as columns: without them the tables would list openings
+   the opponent chose as if they were the player's own. The two ACPL
+   columns are labelled for what they measure — opening-phase and
+   whole-game — since only the first is opening advice.
+   `groupByFamily` partitions rows by `faced` *before* rolling up,
+   per the rule in [06-coach.md](06-coach.md): the chosen partition
+   by `(color, system)`, the faced partition by `(color, name root)`;
+   two colors of one family never merge.
+
+   A family row drills through to the Games page carrying its member
+   openings — one `opening=ECO|name` URL param per rolled-up row —
+   plus `color` (faced rows add a display-only `faced=true`, which
+   the filter chip renders as "faced as white"), and the Games
+   filter matches games by their classified opening against that
+   list. Matching instead by
+   re-deriving the player's system from each game's moves only ever
+   matched the family's *representative* line, so transposed games
+   silently dropped out and a family reporting 8 games drilled
+   through to 4. The member list is frozen at click time, so the
+   drill-through shows exactly the games the row counted. Legacy
+   links still work: a `system` param falls back to the exact
+   system match, a bare `family` to the name-root match — which
+   respects `color` when present. The ACPL-by-phase chart shows the
+   move count behind each bar and renders "no endgame moves" where the
+   phase has none, rather than a zero bar that reads as flawless play.
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
    (per class, defaulting to the most-played so stats are never mixed
    across controls) filters scope the whole page: games-derived stats
@@ -70,7 +106,37 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    components — no chart library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
-   button (the manual-use fallback).
+   button (the manual-use fallback). The same time-window and
+   time-control controls the Dashboard uses scope the request, so the
+   advice covers the period the student is looking at rather than
+   every game they have ever played. The page reads `games_analyzed`
+   and `games_in_scope` off `GET /report` for the same filters —
+   server-truth counts, never recomputed client-side (`coverageGap` in
+   `coachCoverage.ts`) — and shows one line: a plain "N games
+   analyzed" once coverage is full (or `games_in_scope` is `null`,
+   meaning no scope info), or, while `games_analyzed < games_in_scope`,
+   a warning ("N of M games in this window are analyzed — advice will
+   only cover the analyzed games") with an "Analyze the rest" action.
+   That action posts the page's current `since`/`time_class` to
+   `POST /analyze` and tracks progress with the same SSE hook
+   (`useAnalysisProgress`) the Games page's analyze bar uses; a 409
+   (a run already active for this player, e.g. started from Games or
+   a backfill CLI run) attaches to that progress instead of showing an
+   error. Because each run caps at `engine.analyze_limit`, when a run
+   finishes **cleanly** the page re-reads the report and, if a gap
+   remains, fires another run automatically while the user stays on
+   the page; a failed run or a lost progress stream stops the chain
+   instead (`shouldChainAfterRun` in `coachCoverage.ts`) — a
+   persistently-failing game would otherwise re-fire forever with no
+   backoff — and the user resumes manually with "Analyze the rest".
+   Leaving the page also stops the chain (the server-side run
+   continues regardless). Coverage reaching full clears the warning
+   and the plain generate flow stands. Advice is cached server-side per
+   (player, agent, window, prompt version): a cached result renders
+   immediately, labelled with when it was generated and over how many
+   games, with a "Regenerate" action (`refresh: true`) — the same
+   user-triggered rule as the in-game Explain button, since both spend
+   LLM calls.
 6. **Settings** (`/settings`) — manages the two things a player
    configures: the saved players (list from `GET /api/players` + an
    add-a-player form) and the coach LLM (`AgentSelect`, persisted in

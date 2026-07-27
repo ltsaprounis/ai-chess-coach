@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PlayerReport } from "./api";
 import {
   latestRatings,
   monthKey,
@@ -6,6 +7,7 @@ import {
   mostPlayedClass,
   ratingSeries,
   type StatGame,
+  splitPhases,
   tally,
   tallyByColor,
 } from "./stats";
@@ -159,5 +161,49 @@ describe("monthlyActivity", () => {
       "2025-12",
       "2026-01",
     ]);
+  });
+});
+
+function phaseStat(
+  partial: Partial<PlayerReport["phases"][string]> = {},
+): NonNullable<PlayerReport["phases"][string]> {
+  return { moves: 0, acpl: null, judgment_counts: {}, ...partial };
+}
+
+describe("splitPhases", () => {
+  it("renders a phase with zero moves as 'no moves', never a zero bar", () => {
+    const { phaseData, emptyPhases } = splitPhases({
+      opening: phaseStat({ moves: 40, acpl: 22.5 }),
+      middlegame: phaseStat({ moves: 30, acpl: 61.2 }),
+      endgame: phaseStat({ moves: 0, acpl: null }),
+    });
+    expect(emptyPhases).toEqual(["endgame"]);
+    expect(phaseData.map((bar) => bar.label)).toEqual([
+      "opening",
+      "middlegame",
+    ]);
+  });
+
+  it("still renders a real zero ACPL phase as a bar — null and 0 are not the same", () => {
+    const { phaseData, emptyPhases } = splitPhases({
+      opening: phaseStat({ moves: 12, acpl: 0 }),
+    });
+    expect(emptyPhases).toEqual(["middlegame", "endgame"]);
+    expect(phaseData).toEqual([
+      { label: "opening", value: 0, note: "12 moves" },
+    ]);
+  });
+
+  it("treats a missing phase key the same as zero moves", () => {
+    const { phaseData, emptyPhases } = splitPhases({});
+    expect(phaseData).toEqual([]);
+    expect(emptyPhases).toEqual(["opening", "middlegame", "endgame"]);
+  });
+
+  it("singularizes the move-count note for exactly one move", () => {
+    const { phaseData } = splitPhases({
+      opening: phaseStat({ moves: 1, acpl: 5 }),
+    });
+    expect(phaseData[0]?.note).toBe("1 move");
   });
 });

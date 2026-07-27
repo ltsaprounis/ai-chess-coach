@@ -2,8 +2,11 @@
 
 [PROPOSAL.md](PROPOSAL.md) is the high-level pitch;
 [NEW-FEATURE-PROPOSAL.md](NEW-FEATURE-PROPOSAL.md) holds the
-prioritized candidates for what to build next. Each component below
-has its own build plan. Components are decoupled: the API layer is the
+prioritized candidates for what to build next;
+[COACH-REPORT-IMPROVEMENTS.md](COACH-REPORT-IMPROVEMENTS.md) reviews
+the whole-report coaching output and the Dashboard views built on the
+same data, and plans their rework. Each component below has its own
+build plan. Components are decoupled: the API layer is the
 only module that composes them, and everything else communicates through
 the shared domain types and plain function interfaces.
 [GUIDELINES.md](GUIDELINES.md) holds the cross-cutting engineering
@@ -76,6 +79,9 @@ Pydantic models — validated at the edges, serializable everywhere.
 
 ```python
 MATE_SCORE = 10_000   # mate folded to ±cp for loss arithmetic
+OPENING_PLIES = 20    # phase boundaries: shared by engine (which tags
+ENDGAME_MATERIAL = 13 # moves) and coach (which re-derives the tags
+PIECE_POINTS = {...}  # when aggregating), so the rule cannot drift
 
 Color = Literal["white", "black"]
 Result = Literal["win", "loss", "draw"]
@@ -92,6 +98,9 @@ class Game(BaseModel):
     time_class: TimeClass; result: Result; end_time: int
     opponent: str; player_rating: int; opponent_rating: int
     accuracy: float | None   # chess.com's own, when provided
+    termination: str | None  # raw chess.com code behind `result`:
+                             # timeout/resigned/checkmated/… — None
+                             # until a game is re-synced
 
 class MoveEval(BaseModel):
     ply: int; san: str; eval_cp: int | None
@@ -112,17 +121,55 @@ class GameAnalysis(BaseModel):
 class Opening(BaseModel):
     eco: str; name: str; ply: int
 
-class PlayerReport(BaseModel):
-    username: str; games_analyzed: int; overall_acpl: float
-    acpl_by_phase: dict[Phase, float]
+class Record(BaseModel):              # a W/L/D tally, reused widely
+    games: int; wins: int; losses: int; draws: int
+
+class OpeningStats(BaseModel):        # one opening from one side
+    eco: str; name: str; color: Color # keyed by (color, eco, name):
+    system: str                       #   the player's own first moves
+    first_moves: str                  #   the line with both sides
+    games: int; wins: int; losses: int; draws: int
+    analyzed_games: int
+    opening_acpl: float | None        # opening phase only
+    avg_cp_loss: float | None         # whole game
+
+class PhaseStats(BaseModel):          # acpl is None when moves == 0 —
+    moves: int                        # a phase never reached must not
+    acpl: float | None                # read as 0.0 cp loss
     judgment_counts: dict[Judgment, int]
-    openings: list[OpeningStats]          # games/analyzed_games/W/L/D/avg_cp_loss
-    critical_positions: list[CriticalPosition]  # fen/played/best/...
+
+class PlayerReport(BaseModel):
+    username: str; games_analyzed: int; player_moves: int
+    window_start: int | None; window_end: int | None
+    time_class: TimeClass | None      # the filter applied; None = all
+    requested_since: int | None; requested_until: int | None
+    games_in_scope: int | None        # stored games matching the same
+                                      # filters, analyzed or not — the
+                                      # coverage denominator
+    record: Record; overall_acpl: float
+    phases: dict[Phase, PhaseStats]
+    judgment_counts: dict[Judgment, int]
+    time_classes: list[TimeClassStats]   # rating movement per control
+    months: list[MonthStats]             # games/rating/ACPL/blunder %
+    terminations: list[TerminationStats] # how games actually ended
+    opponents: OpponentStats | None      # score vs stronger/weaker
+    openings: list[OpeningStats]
+    error_patterns: list[ErrorPattern]   # tagged deterministically
+    critical_positions: list[CriticalPosition]  # turning points
 ```
 
-Composites elided above for brevity (`OpeningStats`,
-`CriticalPosition`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
+Composites elided above for brevity (`CriticalPosition`,
+`TimeClassStats`, `MonthStats`, `OpponentStats`, `TerminationStats`,
+`ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
 `LlmConfig`, `CoachAgent`) also live in `domain.py` — the component
 docs state their shapes where they are used. Types may grow, but changes to
 them are contract changes — update the affected component docs in
 the same commit.
+
+`PlayerReport` and `OpeningStats` are read by both the coaching prompt
+and the Dashboard, and `OpeningStats` has two independent producers
+(storage's SQL over classified games, coach's Python over analyzed
+ones). Their aggregation semantics — move-weighted ACPL, the color
+split, the family-rollup key, which ACPL each column means — are
+defined once in [06-coach.md](06-coach.md); both implementations are
+written against that definition rather than against each other.

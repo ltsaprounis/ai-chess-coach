@@ -7,11 +7,13 @@ from contextlib import aclosing
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import run_in_threadpool
 
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
+    PROMPT_VERSION,
     CoachProvider,
     CoachProviderError,
     PositionAnalystFn,
@@ -39,11 +41,14 @@ from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
     Db,
     GameFilters,
+    ReportKey,
+    count_games,
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
     get_explanation,
     get_game,
+    get_report,
     latest_game_time,
     list_analyzed_games,
     list_games,
@@ -51,6 +56,7 @@ from chess_coach.storage import (
     opening_stats,
     save_analysis,
     save_explanation,
+    save_report,
     set_opening,
     upsert_games,
 )
@@ -97,10 +103,19 @@ class SyncResult(BaseModel):
 
 
 @router.post("/players/{username}/sync")
-async def sync_player(username: str, db: DbDep, book: BookDep) -> SyncResult:
-    """Fetch new games from chess.com, store and classify them."""
+async def sync_player(
+    username: str, db: DbDep, book: BookDep, full: bool = False
+) -> SyncResult:
+    """Fetch new games from chess.com, store and classify them.
+
+    `full=True` re-fetches the entire archive instead of just the games
+    since the last sync — the upsert makes this idempotent — to backfill
+    columns added after games were stored (currently `termination`); a
+    normal sync never re-fetches a stored game, so only a full re-sync
+    can pick up such a column for existing rows.
+    """
     user = username.lower()
-    since = latest_game_time(db, user)
+    since = None if full else latest_game_time(db, user)
     synced = 0
     async for batch in sync_games(user, since):
         upsert_games(db, batch)
@@ -170,12 +185,26 @@ def game_detail(game_id: str, db: DbDep) -> GameDetail:
 
 class AnalyzeRequest(BaseModel):
     game_ids: list[str] | None = None
-    limit: int | None = None  # bulk path only; capped by config
+    # Bulk path only; capped by config. ge=0 because SQLite reads a
+    # negative LIMIT as "unlimited", which would bypass the cap; 0 is
+    # the documented no-op probe.
+    limit: int | None = Field(default=None, ge=0)
+    # Bulk-path scope only (ignored when game_ids is set); same window
+    # semantics as everywhere else (since inclusive, until exclusive).
+    # Passed to both the enqueue and the remaining count so they always
+    # describe the same scope.
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
 
 
 class AnalyzeResult(BaseModel):
     queued: int
-    remaining: int  # unanalyzed games not covered by this run
+    # Unanalyzed games not covered by this run. Exact on the bulk
+    # path; the game_ids path subtracts the whole resolved list, so
+    # re-analyzing already-analyzed games under-counts by that many
+    # (floored at 0) — an accepted approximation.
+    remaining: int
 
 
 @router.post("/players/{username}/analyze", status_code=202)
@@ -206,15 +235,48 @@ async def analyze_player(
             for game_id in body.game_ids
             if (game := get_game(db, game_id)) is not None
         ]
+        remaining = max(
+            0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
+        )
     else:
+        since = body.since if body is not None else None
+        until = body.until if body is not None else None
+        time_class = body.time_class if body is not None else None
         limit = cfg.engine.analyze_limit
         if body is not None and body.limit is not None:
             limit = min(body.limit, cfg.engine.analyze_limit)
-        games = games_needing_analysis(db, user, cfg.engine.depth, limit)
+        games = games_needing_analysis(
+            db,
+            user,
+            cfg.engine.depth,
+            limit,
+            since=since,
+            until=until,
+            time_class=time_class,
+        )
+        remaining = max(
+            0,
+            count_games_needing_analysis(
+                db,
+                user,
+                cfg.engine.depth,
+                since=since,
+                until=until,
+                time_class=time_class,
+            )
+            - len(games),
+        )
 
-    remaining = max(
-        0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
-    )
+    if not games:
+        # Nothing to enqueue: answer 202 without touching `runs`, so no
+        # run is started and no 409-blocking state is left behind. This
+        # makes `limit: 0` a free probe and `queued=0, remaining=0` the
+        # backfill's termination signal, per
+        # docs/fixes-2026-07/07-analysis-coverage.md. The active-run
+        # 409 guard above already ran, so a probe against a genuinely
+        # running player still 409s as usual.
+        return AnalyzeResult(queued=0, remaining=remaining)
+
     run = AnalysisRun(len(games))
     runs[user] = run
     opts = EngineOptions(depth=cfg.engine.depth, thresholds=cfg.thresholds)
@@ -455,12 +517,22 @@ def coach_agents(cfg: CfgDep) -> CoachAgentsResponse:
 
 class CoachRequest(BaseModel):
     agent_id: str | None = None  # None -> config default agent
+    # The same window/time-control filters `/report` takes, so the coach
+    # reasons over the period the student is looking at rather than the
+    # player's entire history.
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
+    refresh: bool = False  # bypass the cache read and regenerate
 
 
 class CoachResponse(BaseModel):
     prompt: str
     advice: str
     agent_id: str
+    cached: bool
+    generated_at: int  # epoch seconds the served advice was generated
+    games_analyzed: int  # games covered at generation time
 
 
 @router.get("/players/{username}/report")
@@ -477,37 +549,134 @@ def player_report(
     `time_class` restricts to one time control.
     """
     user = username.lower()
+    games_in_scope = count_games(
+        db, user, since=since, until=until, time_class=time_class
+    )
     return build_report(
         user,
         list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
+        time_class=time_class,
+        requested_since=since,
+        requested_until=until,
+        games_in_scope=games_in_scope,
     )
 
 
+# Docstring stays word-for-word the API's OpenAPI description (no HTTP
+# surface change here) — the engine-tool wiring is explained in comments
+# below instead of growing the docstring.
 @router.post("/players/{username}/coach")
 async def coach_player(
     username: str,
     db: DbDep,
     cfg: CfgDep,
+    pool: PoolDep,
     providers: ProvidersDep,
     body: CoachRequest | None = None,
 ) -> CoachResponse:
-    """Build the report, render the prompt, and ask the chosen agent."""
+    """Build the report, render the prompt, and ask the chosen agent.
+
+    Coaching is the most expensive call the app makes, so — like
+    `GET /games/{id}/explain` — it is cached: the window/time-class
+    filters are part of the cache key alongside the agent and
+    `coach.PROMPT_VERSION`, with a `refresh` escape hatch that skips the
+    cache read and overwrites the cached row.
+    """
     agent_id = cfg.coach.default_agent
-    if body is not None and body.agent_id is not None:
-        agent_id = body.agent_id
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
+    refresh = False
+    if body is not None:
+        if body.agent_id is not None:
+            agent_id = body.agent_id
+        since = body.since
+        until = body.until
+        time_class = body.time_class
+        refresh = body.refresh
     provider = providers.get(agent_id)
     if provider is None:
         raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
+
     user = username.lower()
-    report = build_report(user, list_analyzed_games(db, user))
-    if report.games_analyzed == 0:
-        raise HTTPException(
-            status_code=409,
-            detail="no analyzed games yet — sync and analyze first",
+    key = ReportKey(
+        username=user,
+        agent_id=agent_id,
+        prompt_version=PROMPT_VERSION,
+        since=since if since is not None else 0,
+        until=until if until is not None else 0,
+        time_class=time_class if time_class is not None else "",
+    )
+
+    if not refresh:
+        cached = await run_in_threadpool(get_report, db, key)
+        if cached is not None:
+            # A cache hit serves without touching storage's games table
+            # or the provider — a report for a player whose games were
+            # since deleted still serves from here.
+            return CoachResponse(
+                prompt=cached.prompt,
+                advice=cached.advice,
+                agent_id=agent_id,
+                cached=True,
+                generated_at=cached.created_at,
+                games_analyzed=cached.games_analyzed,
+            )
+
+    def _load_and_build() -> tuple[str, PlayerReport]:
+        # Runs off the event loop: list_analyzed_games and count_games hit
+        # storage and build_report replays every game with python-chess
+        # several times over, which is not cheap at hundreds of games.
+        games = list_analyzed_games(
+            db, user, since=since, until=until, time_class=time_class
         )
-    prompt = render_prompt(report)
+        if not games:
+            raise HTTPException(
+                status_code=409,
+                detail="no analyzed games yet — sync and analyze first",
+            )
+        games_in_scope = count_games(
+            db, user, since=since, until=until, time_class=time_class
+        )
+        report = build_report(
+            user,
+            games,
+            time_class=time_class,
+            requested_since=since,
+            requested_until=until,
+            games_in_scope=games_in_scope,
+        )
+        return render_prompt(report), report
+
+    prompt, report = await run_in_threadpool(_load_and_build)
+
+    # Same wrapper explain_move builds around the engine pool — this is
+    # where coach meets engine; they never import each other. When the
+    # pool is up, the provider runs agentically against `analyze_position`
+    # so it can verify concrete lines before asserting them. Unlike
+    # analyze/eval, a missing pool is not fatal here: `None` degrades the
+    # provider to its single-turn path and the report still generates.
+    analyst: PositionAnalystFn | None = None
+    if pool is not None:
+
+        async def _analyst(fen: str) -> list[EvalLine]:
+            return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
+
+        analyst = _analyst
+
     try:
-        advice = await provider.complete(prompt)
+        advice = await provider.complete(prompt, analyst)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return CoachResponse(prompt=prompt, advice=advice, agent_id=agent_id)
+
+    generated_at = await run_in_threadpool(
+        save_report, db, key, prompt, advice, report.games_analyzed
+    )
+    return CoachResponse(
+        prompt=prompt,
+        advice=advice,
+        agent_id=agent_id,
+        cached=False,
+        generated_at=generated_at,
+        games_analyzed=report.games_analyzed,
+    )

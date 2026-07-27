@@ -74,6 +74,16 @@ export function axisScale(
   return { lo, hi, ticks };
 }
 
+/** "Mar '26" for a "2026-03" month key — shared by the monthly charts
+ *  so their x-axes read identically. */
+export function formatMonth(key: string): string {
+  const [year = 0, month = 1] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(undefined, {
+    month: "short",
+    year: "2-digit",
+  });
+}
+
 /** Rect path rounded only at the top — the data end of an upward bar. */
 export function topRoundedRectPath(
   x: number,

@@ -1,5 +1,8 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
+import asyncio
+import threading
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -19,7 +22,14 @@ from chess_coach.config import (
     OpeningsConfig,
     StorageConfig,
 )
-from chess_coach.domain import CoachAgent, EvalLine, Game, GameAnalysis
+from chess_coach.domain import (
+    AnalyzedGame,
+    CoachAgent,
+    EvalLine,
+    Game,
+    GameAnalysis,
+    TimeClass,
+)
 from chess_coach.engine import (
     EngineError,
     EngineOptions,
@@ -29,6 +39,7 @@ from chess_coach.engine import (
 )
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.storage import (
+    Db,
     get_explanation,
     open_db,
     save_analysis,
@@ -47,11 +58,17 @@ class StubProvider:
     def __init__(self, advice: str = "Practice rook endgames.") -> None:
         self.advice = advice
         self.prompts: list[str] = []
+        # One entry per `complete` call, so tests can see whether that
+        # call carried a working analyst (pool up) or None (pool down).
+        self.complete_analysts: list[PositionAnalystFn | None] = []
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(
+        self, prompt: str, analyst: PositionAnalystFn | None = None
+    ) -> str:
         self.prompts.append(prompt)
+        self.complete_analysts.append(analyst)
         return self.advice
 
     async def explain(
@@ -73,7 +90,13 @@ class StubPool:
 
     def __init__(self) -> None:
         self.stream_eval_calls: list[tuple[str, int, int]] = []
+        self.eval_lines_calls: list[tuple[str, int, int]] = []
         self.eval_lines_error: Exception | None = None
+        # When set, analyze_game blocks until the event fires, so a test
+        # can hold a run open and exercise the one-run-per-player 409
+        # guard. threading.Event (bridged via to_thread) because tests
+        # release it from the TestClient thread, not the app's loop.
+        self.analyze_release: threading.Event | None = None
 
     async def analyze_game(
         self,
@@ -81,6 +104,8 @@ class StubPool:
         opts: EngineOptions,
         on_progress: ProgressCallback | None = None,
     ) -> GameAnalysis:
+        if self.analyze_release is not None:
+            await asyncio.to_thread(self.analyze_release.wait)
         total = max(1, len(game.san_moves))
         if on_progress is not None:
             on_progress(Progress(game_id=game.id, ply=total, total_plies=total))
@@ -118,6 +143,7 @@ class StubPool:
         self, fen: str, depth: int, multipv: int = 1
     ) -> list[EvalLine]:
         chess.Board(fen)  # same eager ValueError on a bad FEN as the pool
+        self.eval_lines_calls.append((fen, depth, multipv))
         if self.eval_lines_error is not None:
             raise self.eval_lines_error
         return [
@@ -224,6 +250,32 @@ def test_games_list_with_filters(client: TestClient, db_path: Path) -> None:
     assert wins[0]["analyzed"] is True
 
 
+def test_games_list_row_is_the_slim_game_summary_shape(
+    client: TestClient, db_path: Path
+) -> None:
+    """Pins the list row to `GameSummary`: fails if `pgn`/`san_moves`
+    reappear on a list row, or if `first_plies` disappears."""
+    seed(db_path, [make_game(id="g-1")])
+
+    listed: Any = get(client, "/api/players/testuser/games").json()
+    assert set(listed[0].keys()) == {
+        "id",
+        "color",
+        "time_class",
+        "result",
+        "end_time",
+        "opponent",
+        "player_rating",
+        "opponent_rating",
+        "accuracy",
+        "termination",
+        "first_plies",
+        "opening",
+        "analyzed",
+    }
+    assert isinstance(listed[0]["first_plies"], list)
+
+
 def test_players_endpoint_lists_saved_players(
     client: TestClient, db_path: Path
 ) -> None:
@@ -282,6 +334,48 @@ def test_sync_stores_games_and_reports_count(
 
     listed: Any = get(client, "/api/players/testuser/games").json()
     assert [g["id"] for g in listed] == ["g-new-2", "g-new-1"]
+
+
+def test_sync_full_passes_since_none_even_with_stored_games(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1", end_time=50)])
+    seen_since: list[int | None] = []
+
+    def fake_sync(username: str, since: int | None = None) -> AsyncIterator[list[Game]]:
+        seen_since.append(since)
+
+        async def batches() -> AsyncIterator[list[Game]]:
+            yield []
+
+        return batches()
+
+    monkeypatch.setattr(routes, "sync_games", fake_sync)
+
+    response = post(client, "/api/players/testuser/sync?full=true")
+    assert response.status_code == 200
+    assert seen_since == [None]
+
+
+def test_sync_without_full_passes_the_latest_stored_time(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1", end_time=50)])
+    seen_since: list[int | None] = []
+
+    def fake_sync(username: str, since: int | None = None) -> AsyncIterator[list[Game]]:
+        seen_since.append(since)
+
+        async def batches() -> AsyncIterator[list[Game]]:
+            yield []
+
+        return batches()
+
+    monkeypatch.setattr(routes, "sync_games", fake_sync)
+
+    response = post(client, "/api/players/testuser/sync")
+    assert response.status_code == 200
+    assert seen_since == [50]
 
 
 SyncFn = Callable[[str, int | None], AsyncIterator[list[Game]]]
@@ -346,8 +440,6 @@ def test_openings_endpoint_aggregates_records(
 
 
 def wait_until_analyzed(client: TestClient, username: str, expected: int) -> None:
-    import time
-
     for _ in range(100):
         analyzed: Any = get(
             client,
@@ -388,7 +480,14 @@ def test_analyze_fills_opening_avg_cp_loss(
     wait_until_analyzed(client, "testuser", 1)
 
     stats: Any = get(client, "/api/players/testuser/openings").json()
-    assert stats[0]["avg_cp_loss"] == 2.5
+    # avg_cp_loss is move-weighted over the player's own plies only
+    # (storage's opening_stats); StubPool's canned analysis credits the
+    # player's one recorded ply (white, ply 1) with zero loss, so
+    # "filled in" here means "no longer None" -- a plain `== 0.0` cannot
+    # tell a computed zero apart from an unfilled None collapsing to
+    # zero, which is exactly the bug this assertion exists to catch.
+    assert stats[0]["avg_cp_loss"] is not None
+    assert stats[0]["avg_cp_loss"] == 0.0
     assert stats[0]["analyzed_games"] == 1
 
 
@@ -430,6 +529,149 @@ def test_analyze_limit_is_capped_by_config(client: TestClient, db_path: Path) ->
     assert response.json() == {"queued": 2, "remaining": 2}
 
 
+def test_analyze_scoped_request_enqueues_only_in_scope_games(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-in-1", end_time=10, time_class="rapid"),
+            make_game(id="g-in-2", end_time=12, time_class="rapid"),
+            make_game(id="g-in-3", end_time=14, time_class="rapid"),
+            make_game(id="g-before", end_time=5, time_class="rapid"),  # out of window
+            make_game(id="g-blitz", end_time=13, time_class="blitz"),  # wrong class
+        ],
+    )
+
+    # since inclusive, until exclusive: [10, 15) rapid -> 3 in-scope games.
+    # config analyze_limit is 2 (see the `client` fixture), so one is left.
+    response = post(
+        client,
+        "/api/players/testuser/analyze",
+        json={"since": 10, "until": 15, "time_class": "rapid"},
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 2, "remaining": 1}
+
+    wait_until_analyzed(client, "testuser", 2)
+    analyzed: Any = get(
+        client, "/api/players/testuser/games", params={"analyzed": "true"}
+    ).json()
+    # Newest-first within scope: neither the out-of-window game nor the
+    # wrong-time-class game was touched.
+    assert [g["id"] for g in analyzed] == ["g-in-3", "g-in-2"]
+
+
+def test_analyze_zero_limit_is_a_probe_that_starts_no_run(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1), make_game(id="g-2", end_time=2)],
+    )
+
+    response = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+    assert response.status_code == 202
+    assert response.json() == {"queued": 0, "remaining": 2}
+
+    # No run was started by the probe, so a real request right after
+    # succeeds instead of 409ing against a run that was never started.
+    response = post(client, "/api/players/testuser/analyze")
+    assert response.status_code == 202
+    assert response.json() == {"queued": 2, "remaining": 0}
+
+
+def test_analyze_409s_while_a_run_is_active_including_probes(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """The one-run-per-player guard is protocol: the backfill CLI reads
+    409 as "batch still running", so it must fire for real requests AND
+    for limit-0 probes while a run is active."""
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1), make_game(id="g-2", end_time=2)],
+    )
+    pool = stub_pool(stub_registry)
+    pool.analyze_release = threading.Event()
+    try:
+        response = post(client, "/api/players/testuser/analyze", json={"limit": 1})
+        assert response.status_code == 202
+        assert response.json()["queued"] == 1
+
+        # While the batch is held open, both a real request and a probe
+        # hit the guard.
+        assert post(client, "/api/players/testuser/analyze").status_code == 409
+        probe = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+        assert probe.status_code == 409
+    finally:
+        pool.analyze_release.set()
+
+    # Released: the run finishes and a probe soon answers 202 again,
+    # reporting the game the limited batch did not cover.
+    for _ in range(200):
+        probe = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+        if probe.status_code == 202:
+            break
+        time.sleep(0.02)
+    assert probe.status_code == 202
+    assert probe.json() == {"queued": 0, "remaining": 1}
+
+
+def test_analyze_negative_limit_is_rejected(client: TestClient, db_path: Path) -> None:
+    """SQLite reads a negative LIMIT as unlimited, which would bypass
+    the engine.analyze_limit cap — pydantic must reject it instead."""
+    seed(db_path, [make_game(id="g-1", end_time=1)])
+    response = post(client, "/api/players/testuser/analyze", json={"limit": -1})
+    assert response.status_code == 422
+
+
+def test_analyze_fully_analyzed_scope_returns_zero_and_zero(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1, time_class="rapid")],
+        analyzed={"g-1"},
+    )
+
+    response = post(
+        client, "/api/players/testuser/analyze", json={"time_class": "rapid"}
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 0, "remaining": 0}
+
+    # No 409-blocking run was left behind by the zero-game result.
+    assert get(client, "/api/players/testuser/analyze/progress").status_code == 404
+
+
+def test_analyze_game_ids_request_ignores_scope_fields(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-blitz", end_time=1, time_class="blitz"),
+            make_game(id="g-rapid", end_time=2, time_class="rapid"),
+        ],
+    )
+
+    # time_class="rapid" would exclude g-blitz on the bulk path, but an
+    # explicit game_ids list ignores the scope fields entirely.
+    response = post(
+        client,
+        "/api/players/testuser/analyze",
+        json={"game_ids": ["g-blitz"], "time_class": "rapid"},
+    )
+    assert response.status_code == 202
+    assert response.json() == {"queued": 1, "remaining": 1}
+
+    wait_until_analyzed(client, "testuser", 1)
+    analyzed: Any = get(
+        client, "/api/players/testuser/games", params={"analyzed": "true"}
+    ).json()
+    assert [g["id"] for g in analyzed] == ["g-blitz"]
+
+
 def test_analyze_without_engine_binary_is_503(db_path: Path, tmp_path: Path) -> None:
     config = AppConfig(
         engine=EngineConfig(bin_path=tmp_path / "missing-stockfish"),
@@ -458,7 +700,12 @@ def test_report_aggregates_analyzed_games(client: TestClient, db_path: Path) -> 
     report: Any = get(client, "/api/players/TestUser/report").json()
     assert report["username"] == "testuser"
     assert report["games_analyzed"] == 2
-    assert report["overall_acpl"] == 2.5
+    # overall_acpl is move-weighted over the player's own plies only
+    # (coach's build_report); make_analysis's canned analysis credits
+    # the player's one recorded ply per game (white, ply 1) with zero
+    # loss, so this is the two games' combined average, not a per-game
+    # echo of GameAnalysis.overall_acpl.
+    assert report["overall_acpl"] == 0.0
 
 
 def test_report_and_openings_respect_time_window(
@@ -491,12 +738,91 @@ def test_report_and_openings_respect_time_window(
         client, "/api/players/testuser/report", params={"time_class": "blitz"}
     ).json()
     assert blitz["games_analyzed"] == 0
+    # The applied filter is recorded on the report even with no games --
+    # PlayerReport.time_class is the scope of the numbers, not a summary
+    # of the games found.
+    assert blitz["time_class"] == "blitz"
+
+
+def test_report_states_coverage_over_a_window_with_unanalyzed_games(
+    client: TestClient, db_path: Path
+) -> None:
+    """games_in_scope counts every stored game in the window, analyzed or
+    not, and requested_since/requested_until echo the query -- the "N of
+    M" coverage the prompt and (later) the UI rely on to never silently
+    understate the analyzed span (docs/fixes-2026-07/07)."""
+    seed(
+        db_path,
+        [
+            make_game(id="before-window", end_time=50),
+            make_game(id="in-window-analyzed", end_time=150),
+            make_game(id="in-window-unanalyzed", end_time=180),
+            make_game(id="after-window", end_time=300),
+        ],
+        analyzed={"in-window-analyzed"},
+    )
+
+    report: Any = get(
+        client,
+        "/api/players/testuser/report",
+        params={"since": "100", "until": "200"},
+    ).json()
+
+    assert report["requested_since"] == 100
+    assert report["requested_until"] == 200
+    # Both in-window games count, analyzed or not; the two out-of-window
+    # games (before/after) are excluded from the denominator.
+    assert report["games_in_scope"] == 2
+    assert report["games_analyzed"] == 1
+
+
+def test_report_without_filters_still_states_full_history_coverage(
+    client: TestClient, db_path: Path
+) -> None:
+    """A filter-less request still gets a denominator -- games_in_scope
+    is the full stored history, not left None just because the caller
+    passed no since/until/time_class."""
+    seed(
+        db_path,
+        [make_game(id="analyzed-1"), make_game(id="unanalyzed-1", end_time=2)],
+        analyzed={"analyzed-1"},
+    )
+
+    report: Any = get(client, "/api/players/testuser/report").json()
+
+    assert report["requested_since"] is None
+    assert report["requested_until"] is None
+    assert report["games_in_scope"] == 2
+    assert report["games_analyzed"] == 1
+
+
+def test_coach_cache_miss_prompt_states_coverage_when_games_are_unanalyzed(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """A cache-miss /coach run passes the same games_in_scope/requested_*
+    through to build_report as /report does, so the prompt the provider
+    receives states coverage instead of presenting the analyzed games as
+    the whole story."""
+    seed(
+        db_path,
+        [make_game(id="analyzed-1"), make_game(id="unanalyzed-1", end_time=2)],
+        analyzed={"analyzed-1"},
+    )
+
+    body: Any = post(client, "/api/players/testuser/coach").json()
+    assert body["cached"] is False
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+    prompt = provider.prompts[0]
+    assert "- Coverage: 1 of 2 games in scope is analyzed" in prompt
+    assert "the other 1 game in scope is not engine-analyzed" in prompt
 
 
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
     body: Any = get(client, "/api/coach/agents").json()
     assert body["default"] == "claude"
-    # Exact match also proves max_tokens is not exposed.
+    # Exact match pins the exposed fields to exactly these four.
     assert body["agents"] == [
         {
             "id": "claude",
@@ -521,7 +847,9 @@ def test_coach_uses_default_agent_without_a_body(
     body: Any = post(client, "/api/players/testuser/coach").json()
     assert body["agent_id"] == "claude"
     assert body["advice"] == "advice from claude"
-    assert "## Player profile: testuser" in body["prompt"]
+    assert "# Coaching brief -- testuser" in body["prompt"]
+    assert body["cached"] is False
+    assert body["games_analyzed"] == 1
 
 
 def test_coach_routes_to_the_requested_agent(client: TestClient, db_path: Path) -> None:
@@ -548,6 +876,238 @@ def test_coach_409s_without_analyzed_games(client: TestClient, db_path: Path) ->
     response = post(client, "/api/players/testuser/coach")
     assert response.status_code == 409
     assert "analyze first" in response.json()["error"]["message"]
+
+
+def test_coach_caches_and_a_repeat_is_a_cache_hit(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    first: Any = post(client, "/api/players/testuser/coach").json()
+    assert first["cached"] is False
+    assert first["games_analyzed"] == 1
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+
+    second: Any = post(client, "/api/players/testuser/coach").json()
+    assert second["cached"] is True
+    assert second["prompt"] == first["prompt"]
+    assert second["advice"] == first["advice"]
+    assert second["games_analyzed"] == 1
+    assert second["generated_at"] == first["generated_at"]
+    # No further provider invocation on the cache hit, and the engine
+    # pool is never touched either -- the cache short-circuits before
+    # the analyst wrapper is even built.
+    assert len(provider.prompts) == 1
+    assert stub_pool(stub_registry).eval_lines_calls == []
+
+
+def test_coach_generated_at_survives_a_clock_tick(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """generated_at must be the single clock read storage's save_report
+    persists, not a second, independent time.time() read in the API
+    layer -- two independent reads can straddle a second boundary and
+    disagree, which a same-second test run would never catch. Here every
+    time.time() call advances the clock by a full second, so any second,
+    independent read would necessarily disagree with the one persisted."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    clock = [1_700_000_000.0]
+
+    def ticking_time() -> float:
+        clock[0] += 1.0
+        return clock[0]
+
+    monkeypatch.setattr(time, "time", ticking_time)
+
+    first: Any = post(client, "/api/players/testuser/coach").json()
+    assert first["cached"] is False
+
+    second: Any = post(client, "/api/players/testuser/coach").json()
+    assert second["cached"] is True
+    assert second["generated_at"] == first["generated_at"]
+
+
+def test_coach_refresh_bypasses_the_cache_and_regenerates(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    post(client, "/api/players/testuser/coach")
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+
+    refreshed: Any = post(
+        client, "/api/players/testuser/coach", json={"refresh": True}
+    ).json()
+    assert refreshed["cached"] is False
+    assert len(provider.prompts) == 2  # refresh bypasses the cache read
+
+    # A plain repeat is now a cache hit on the freshly-generated advice.
+    repeat: Any = post(client, "/api/players/testuser/coach").json()
+    assert repeat["cached"] is True
+    assert len(provider.prompts) == 2
+
+
+def test_coach_refresh_reinvokes_the_provider_with_the_analyst_again(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    post(client, "/api/players/testuser/coach")
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.complete_analysts) == 1
+    assert provider.complete_analysts[0] is not None
+
+    post(client, "/api/players/testuser/coach", json={"refresh": True})
+    assert len(provider.complete_analysts) == 2
+    assert provider.complete_analysts[1] is not None
+
+
+def test_coach_pool_present_passes_a_working_analyst_to_the_provider(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """On a cache miss with the engine pool up, `complete` gets a real
+    analyst -- and calling it reaches the stub pool's `eval_lines` with
+    the injector's (config's) depth/multipv, not a caller's choice."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = post(client, "/api/players/testuser/coach")
+    assert response.status_code == 200
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.complete_analysts) == 1
+    analyst = provider.complete_analysts[0]
+    assert analyst is not None
+
+    async def call_analyst() -> list[EvalLine]:
+        return await analyst(chess.STARTING_FEN)
+
+    lines = asyncio.run(call_analyst())
+    assert len(lines) == 1
+    pool = stub_pool(stub_registry)
+    assert pool.eval_lines_calls == [(chess.STARTING_FEN, 16, 5)]
+
+
+def test_coach_without_engine_pool_passes_no_analyst_and_still_succeeds(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike analyze/eval, a missing engine is not fatal here -- the
+    report still generates, degraded to the provider's single-turn path."""
+    registry: dict[str, object] = {}
+
+    def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
+        provider = StubProvider(advice=f"advice from {cfg.id}")
+        registry[f"provider:{cfg.id}"] = provider
+        return provider
+
+    monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
+    config = AppConfig(
+        engine=EngineConfig(bin_path=tmp_path / "missing-stockfish"),
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
+    )
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    with TestClient(create_app(config)) as coach_client:
+        response = post(coach_client, "/api/players/testuser/coach")
+
+    assert response.status_code == 200
+    body: Any = response.json()
+    assert body["advice"] == "advice from claude"
+    provider = stub_provider(registry, "claude")
+    assert provider.complete_analysts == [None]
+
+
+def test_coach_cache_key_separates_windows_and_agents(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """Two coach runs over different scopes are different reports, not a
+    cache hit -- the window/time-class filters and the agent are all
+    part of the cache key, and the all-time (no window) case is the
+    sentinel most likely to collide with itself if since/until/time_class
+    default to None instead of the documented 0/""."""
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=100),
+            make_game(id="g-new", end_time=200),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+    provider = stub_provider(stub_registry, "claude")
+
+    all_time: Any = post(client, "/api/players/testuser/coach").json()
+    assert all_time["cached"] is False
+    assert all_time["games_analyzed"] == 2
+    assert len(provider.prompts) == 1
+
+    # A repeat all-time call is a cache hit -- the sentinel case.
+    repeat_all_time: Any = post(client, "/api/players/testuser/coach").json()
+    assert repeat_all_time["cached"] is True
+    assert len(provider.prompts) == 1
+
+    # A windowed call is a different cache key -> another provider call.
+    windowed: Any = post(
+        client, "/api/players/testuser/coach", json={"since": 150}
+    ).json()
+    assert windowed["cached"] is False
+    assert windowed["games_analyzed"] == 1
+    assert len(provider.prompts) == 2
+
+    # Repeating the same window is a cache hit.
+    repeat_windowed: Any = post(
+        client, "/api/players/testuser/coach", json={"since": 150}
+    ).json()
+    assert repeat_windowed["cached"] is True
+    assert len(provider.prompts) == 2
+
+    # A different agent over the same (all-time) scope is a third key.
+    other_agent: Any = post(
+        client, "/api/players/testuser/coach", json={"agent_id": "beta"}
+    ).json()
+    assert other_agent["cached"] is False
+    assert len(provider.prompts) == 2
+    assert len(stub_provider(stub_registry, "beta").prompts) == 1
+
+
+def test_coach_filters_reach_list_analyzed_games_and_the_prompt(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=100, time_class="blitz"),
+            make_game(id="g-new", end_time=200, time_class="rapid"),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+    calls: list[dict[str, object]] = []
+    original = routes.list_analyzed_games
+
+    def spy(
+        db: Db,
+        username: str,
+        *,
+        since: int | None = None,
+        until: int | None = None,
+        time_class: TimeClass | None = None,
+    ) -> list[AnalyzedGame]:
+        calls.append({"since": since, "until": until, "time_class": time_class})
+        return original(db, username, since=since, until=until, time_class=time_class)
+
+    monkeypatch.setattr(routes, "list_analyzed_games", spy)
+
+    body: Any = post(
+        client,
+        "/api/players/testuser/coach",
+        json={"since": 150, "time_class": "rapid"},
+    ).json()
+
+    assert calls == [{"since": 150, "until": None, "time_class": "rapid"}]
+    assert body["games_analyzed"] == 1
+    assert "Scope: rapid only" in body["prompt"]
 
 
 def test_eval_streams_eval_events_then_done(client: TestClient) -> None:

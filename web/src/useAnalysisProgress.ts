@@ -11,6 +11,18 @@ export type RunProgress = {
 };
 
 /**
+ * How a run ended, passed to `onFinished` so callers can tell a clean
+ * finish apart from a failure or a lost connection — e.g. the Coach
+ * page's auto-chain only continues on a clean finish (see
+ * `shouldChainAfterRun` in `coachCoverage.ts`); a caller that doesn't
+ * care (the Games page's analyze bar) can just ignore the argument.
+ */
+export type RunOutcome = {
+  failed: boolean;
+  streamLost: boolean;
+};
+
+/**
  * One SSE event from the analysis progress stream. Hand-declared
  * because SSE payloads are not part of the OpenAPI schema; mirrors
  * the backend's RunEvent model (its `type` field arrives as the SSE
@@ -35,7 +47,7 @@ const EVENT_TYPES = [
 export function useAnalysisProgress(
   username: string,
   active: boolean,
-  onFinished: () => void,
+  onFinished: (outcome: RunOutcome) => void,
 ): RunProgress | null {
   const [state, setState] = useState<RunProgress | null>(null);
   const onFinishedRef = useRef(onFinished);
@@ -60,7 +72,13 @@ export function useAnalysisProgress(
       });
       if (data.finished) {
         source.close();
-        onFinishedRef.current();
+        // The backend sets `finished` before publishing `run_failed`,
+        // so a failed run arrives here too — report it as such rather
+        // than as a clean finish.
+        onFinishedRef.current({
+          failed: event.type === "run_failed",
+          streamLost: false,
+        });
       }
     };
 
@@ -81,7 +99,7 @@ export function useAnalysisProgress(
               streamLost: true,
             },
       );
-      onFinishedRef.current();
+      onFinishedRef.current({ failed: false, streamLost: true });
     };
     return () => source.close();
   }, [username, active]);
