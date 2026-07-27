@@ -5,7 +5,7 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from chess_coach.domain import (
     AnalyzedGame,
@@ -25,14 +25,19 @@ from chess_coach.storage.db import Db
 
 
 class GameFilters(BaseModel):
-    """Optional filters for list_games."""
+    """Optional filters for list_games.
+
+    Paging is ge=0 because SQLite reads a negative LIMIT as
+    "unlimited" (and a negative OFFSET as 0) — the same guard
+    `AnalyzeRequest.limit` documents.
+    """
 
     opening_eco: str | None = None
     result: Result | None = None
     time_class: TimeClass | None = None
     analyzed: bool | None = None
-    limit: int = 100
-    offset: int = 0
+    limit: int = Field(default=100, ge=0)
+    offset: int = Field(default=0, ge=0)
 
 
 _INSERT_COLUMNS = (

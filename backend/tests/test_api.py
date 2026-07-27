@@ -1522,3 +1522,12 @@ def test_unknown_user_maps_to_404_envelope(
     response = post(client, "/api/players/ghost/sync")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "unknown_user"
+
+
+def test_games_list_rejects_negative_paging(client: TestClient) -> None:
+    """SQLite reads a negative LIMIT as "unlimited" — the same reason
+    AnalyzeRequest.limit is ge=0 — so negative paging 422s at the edge
+    instead of returning the whole table (scan finding 10)."""
+    for params in ({"limit": "-1"}, {"offset": "-1"}):
+        response = get(client, "/api/players/testuser/games", params=params)
+        assert response.status_code == 422

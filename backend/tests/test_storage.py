@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from chess_coach.domain import GameAnalysis, MoveEval, Opening
 from chess_coach.storage import (
@@ -1149,3 +1150,13 @@ def test_migration_007_backfills_aggregates_from_stored_evals(
     assert stat.avg_cp_loss == 20.0  # (10 + 30) / 2
     assert stat.opening_acpl == 10.0
     migrated.close()
+
+
+def test_game_filters_reject_negative_paging() -> None:
+    """Mirrors the API edge guard: SQLite reads a negative LIMIT as
+    "unlimited" (and a negative OFFSET as 0), so the storage parameter
+    type refuses both outright."""
+    with pytest.raises(ValidationError):
+        GameFilters(limit=-1)
+    with pytest.raises(ValidationError):
+        GameFilters(offset=-1)

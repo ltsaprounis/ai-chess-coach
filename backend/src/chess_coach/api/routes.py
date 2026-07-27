@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
@@ -172,8 +172,12 @@ def player_games(
     result: Result | None = None,
     time_class: TimeClass | None = None,
     analyzed: bool | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    # ge=0 at the edge so a negative value 422s instead of failing
+    # GameFilters' own validation inside the handler (a 500); SQLite
+    # reads a negative LIMIT as "unlimited", which would return the
+    # whole table (docs/CODEBASE-SCAN-2026-07.md, finding 10).
+    limit: Annotated[int, Query(ge=0)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[GameSummary]:
     filters = GameFilters(
         opening_eco=opening_eco,
