@@ -5,8 +5,12 @@
 prioritized candidates for what to build next;
 [COACH-REPORT-IMPROVEMENTS.md](COACH-REPORT-IMPROVEMENTS.md) reviews
 the whole-report coaching output and the Dashboard views built on the
-same data, and plans their rework. Each component below has its own
-build plan. Components are decoupled: the API layer is the
+same data, and plans their rework;
+[fixes-2026-07/](fixes-2026-07/README.md) is the follow-up fix
+iteration to that rework; and
+[CODEBASE-ASSESSMENT.md](CODEBASE-ASSESSMENT.md) is a point-in-time
+full-repo review (2026-07-24) with ranked findings. Each component
+below has its own build plan. Components are decoupled: the API layer is the
 only module that composes them, and everything else communicates through
 the shared domain types and plain function interfaces.
 [GUIDELINES.md](GUIDELINES.md) holds the cross-cutting engineering
