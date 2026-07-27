@@ -115,17 +115,28 @@ async def sync_player(
     can pick up such a column for existing rows.
     """
     user = username.lower()
-    since = None if full else latest_game_time(db, user)
+    since = None if full else await run_in_threadpool(latest_game_time, db, user)
     synced = 0
     async for batch in sync_games(user, since):
-        upsert_games(db, batch)
+        # Threadpool: this endpoint is async for the sake of the
+        # chess.com fetch, so its sync storage writes would otherwise
+        # run on the event loop and stall every concurrent request and
+        # SSE stream — a full re-sync writes the whole archive.
+        await run_in_threadpool(upsert_games, db, batch)
         synced += len(batch)
-    # One pass covers the new games and any stored-but-unclassified
-    # backlog; book-less games simply stay unclassified.
-    for game in games_missing_opening(db, user):
-        opening = book.classify(game.san_moves)
-        if opening is not None:
-            set_opening(db, game.id, opening)
+
+    def classify_backlog() -> None:
+        # One pass covers the new games and any stored-but-unclassified
+        # backlog; book-less games simply stay unclassified.
+        for game in games_missing_opening(db, user):
+            opening = book.classify(game.san_moves)
+            if opening is not None:
+                set_opening(db, game.id, opening)
+
+    # Threadpool for the same reason: classification replays up to 30
+    # plies per unclassified game, which after a full re-sync is the
+    # whole archive — minutes of CPU that must not block the loop.
+    await run_in_threadpool(classify_backlog)
     return SyncResult(games_synced=synced)
 
 
@@ -301,7 +312,9 @@ async def _run_analysis(
             run.publish(run.event("progress", progress))
 
         analysis = await pool.analyze_game(game, opts, on_progress)
-        save_analysis(db, analysis)
+        # Threadpool: this task shares the event loop with every SSE
+        # stream; the write serializes a full per-move eval list.
+        await run_in_threadpool(save_analysis, db, analysis)
         run.games_done += 1
         run.publish(run.event("game_done"))
 
@@ -420,7 +433,10 @@ async def explain_move(
             status_code=400, detail=f"unknown coach agent: {resolved_agent_id}"
         )
 
-    game = get_game(db, game_id)
+    # Threadpool: async endpoint (the provider stream below), so these
+    # sync storage reads — get_game deserializes the full eval list —
+    # must not run on the event loop.
+    game = await run_in_threadpool(get_game, db, game_id)
     if game is None:
         raise HTTPException(status_code=404, detail=f"unknown game: {game_id}")
     analysis = game.analysis
@@ -430,7 +446,13 @@ async def explain_move(
             detail="no analysis for this game — analyze this game first",
         )
 
-    cached = None if refresh else get_explanation(db, game_id, ply, resolved_agent_id)
+    cached = (
+        None
+        if refresh
+        else await run_in_threadpool(
+            get_explanation, db, game_id, ply, resolved_agent_id
+        )
+    )
     if cached is not None:
 
         async def cached_stream() -> AsyncIterator[dict[str, str]]:
@@ -483,7 +505,9 @@ async def explain_move(
             }
             return
         full_text = "".join(chunks)
-        save_explanation(db, game_id, ply, resolved_agent_id, full_text)
+        await run_in_threadpool(
+            save_explanation, db, game_id, ply, resolved_agent_id, full_text
+        )
         yield {"event": "done", "data": ExplainDone(text=full_text).model_dump_json()}
 
     return EventSourceResponse(stream())

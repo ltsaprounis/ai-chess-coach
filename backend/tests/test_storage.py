@@ -1,5 +1,6 @@
 """Storage component tests (docs/03-storage.md)."""
 
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -905,3 +906,32 @@ def test_report_survives_close_and_reopen(tmp_path: Path) -> None:
     assert cached is not None
     assert cached.advice == "advice"
     second.close()
+
+
+def test_concurrent_write_transactions_serialize(db: Db) -> None:
+    """Writers from different threads must not corrupt each other.
+
+    Serialized sqlite3 protects single calls on the shared connection,
+    not transactions: without Db's write lock, two threads inside
+    `with db:` at once interleave their BEGIN/COMMIT and abort with
+    InterfaceError — exactly what an analysis run's saves racing a
+    sync's upserts did once both moved off the event loop.
+    """
+    upsert_games(db, [make_game(id=f"g-{n}") for n in range(50)])
+    errors: list[Exception] = []
+
+    def save_all() -> None:
+        try:
+            for n in range(50):
+                save_analysis(db, make_analysis(game_id=f"g-{n}"))
+        except Exception as exc:  # any sqlite error fails the test
+            errors.append(exc)
+
+    threads = [threading.Thread(target=save_all) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert len(list_analyzed_games(db, "testuser")) == 50
