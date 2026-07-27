@@ -212,6 +212,10 @@ reworked explain prompt keeps serving old cached explanations until
 the user hits Regenerate. Either include a version in the key or
 document the asymmetry as intended.
 
+Planned fix: the key gains a version, and both versions become
+content fingerprints instead of hand-bumped strings —
+[future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md).
+
 ### 13. `analyze` by game id skips ownership and dedupe
 
 `routes.py:232-240`: the `game_ids` path resolves ids with no check
