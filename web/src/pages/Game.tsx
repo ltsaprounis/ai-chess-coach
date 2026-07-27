@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Chess } from "chess.js";
 import { useEffect, useMemo, useState } from "react";
 import { Chessboard } from "react-chessboard";
@@ -74,6 +74,22 @@ export default function Game() {
       )
     : undefined;
   const { state: explainState, explain } = useExplain();
+
+  // Queue analysis for this one game. A mutation (like the Games and
+  // Coach pages), not a fire-and-forget fetch: `analyzing` — which
+  // drives the 1s poll below — must flip only when the server actually
+  // enqueued the game, so a failed POST (409 run active, 503 no
+  // engine) surfaces as an error instead of polling forever for an
+  // analysis that never started.
+  const analyze = useMutation({
+    mutationFn: (vars: { username: string; gameId: string }) =>
+      api.analyze(vars.username, { gameIds: [vars.gameId] }),
+    onSuccess: (outcome) => {
+      if (outcome.queued > 0) {
+        setAnalyzing(true);
+      }
+    },
+  });
 
   const { fens, moveSquares } = useMemo(() => {
     const chess = new Chess();
@@ -229,16 +245,18 @@ export default function Game() {
             </p>
           )}
           {!evals && (
-            <button
-              type="button"
-              disabled={analyzing}
-              onClick={() => {
-                setAnalyzing(true);
-                void api.analyze(data.username, { gameIds: [data.id] });
-              }}
-            >
-              {analyzing ? "Analyzing…" : "Analyze this game"}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={analyzing || analyze.isPending}
+                onClick={() =>
+                  analyze.mutate({ username: data.username, gameId: data.id })
+                }
+              >
+                {analyzing ? "Analyzing…" : "Analyze this game"}
+              </button>
+              {analyze.isError && <p role="alert">{analyze.error.message}</p>}
+            </>
           )}
 
           <section className="panel engine-panel">
