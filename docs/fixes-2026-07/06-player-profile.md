@@ -1,5 +1,9 @@
 # 06 — Player profile (finding 11) — parked for a later iteration
 
+**Status: not started, by decision. Its prerequisites (docs 03 and
+04) both settled on 2026-07-25, so it is unblocked for whichever
+iteration picks it up.**
+
 ## What and why
 
 The durable artifact other features embed:

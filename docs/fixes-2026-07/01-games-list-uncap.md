@@ -1,5 +1,7 @@
 # 01 — Slim the games list row and remove the 2000-game cap
 
+**Status: shipped 2026-07-25 in `f90f97e` (wave 1).**
+
 ## Symptom
 
 `web/src/api.ts` `allGames()` stops at 2,000 games. The Dashboard's

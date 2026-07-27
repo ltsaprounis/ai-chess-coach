@@ -684,6 +684,12 @@ export interface components {
             window_end: number | null;
             /** Time Class */
             time_class: ("bullet" | "blitz" | "rapid" | "daily") | null;
+            /** Requested Since */
+            requested_since?: number | null;
+            /** Requested Until */
+            requested_until?: number | null;
+            /** Games In Scope */
+            games_in_scope?: number | null;
             record: components["schemas"]["Record"];
             /** Overall Acpl */
             overall_acpl: number;

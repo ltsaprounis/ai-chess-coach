@@ -1,5 +1,7 @@
 # 05 — Remove the inert `LlmConfig.max_tokens`
 
+**Status: shipped 2026-07-25 in `f90f97e` (wave 1).**
+
 ## Symptom
 
 `LlmConfig.max_tokens` (`domain.py`) is read by no shipped

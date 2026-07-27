@@ -1,5 +1,10 @@
 # 04 — Give the report the engine tool (finding 9)
 
+**Status: shipped 2026-07-25 in `8c340d4` (wave 3), verified by
+stubbed-SDK tests and boundary review. The first live run
+(2026-07-27) exposed a gap — the tool was available but the prompt
+carried no FENs to feed it — fixed by the wave-5 follow-up below.**
+
 ## Symptom
 
 The report path is `complete()` with `max_turns=1` and no tools, so
@@ -82,3 +87,28 @@ instruction-block addition; report cache behavior unchanged.
   If the Coach page's pending state feels too long on real data,
   note it — streaming the report is a separate feature, not this
   one.
+
+## Live-run follow-up (wave 5)
+
+The first live run (2026-07-27, Copilot agent, 45 s, 450 analyzed
+rapid games) confirmed the machinery and exposed two defects in how
+the prompt meets the tool. Wave 5 fixes both; the coverage half of
+that wave lives in [07-analysis-coverage.md](07-analysis-coverage.md).
+
+- **The prompt carried no FENs.** `analyze_position` takes a FEN, and
+  the rendered report contained none — `CriticalPosition.fen` existed
+  all along but `_turning_point_entry` never rendered it. The tool
+  was available and structurally unusable: every "engine preferred X"
+  in the output was the stored `best` field, and no entry could say
+  *why* a move lost. Fix: render the FEN on each turning-point entry
+  (backticked, as the explain prompt renders positions).
+- **The verification instruction was defensive.** "Check any line
+  before asserting it" is satisfied by asserting nothing new, which
+  is exactly what the model did. Fix: affirmative and scoped — for
+  each turning point the brief features, run the tool on that entry's
+  FEN and state the refutation; the scope keeps the calls within
+  `_REPORT_MAX_TURNS`.
+
+One `PROMPT_VERSION` bump ("2026-07-fen-coverage") covers this
+follow-up and 07's coverage statement, keeping the snapshot churn to
+one readable diff per the README's sequencing rule.

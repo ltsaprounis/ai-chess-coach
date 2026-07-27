@@ -25,9 +25,13 @@ opening) and its judgment counts (19,018 player moves).
 
 ## Status
 
-Findings 1-8, 10 and 12 shipped in July 2026 (P0, P0b, P1 and the
-report cache). Findings 9 and 11 are still open, and the line numbers
-in the table below refer to the code as it stood before the rework.
+Findings 1-10 and 12 shipped in July 2026: the rework itself
+(`1548790`), then the follow-up iteration in
+[fixes-2026-07/](fixes-2026-07/README.md) (waves 1-3, ending
+`8c340d4`, which gave the report path the engine tool). Finding 11
+(the player profile) is the only one still open, parked for a later
+iteration. The line numbers in the table below refer to the code as
+it stood before the rework.
 
 The repertoire semantics that finding 1 turns on are now stated once
 in [06-coach.md](06-coach.md) and implemented twice against that
@@ -58,8 +62,9 @@ Two notes for whoever picks up 11. The turning-point entries still
 carry no stored engine PV — deliberately: finding 9 gave the report
 run the analyst tool instead, so the model verifies a refutation
 live rather than trusting a line computed at analysis time, closing
-the part of finding 6 that had stayed open. And the family rollup keys on the student's own first three moves
-rather than on "first moves plus ECO, falling back to the name root"
+the part of finding 6 that had stayed open. And the family rollup
+keys on the student's own first three moves rather than on "first
+moves plus ECO, falling back to the name root"
 as sketched below: the lichess names turned out too coarse for a
 name-based fallback (82 variations sit under "Queen's Pawn Game",
 spanning 36 distinct move orders), while the student's own moves are

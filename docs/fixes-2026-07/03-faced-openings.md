@@ -1,5 +1,10 @@
 # 03 — Chosen vs faced: the "What you face" split
 
+**Status: shipped 2026-07-25 in `d2795a1` (wave 2); drill-through
+verified 229/229 families on the real DB. The revisit clause is
+live: on real data, faced-family labels are coarse (anti-Pirc
+systems label as "Pirc Defense") — revisit if it confuses.**
+
 ## Symptom
 
 The rework split the repertoire by color and added the `system` /

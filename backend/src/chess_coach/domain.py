@@ -308,6 +308,16 @@ class PlayerReport(BaseModel):
     window_start: int | None  # epoch seconds of the oldest game covered
     window_end: int | None  # epoch seconds of the newest
     time_class: TimeClass | None  # the filter applied; None = all mixed
+    # The scope the caller asked for, as opposed to what analysis covers:
+    # requested_* are the window bounds of the request (None = unbounded)
+    # and games_in_scope counts every stored game matching the same
+    # filters, analyzed or not. Together they let the prompt state
+    # coverage ("450 of 1,010 games in the window are analyzed") instead
+    # of presenting the analyzed span as if it were the whole story.
+    # None throughout = the caller supplied no scope information.
+    requested_since: int | None = None
+    requested_until: int | None = None
+    games_in_scope: int | None = None
     record: Record
     overall_acpl: float  # total loss ÷ player_moves
     phases: dict[Phase, PhaseStats]

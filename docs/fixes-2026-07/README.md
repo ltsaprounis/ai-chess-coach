@@ -13,14 +13,15 @@ feature doc so implementers don't guess.
 
 ## Work items
 
-| # | Doc | What | Components (agents) | Pri |
-|---|-----|------|---------------------|-----|
-| 1 | [01-games-list-uncap.md](01-games-list-uncap.md) | Slim `GameSummary`, remove the 2000-game cap | domain (main), storage-dev, api-dev, frontend-dev | P0 |
-| 2 | [02-termination-backfill.md](02-termination-backfill.md) | Full re-sync path so `Game.termination` backfills | api-dev, frontend-dev | P1 |
-| 3 | [03-faced-openings.md](03-faced-openings.md) | Chosen-vs-faced split in the repertoire | domain (main), storage-dev, coach-dev, frontend-dev | P1 |
-| 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 |
-| 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 |
-| 6 | [06-player-profile.md](06-player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 |
+| # | Doc | What | Components (agents) | Pri | Status |
+|---|-----|------|---------------------|-----|--------|
+| 1 | [01-games-list-uncap.md](01-games-list-uncap.md) | Slim `GameSummary`, remove the 2000-game cap | domain (main), storage-dev, api-dev, frontend-dev | P0 | shipped `f90f97e` |
+| 2 | [02-termination-backfill.md](02-termination-backfill.md) | Full re-sync path so `Game.termination` backfills | api-dev, frontend-dev | P1 | shipped `f90f97e`; backfill run and verified (8,149/8,149 non-NULL) |
+| 3 | [03-faced-openings.md](03-faced-openings.md) | Chosen-vs-faced split in the repertoire | domain (main), storage-dev, coach-dev, frontend-dev | P1 | shipped `d2795a1`; label-coarseness revisit clause open |
+| 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 | shipped `8c340d4`; live run 2026-07-27 exposed the FEN gap → wave-5 follow-up |
+| 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 | shipped `f90f97e` |
+| 6 | [06-player-profile.md](06-player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | parked — a later iteration |
+| 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | wave 5 in progress (report/prompt slice, with 04's live-run follow-up) |
 
 ## Decisions already made
 
@@ -59,20 +60,28 @@ delegated. That is the standing rule from `.claude/CLAUDE.md`; last
 iteration every serious defect appeared in the seams, not the
 slices.
 
-- **Wave 1 (parallel):** 01, 02, 05. Disjoint backend surfaces.
-  The frontend slices of 01 and 02 both touch `Games.tsx`, so run
-  them sequentially through frontend-dev (01 first).
-- **Wave 2:** 03. Touches `storage/games.py`, `coach/report.py`,
-  `coach/prompt.py`, `openings.ts` — keep it off Wave 1's files.
-- **Wave 3:** 04. Edits `coach/prompt.py` and the snapshot again;
-  after 03 so `PROMPT_VERSION` and the snapshot churn once per
-  wave, not per keystroke.
+- **Wave 1 (parallel; shipped `f90f97e`):** 01, 02, 05. Disjoint
+  backend surfaces. The frontend slices of 01 and 02 both touch
+  `Games.tsx`, so run them sequentially through frontend-dev (01
+  first).
+- **Wave 2 (shipped `d2795a1`):** 03. Touches `storage/games.py`,
+  `coach/report.py`, `coach/prompt.py`, `openings.ts` — keep it off
+  Wave 1's files.
+- **Wave 3 (shipped `8c340d4`):** 04. Edits `coach/prompt.py` and
+  the snapshot again; after 03 so `PROMPT_VERSION` and the snapshot
+  churn once per wave, not per keystroke.
 - **Wave 4 (parked — a later iteration):** 06. Reuses 03's
   aggregation and 04's provider path; do not start it before both
   settle, and not in this iteration.
+- **Wave 5:** 04's live-run follow-up (turning-point FENs,
+  affirmative verification rule) + 07's report/prompt slice
+  (coverage statement). One wave because both edit
+  `coach/prompt.py` and the snapshot: one `PROMPT_VERSION` bump
+  ("2026-07-fen-coverage"), one readable diff. 07's
+  analyze-endpoint and Coach-page slices follow separately.
 
-`PROMPT_VERSION` bumps in waves 2 and 3; each bump invalidates the
-report cache by design. That is expected, not a regression.
+`PROMPT_VERSION` bumps in waves 2, 3 and 5; each bump invalidates
+the report cache by design. That is expected, not a regression.
 
 ## Standing guard rails (do not weaken)
 

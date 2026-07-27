@@ -142,6 +142,10 @@ class PlayerReport(BaseModel):
     username: str; games_analyzed: int; player_moves: int
     window_start: int | None; window_end: int | None
     time_class: TimeClass | None      # the filter applied; None = all
+    requested_since: int | None; requested_until: int | None
+    games_in_scope: int | None        # stored games matching the same
+                                      # filters, analyzed or not — the
+                                      # coverage denominator
     record: Record; overall_acpl: float
     phases: dict[Phase, PhaseStats]
     judgment_counts: dict[Judgment, int]

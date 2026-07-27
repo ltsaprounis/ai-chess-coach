@@ -9,10 +9,19 @@ interface. This is the only component that talks to an LLM API.
 ```python
 # Pure aggregation — input assembled by the API layer from storage.
 # `time_class` is the filter the caller applied, recorded so the
-# prompt can state the scope of its own numbers; the window bounds are
-# derived from the games themselves.
+# prompt can state the scope of its own numbers; the *covered* window
+# bounds are derived from the games themselves. `requested_since`/
+# `requested_until` are the bounds the caller asked for, and
+# `games_in_scope` is storage's count of every stored game matching
+# the same filters, analyzed or not — copied onto the report so the
+# prompt can state coverage rather than presenting the analyzed span
+# as the requested one. All default to None: with no scope info the
+# report (and prompt) render exactly as before.
 def build_report(username: str, games: list[AnalyzedGame], *,
-                 time_class: TimeClass | None = None) -> PlayerReport
+                 time_class: TimeClass | None = None,
+                 requested_since: int | None = None,
+                 requested_until: int | None = None,
+                 games_in_scope: int | None = None) -> PlayerReport
 # AnalyzedGame: domain composite = Game + GameAnalysis + Opening|None
 
 # Deterministic markdown template, also shown/copyable in the UI.
@@ -202,6 +211,21 @@ player's reply is visible alongside the opponent's line). The chosen
 table is the player's repertoire; the faced table is the coaching
 target for "learn a response", never "stop playing this".
 
+### Coverage is stated, not implied
+
+The report aggregates analyzed games only, and the first live run
+showed why that must be said out loud: a "last 6 months" request over
+1,010 games silently became a report on the 450 recent ones that had
+analysis, presented under a window line that made the shrunken span
+look like the request. When the caller supplies them, the prompt's
+student section states the requested window alongside the covered
+span, and renders coverage as "N of M games in scope"; when analysis
+covers less than the scope it adds an explicit caveat that the
+remaining games are unanalyzed and the figures describe only the
+analyzed span — which is what lets the instruction block's honesty
+rule actually bite. With no scope information (`None` throughout) the
+section renders as it always did.
+
 ### Judgment counts carry their denominator
 
 `PlayerReport.player_moves` is the denominator for `judgment_counts`,
@@ -229,9 +253,12 @@ distinguishable from a coup de grâce.
 The engine's principal variation would be the natural companion to
 `best`, but only a live engine call produces a trustworthy one, so
 entries still state the move, not a stored refutation line. The
-refutation comes from the run instead: `complete` carries the engine
-tool (see Providers), and the instruction block tells the model to
-verify any concrete line with it before asserting it.
+refutation comes from the run instead: each rendered entry includes
+the position's FEN, `complete` carries the engine tool (see
+Providers), and the instruction block directs the model to verify the
+turning points it cites. The FEN is load-bearing — the first live run
+proved a tool that takes a FEN is unusable from a prompt that
+contains none, and the model correctly asserted nothing new.
 
 ### Error patterns are counted, not narrated
 
@@ -275,11 +302,16 @@ weaknesses, and carries the rules the data alone cannot enforce:
   a club player, pawns never centipawns, the idea before the number.
 - **Honesty.** Say when the data does not support a conclusion instead
   of filling the section anyway.
-- **Verification.** When the `analyze_position` tool is available,
-  check any concrete line with it before asserting it; never present
-  an unverified variation as fact. (The template is identical either
-  way — the cache is keyed on `PROMPT_VERSION`, not tool
-  availability — so the rule is phrased conditionally.)
+- **Verification.** When the `analyze_position` tool is available:
+  for each turning point the brief features, run the tool on that
+  entry's FEN and state the refutation — what the played move loses
+  to, not just the better move's name — and check any other concrete
+  line before asserting it. Never present an unverified variation as
+  fact. The rule is affirmative but scoped to the *cited* positions:
+  the run budget affords a handful of engine calls, not one per
+  rendered entry. It stays conditional on tool availability because
+  the same template serves analyst-less runs — the cache is keyed on
+  `PROMPT_VERSION`, not tool availability.
 
 ## Providers
 

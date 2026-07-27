@@ -1,5 +1,8 @@
 # 02 — Full re-sync so `Game.termination` backfills
 
+**Status: shipped 2026-07-25 in `f90f97e` (wave 1). The backfill
+itself ran on 2026-07-25: all 8,149 stored games verified non-NULL.**
+
 ## Symptom
 
 `Game.termination` (migration 004) is NULL on every game stored

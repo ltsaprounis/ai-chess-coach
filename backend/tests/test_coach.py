@@ -108,6 +108,27 @@ def test_build_report_records_time_class_filter() -> None:
     assert build_report("testuser", []).time_class is None
 
 
+def test_build_report_copies_scope_kwargs_onto_report() -> None:
+    """docs/06-coach.md: `requested_since`/`requested_until`/
+    `games_in_scope` carry no aggregation logic -- `build_report` copies
+    them verbatim onto the report, and all three default to None."""
+    report = build_report(
+        "testuser",
+        [],
+        requested_since=1_767_225_600,
+        requested_until=1_785_110_400,
+        games_in_scope=30,
+    )
+    assert report.requested_since == 1_767_225_600
+    assert report.requested_until == 1_785_110_400
+    assert report.games_in_scope == 30
+
+    defaults = build_report("testuser", [])
+    assert defaults.requested_since is None
+    assert defaults.requested_until is None
+    assert defaults.games_in_scope is None
+
+
 def test_openings_sorted_worst_first() -> None:
     # Impact (games x win-rate deficit), not raw win rate: the 5-game
     # all-loss line must outrank the 2-game all-win line.
@@ -511,8 +532,21 @@ def test_render_prompt_matches_snapshot() -> None:
     and still render the same string twice. Regenerate deliberately
     with `UPDATE_SNAPSHOTS=1 uv run pytest -k snapshot`, then read the
     diff of `testdata/coach_prompt.md` as the review artifact.
+
+    Scope info is passed (a requested window plus a `games_in_scope`
+    larger than the scenario's 19 games) so the snapshot exercises the
+    coverage path -- the "N of M" line and the partial-coverage caveat
+    (docs/06-coach.md, "Coverage is stated, not implied") -- rather than
+    the scope-free rendering already covered by
+    test_scope_free_prompt_renders_with_no_coverage_lines.
     """
-    report = build_report("testuser", scenario_games())
+    report = build_report(
+        "testuser",
+        scenario_games(),
+        requested_since=1_767_225_600,  # 2026-01-01
+        requested_until=1_785_110_400,  # 2026-07-27
+        games_in_scope=30,  # > 19 analyzed, so the caveat renders
+    )
     prompt = render_prompt(report)
 
     assert prompt == render_prompt(report), "render_prompt is not deterministic"
@@ -548,6 +582,80 @@ def test_empty_report_prompt_has_no_empty_sections() -> None:
     assert "Trend" not in prompt
     assert "How games end" not in prompt
     assert "Recurring error patterns" not in prompt
+
+
+# --- scope/coverage rendering (docs/06-coach.md, "Coverage is stated,
+# --- not implied") ----------------------------------------------------
+
+
+def test_scope_free_prompt_renders_with_no_coverage_lines() -> None:
+    """With `requested_since`/`requested_until`/`games_in_scope` all None
+    (the default), the section must render exactly as it always did --
+    the hard backward-compatibility requirement docs/06-coach.md states.
+    """
+    report = build_report("testuser", scenario_games())
+    prompt = render_prompt(report)
+
+    assert "Requested:" not in prompt
+    assert "Coverage:" not in prompt
+    assert "not engine-analyzed" not in prompt
+
+
+def test_full_coverage_renders_n_of_n_with_no_caveat() -> None:
+    report = build_report(
+        "testuser",
+        scenario_games(),
+        games_in_scope=19,  # == games_analyzed
+    )
+    prompt = render_prompt(report)
+
+    assert "Coverage: 19 of 19 games in scope are analyzed" in prompt
+    assert "not engine-analyzed" not in prompt
+
+
+def test_partial_coverage_renders_caveat() -> None:
+    report = build_report("testuser", scenario_games(), games_in_scope=25)
+    prompt = render_prompt(report)
+
+    assert "Coverage: 19 of 25 games in scope are analyzed" in prompt
+    assert (
+        "Note: the other 6 games in scope are not engine-analyzed; every "
+        "figure below describes only the analyzed span." in prompt
+    )
+
+
+def test_requested_window_handles_one_sided_bounds() -> None:
+    since_only = render_prompt(
+        build_report("testuser", scenario_games(), requested_since=1_767_225_600)
+    )
+    assert "- Requested: since 2026-01-01" in since_only
+
+    until_only = render_prompt(
+        build_report("testuser", scenario_games(), requested_until=1_785_110_400)
+    )
+    assert "- Requested: until 2026-07-27" in until_only
+
+    both = render_prompt(
+        build_report(
+            "testuser",
+            scenario_games(),
+            requested_since=1_767_225_600,
+            requested_until=1_785_110_400,
+        )
+    )
+    assert "- Requested: 2026-01-01 to 2026-07-27" in both
+
+
+def test_turning_point_entries_carry_their_fen() -> None:
+    """The FEN is what makes `analyze_position` usable from the prompt at
+    all (docs/06-coach.md) -- every rendered turning point must carry
+    its own entry's FEN, backticked, on its own line."""
+    report = build_report("testuser", scenario_games())
+    prompt = render_prompt(report)
+
+    assert report.critical_positions  # the fixture produces turning points
+    for position in report.critical_positions:
+        assert f"FEN: `{position.fen}`" in prompt
 
 
 async def test_agent_sdk_provider_collects_text(

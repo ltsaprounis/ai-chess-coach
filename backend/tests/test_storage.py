@@ -11,6 +11,7 @@ from chess_coach.storage import (
     Db,
     GameFilters,
     ReportKey,
+    count_games,
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
@@ -567,6 +568,71 @@ def test_time_class_filter(db: Db) -> None:
     (stat,) = opening_stats(db, "testuser", time_class="blitz")
     assert stat.games == 1
     assert stat.analyzed_games == 1
+
+
+def test_count_games_time_window_edges(db: Db) -> None:
+    """Mirrors `list_analyzed_games`'s window semantics exactly: `since`
+    inclusive, `until` exclusive — the numerator and denominator behind
+    the report's coverage statement must describe the same scope."""
+    upsert_games(
+        db,
+        [make_game(id="old", end_time=100), make_game(id="recent", end_time=200)],
+    )
+
+    assert count_games(db, "testuser") == 2
+    assert count_games(db, "testuser", since=150) == 1  # only "recent"
+    assert count_games(db, "testuser", until=150) == 1  # only "old"
+    assert count_games(db, "testuser", since=200) == 1  # since is inclusive
+    assert count_games(db, "testuser", until=200) == 1  # until is exclusive
+
+
+def test_count_games_time_class_filter(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="rapid", time_class="rapid"),
+            make_game(id="blitz", time_class="blitz"),
+        ],
+    )
+
+    assert count_games(db, "testuser", time_class="rapid") == 1
+    assert count_games(db, "testuser", time_class="blitz") == 1
+    assert count_games(db, "testuser") == 2
+
+
+def test_count_games_includes_unanalyzed_games(db: Db) -> None:
+    """The denominator counts every stored game, analyzed or not — it
+    must never collapse onto `list_analyzed_games`'s numerator."""
+    upsert_games(
+        db,
+        [
+            make_game(id="analyzed-1", end_time=1),
+            make_game(id="analyzed-2", end_time=2),
+            make_game(id="unanalyzed-1", end_time=3),
+            make_game(id="unanalyzed-2", end_time=4),
+        ],
+    )
+    save_analysis(db, make_analysis(game_id="analyzed-1"))
+    save_analysis(db, make_analysis(game_id="analyzed-2"))
+
+    assert count_games(db, "testuser") == 4
+    assert len(list_analyzed_games(db, "testuser")) == 2
+    assert count_games(db, "testuser") > len(list_analyzed_games(db, "testuser"))
+
+
+def test_count_games_scopes_to_user_with_no_filters(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="a1", username="alice", end_time=1),
+            make_game(id="a2", username="alice", end_time=2),
+            make_game(id="b1", username="bob", end_time=1),
+        ],
+    )
+
+    assert count_games(db, "alice") == 2
+    assert count_games(db, "bob") == 1
+    assert count_games(db, "someone-else") == 0
 
 
 def test_games_missing_opening(db: Db) -> None:

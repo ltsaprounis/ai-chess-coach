@@ -57,7 +57,11 @@ unexpected to 500.
   engine binary is not fatal at startup — analyze returns 503 with a
   `make engine` hint; one run per player at a time (409 otherwise).
 - The coach route reads everything from storage — a game with no
-  analysis is simply excluded from the report.
+  analysis is simply excluded from the report. That exclusion must
+  never be silent: both `/report` and `/coach` pass `build_report`
+  the requested `since`/`until` and storage's `count_games(...)`
+  over the same window/time-class filters, so the report states its
+  own coverage (see 06-coach.md, "Coverage is stated, not implied").
 - Coaching (`POST /players/{u}/coach`) is the most expensive call the
   app makes, so it follows the explain rule: user-triggered **and**
   cached. The window/time-class filters are part of the cache key

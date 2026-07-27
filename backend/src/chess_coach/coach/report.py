@@ -99,8 +99,17 @@ def build_report(
     games: list[AnalyzedGame],
     *,
     time_class: TimeClass | None = None,
+    requested_since: int | None = None,
+    requested_until: int | None = None,
+    games_in_scope: int | None = None,
 ) -> PlayerReport:
-    """Pure aggregation over analyzed games; every figure move-weighted."""
+    """Pure aggregation over analyzed games; every figure move-weighted.
+
+    `requested_since`/`requested_until`/`games_in_scope` carry no
+    aggregation logic of their own -- they are copied verbatim onto the
+    report so the prompt can state coverage (docs/06-coach.md, "Coverage
+    is stated, not implied"). All default to None.
+    """
     summaries = [_summarize_game(g) for g in games]
 
     player_moves = sum(s.player_moves for s in summaries)
@@ -113,6 +122,9 @@ def build_report(
         window_start=min((g.end_time for g in games), default=None),
         window_end=max((g.end_time for g in games), default=None),
         time_class=time_class,
+        requested_since=requested_since,
+        requested_until=requested_until,
+        games_in_scope=games_in_scope,
         record=_record(games),
         overall_acpl=round(player_loss / player_moves, 1) if player_moves else 0.0,
         phases=_phase_stats(summaries),

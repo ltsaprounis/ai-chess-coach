@@ -78,6 +78,14 @@ def list_analyzed_games(db, username: str, *, since: int | None = None,
                         until: int | None = None,
                         time_class: TimeClass | None = None
                         ) -> list[AnalyzedGame]
+def count_games(db, username: str, *, since: int | None = None,
+                until: int | None = None,
+                time_class: TimeClass | None = None) -> int
+#   Total stored games matching the filters, analyzed or not — the
+#   "of 1,010" denominator behind the report's coverage statement
+#   (PlayerReport.games_in_scope). Window semantics are identical to
+#   list_analyzed_games (since inclusive, until exclusive), so the
+#   count and the analyzed list describe the same scope.
 def opening_stats(db, username: str, *, since: int | None = None,
                   until: int | None = None,
                   time_class: TimeClass | None = None) -> list[OpeningStats]

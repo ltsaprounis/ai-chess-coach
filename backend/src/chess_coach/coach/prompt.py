@@ -24,7 +24,7 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-engine-tool"
+PROMPT_VERSION = "2026-07-fen-coverage"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -63,9 +63,12 @@ _INSTRUCTIONS = (
     "- **Honesty.** If the data does not support a conclusion -- too few "
     "games, no sample past the floor -- say so plainly instead of "
     "filling the section anyway.\n"
-    "- **Verification.** When the `analyze_position` tool is available, "
-    "check any concrete line with it before asserting it -- never present "
-    "an unverified variation as fact.\n"
+    "- **Verification.** When the `analyze_position` tool is available: "
+    "for each turning point the brief features, run the tool on that "
+    "entry's FEN and state the refutation -- what the played move loses "
+    "to, not just the better move's name -- and check any other concrete "
+    "line before asserting it. Never present an unverified variation as "
+    "fact.\n"
     "- **Plan.** Close with a two-week training plan sized to the time "
     "controls and volume shown above, not a generic study list."
 )
@@ -97,9 +100,13 @@ def _student_section(report: PlayerReport) -> str:
         "",
         "## The student",
     ]
+    requested = _requested_window_line(report)
+    if requested:
+        lines.append(requested)
     window = _window_line(report)
     if window:
         lines.append(window)
+    lines.extend(_coverage_lines(report))
     lines.append(
         f"- Scope: {report.time_class} only"
         if report.time_class
@@ -129,6 +136,50 @@ def _window_line(report: PlayerReport) -> str | None:
     start = _format_date(report.window_start)
     end = _format_date(report.window_end)
     return f"- Window: {start} to {end}"
+
+
+def _requested_window_line(report: PlayerReport) -> str | None:
+    """The window the caller asked for, alongside the covered span above
+    (docs/06-coach.md, "Coverage is stated, not implied"). Renders
+    whenever either bound is present, handling a one-sided request (only
+    `since`, or only `until`) gracefully; `None` throughout renders
+    nothing, keeping scope-free reports byte-identical to before.
+    """
+    since = report.requested_since
+    until = report.requested_until
+    if since is None and until is None:
+        return None
+    if since is None:
+        assert until is not None  # narrowed: not (since is None and until is None)
+        return f"- Requested: until {_format_date(until)}"
+    if until is None:
+        return f"- Requested: since {_format_date(since)}"
+    return f"- Requested: {_format_date(since)} to {_format_date(until)}"
+
+
+def _coverage_lines(report: PlayerReport) -> list[str]:
+    """Coverage as N of M games in scope, with an explicit caveat when
+    analysis covers less than the requested scope -- the statement that
+    lets the instruction block's honesty rule actually bite
+    (docs/06-coach.md). `games_in_scope is None` (the caller supplied no
+    scope info) renders nothing.
+    """
+    if report.games_in_scope is None:
+        return []
+    verb = "is" if report.games_analyzed == 1 else "are"
+    lines = [
+        f"- Coverage: {report.games_analyzed} of "
+        f"{_plural(report.games_in_scope, 'game')} in scope {verb} analyzed"
+    ]
+    missing = report.games_in_scope - report.games_analyzed
+    if missing > 0:
+        verb = "is" if missing == 1 else "are"
+        lines.append(
+            f"- Note: the other {_plural(missing, 'game')} in scope "
+            f"{verb} not engine-analyzed; every figure below describes "
+            "only the analyzed span."
+        )
+    return lines
 
 
 def _score_line(record: Record) -> str:
@@ -530,6 +581,7 @@ def _turning_point_entry(n: int, p: CriticalPosition) -> str:
     ]
     if p.leading_up:
         lines.append(f"Leading up: {' '.join(p.leading_up)}")
+    lines.append(f"FEN: `{p.fen}`")
     swing = (
         f"{format_eval(p.eval_before_cp, p.eval_before_mate)} to "
         f"{format_eval(p.eval_after_cp, p.eval_after_mate)}"

@@ -42,6 +42,7 @@ from chess_coach.storage import (
     Db,
     GameFilters,
     ReportKey,
+    count_games,
     count_games_needing_analysis,
     games_missing_opening,
     games_needing_analysis,
@@ -501,10 +502,16 @@ def player_report(
     `time_class` restricts to one time control.
     """
     user = username.lower()
+    games_in_scope = count_games(
+        db, user, since=since, until=until, time_class=time_class
+    )
     return build_report(
         user,
         list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
         time_class=time_class,
+        requested_since=since,
+        requested_until=until,
+        games_in_scope=games_in_scope,
     )
 
 
@@ -570,9 +577,9 @@ async def coach_player(
             )
 
     def _load_and_build() -> tuple[str, PlayerReport]:
-        # Runs off the event loop: list_analyzed_games hits storage and
-        # build_report replays every game with python-chess several
-        # times over, which is not cheap at hundreds of games.
+        # Runs off the event loop: list_analyzed_games and count_games hit
+        # storage and build_report replays every game with python-chess
+        # several times over, which is not cheap at hundreds of games.
         games = list_analyzed_games(
             db, user, since=since, until=until, time_class=time_class
         )
@@ -581,7 +588,17 @@ async def coach_player(
                 status_code=409,
                 detail="no analyzed games yet — sync and analyze first",
             )
-        report = build_report(user, games, time_class=time_class)
+        games_in_scope = count_games(
+            db, user, since=since, until=until, time_class=time_class
+        )
+        report = build_report(
+            user,
+            games,
+            time_class=time_class,
+            requested_since=since,
+            requested_until=until,
+            games_in_scope=games_in_scope,
+        )
         return render_prompt(report), report
 
     prompt, report = await run_in_threadpool(_load_and_build)

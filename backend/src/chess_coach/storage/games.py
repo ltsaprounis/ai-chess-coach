@@ -262,6 +262,43 @@ def list_analyzed_games(
     ]
 
 
+def count_games(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> int:
+    """Every stored game matching the filters, analyzed or not.
+
+    The "of 1,010" denominator behind the report's coverage statement
+    (`PlayerReport.games_in_scope`). The WHERE clause mirrors
+    `list_analyzed_games` exactly (`since` inclusive, `until`
+    exclusive) minus the analysis join, so the count and the analyzed
+    list describe the same scope and can never drift apart.
+    """
+    clauses = ["g.username = ?"]
+    params: list[object] = [username]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
+    row = db.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM games AS g
+        WHERE {" AND ".join(clauses)}
+        """,
+        params,
+    ).fetchone()
+    return int(row["n"])
+
+
 def games_missing_opening(db: Db, username: str) -> list[Game]:
     """Games not yet classified (new, or from before openings shipped)."""
     rows = db.execute(

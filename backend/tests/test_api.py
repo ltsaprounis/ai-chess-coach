@@ -593,6 +593,81 @@ def test_report_and_openings_respect_time_window(
     assert blitz["time_class"] == "blitz"
 
 
+def test_report_states_coverage_over_a_window_with_unanalyzed_games(
+    client: TestClient, db_path: Path
+) -> None:
+    """games_in_scope counts every stored game in the window, analyzed or
+    not, and requested_since/requested_until echo the query -- the "N of
+    M" coverage the prompt and (later) the UI rely on to never silently
+    understate the analyzed span (docs/fixes-2026-07/07)."""
+    seed(
+        db_path,
+        [
+            make_game(id="before-window", end_time=50),
+            make_game(id="in-window-analyzed", end_time=150),
+            make_game(id="in-window-unanalyzed", end_time=180),
+            make_game(id="after-window", end_time=300),
+        ],
+        analyzed={"in-window-analyzed"},
+    )
+
+    report: Any = get(
+        client,
+        "/api/players/testuser/report",
+        params={"since": "100", "until": "200"},
+    ).json()
+
+    assert report["requested_since"] == 100
+    assert report["requested_until"] == 200
+    # Both in-window games count, analyzed or not; the two out-of-window
+    # games (before/after) are excluded from the denominator.
+    assert report["games_in_scope"] == 2
+    assert report["games_analyzed"] == 1
+
+
+def test_report_without_filters_still_states_full_history_coverage(
+    client: TestClient, db_path: Path
+) -> None:
+    """A filter-less request still gets a denominator -- games_in_scope
+    is the full stored history, not left None just because the caller
+    passed no since/until/time_class."""
+    seed(
+        db_path,
+        [make_game(id="analyzed-1"), make_game(id="unanalyzed-1", end_time=2)],
+        analyzed={"analyzed-1"},
+    )
+
+    report: Any = get(client, "/api/players/testuser/report").json()
+
+    assert report["requested_since"] is None
+    assert report["requested_until"] is None
+    assert report["games_in_scope"] == 2
+    assert report["games_analyzed"] == 1
+
+
+def test_coach_cache_miss_prompt_states_coverage_when_games_are_unanalyzed(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """A cache-miss /coach run passes the same games_in_scope/requested_*
+    through to build_report as /report does, so the prompt the provider
+    receives states coverage instead of presenting the analyzed games as
+    the whole story."""
+    seed(
+        db_path,
+        [make_game(id="analyzed-1"), make_game(id="unanalyzed-1", end_time=2)],
+        analyzed={"analyzed-1"},
+    )
+
+    body: Any = post(client, "/api/players/testuser/coach").json()
+    assert body["cached"] is False
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.prompts) == 1
+    prompt = provider.prompts[0]
+    assert "- Coverage: 1 of 2 games in scope is analyzed" in prompt
+    assert "the other 1 game in scope is not engine-analyzed" in prompt
+
+
 def test_coach_agents_lists_roster_and_default(client: TestClient) -> None:
     body: Any = get(client, "/api/coach/agents").json()
     assert body["default"] == "claude"
