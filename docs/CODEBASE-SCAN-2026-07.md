@@ -5,13 +5,12 @@ migrations, `scripts/backfill.py`, and every non-test file in `web/src/`,
 plus mechanical checks (import-linter, grep for env reads and
 cross-component imports) and a run of the quality gates.
 
-Status: findings 2, 3, 4 and 8 are fixed on the `scan-fixes` branch
-this report landed with (one commit per fix). Finding 1 is fixed on
-the follow-up `perspective-ids` branch via perspective game ids
-(migration 006; a full re-sync per player backfills the previously
-dropped copies) — the rejected deeper remodel is recorded in
+Status (2026-07-27): findings 1, 2, 3, 4 and 8 are fixed and merged
+to main (`scan-fixes` and `perspective-ids`, one commit per fix; each
+fixed section below names its commit). Finding 1's fix is the
+perspective-id scheme — the rejected deeper remodel is recorded in
 [future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
-The remaining findings are open.
+Open: findings 5, 6, 7 and 9-14.
 
 ## Summary
 
@@ -25,17 +24,19 @@ Findings, most severe first:
 
 1. **Bug** — a game between two tracked players is stored for only the
    first player synced; the second player's copy is silently dropped.
+   **Fixed.**
 2. **Bug** — the Game page's "Analyze this game" button swallows errors
    and can stick at "Analyzing…" forever, polling every second.
+   **Fixed.**
 3. **Bug** — a `Retry-After` header in HTTP-date form crashes ingestion;
-   the delay is also unbounded.
+   the delay is also unbounded. **Fixed.**
 4. **Robustness** — a crashed Stockfish process is recycled into the
-   engine pool and poisons its slot until restart.
+   engine pool and poisons its slot until restart. **Fixed.**
 5. **Robustness** — `/eval` SSE has no mid-stream error event (unlike
    `/explain`).
 6. **Architecture** — `sync_player` does DB writes and opening
    classification on the event loop; large re-syncs stall every
-   concurrent request and SSE stream.
+   concurrent request and SSE stream. **Fixed.**
 7. **Consistency** — the no-analyst Claude provider path doesn't lock
    down built-in tools the way every other provider path does.
 8. Plus seven smaller opportunities (perf of `opening_stats`, missing
@@ -49,6 +50,11 @@ Findings, most severe first:
 ## Bugs
 
 ### 1. Games between two tracked players are dropped for the second player
+
+**Fixed** in `2020a14`: ingestion mints perspective ids
+(`{uuid}:{username}`), migration 006 rewrites existing rows, and the
+raw uuid is kept in `games.chesscom_uuid`. A full re-sync per player
+backfills any copies dropped before the fix.
 
 `games.id` is the chess.com `uuid` and the table's sole primary key
 (`001_initial.sql`), but a row is a *perspective* — it carries
@@ -72,6 +78,9 @@ scope. The docs (02/03) currently don't acknowledge the case.
 
 ### 2. "Analyze this game" swallows errors and sticks forever
 
+**Fixed** in `8ec2163`: the call runs through a mutation; the polling
+flag flips only on a real enqueue and failures render as an alert.
+
 `web/src/pages/Game.tsx:237` fires `void api.analyze(...)` with no
 error handling after setting `analyzing = true`. If the POST fails —
 409 (run already active), 503 (no engine binary), network — the
@@ -83,6 +92,9 @@ pattern. Fix: same `useMutation` treatment, reset `analyzing` on error
 
 ### 3. `Retry-After` parsing can crash a sync; delay unbounded
 
+**Fixed** in `bbdc8cf`: unparseable values fall back to exponential
+backoff; numeric ones clamp into [0, 60] seconds.
+
 `backend/src/chess_coach/ingestion/client.py:38` does
 `float(response.headers.get("Retry-After", 2**attempt))`. RFC 9110
 allows HTTP-date values, which raise `ValueError` and escape as an
@@ -93,6 +105,10 @@ fall back to exponential backoff on parse failure and clamp the sleep.
 ## Robustness
 
 ### 4. Crashed engines are recycled into the pool
+
+**Fixed** in `8fb8e9f`: a worker whose call raised `EngineError` is
+retired and its slot respawns lazily at the next checkout; a failed
+respawn fails fast and keeps the slot.
 
 Both checkout paths in `backend/src/chess_coach/engine/pool.py` return
 the worker unconditionally (`finally: self._idle.put_nowait(engine)`,
@@ -134,6 +150,13 @@ into a `CoachProviderError`.
 ## Architecture / consistency
 
 ### 8. `sync_player` blocks the event loop
+
+**Fixed** in `5f14184`: sync writes, opening classification,
+explain's storage calls, and the per-game analysis save all moved to
+the threadpool. The move surfaced a latent race serialized sqlite3
+does not cover — concurrent `with db:` transactions interleaving
+BEGIN/COMMIT — so `Db` now holds a write lock for the whole
+transaction; reads stay lock-free.
 
 `routes.py:105-129` is `async def` but calls sync sqlite
 (`upsert_games`, `set_opening`) and the CPU-bound `book.classify` loop
