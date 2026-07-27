@@ -1,9 +1,9 @@
 # 07 — Analysis coverage: state it, then let the user fix it
 
 **Status: wave 5 (`c2f9f2c`) shipped the report/prompt slice with
-doc 04's follow-up. Wave 6 in progress: analyze-endpoint filters +
-the backfill CLI (slices 2-3). The Coach-page warning (slice 4)
-remains.**
+doc 04's follow-up. Wave 6 (`0c836f0`) shipped the analyze-endpoint
+filters + the backfill CLI (slices 2-3). The Coach-page warning
+(slice 4) remains.**
 
 ## Symptom
 
@@ -141,6 +141,53 @@ Four slices:
 
 - `backend/scripts/backfill.py` + `make backfill`, per slice 3
   above. Stdlib-only; every count comes from the API.
+
+## Running a backfill
+
+The CLI drives the running backend; the backend does the analysis.
+
+```bash
+make dev-api    # in one terminal, freshly (re)started
+```
+
+```bash
+make backfill ARGS="<user> --since 2026-01-27 --time-class rapid"
+```
+
+Add `--dry-run` to see the remaining count without enqueueing
+anything; `--until YYYY-MM-DD` bounds the window (exclusive, UTC
+midnight); omit all filters to mean the whole archive. Progress
+prints per batch; `done: N game(s) analyzed …` is the end.
+
+Caveats, all learned the practical way:
+
+- **The backend must be running the current code.** Request models
+  ignore unknown fields (pydantic's default), so a server started
+  before the filters existed will not error — it will silently run
+  an *unscoped* newest-first backfill. Restart the backend after
+  pulling backend changes, always.
+- **`make dev-api` reloads on file edits.** A reload aborts the
+  in-flight batch; the CLI then exits with "backend unreachable".
+  Nothing is lost — analyses save per game; re-run to resume. For
+  an unattended overnight run, either leave the repo untouched or
+  start the server without the reloader:
+
+  ```bash
+  cd backend && uv run uvicorn --factory \
+      chess_coach.api:create_app --port 8000
+  ```
+
+- **caffeinate prevents idle sleep, not lid-close sleep.** Keep the
+  lid open (or clamshell with external display and power). The wake
+  assertion belongs to the CLI process: if the CLI exits early, the
+  machine may sleep even though the server still has a batch open.
+- **One run per player is the invariant, not a limitation.** While
+  a batch runs, the UI's analyze actions answer 409 — expected; the
+  CLI reads the same 409 as "batch still running, wait".
+- **Reports do not refresh themselves.** A cached coach report
+  generated before the backfill serves unchanged afterward (by
+  design — coverage is not in the cache key). Use the Coach page's
+  Regenerate after a backfill to get advice over the new coverage.
 
 ## Acceptance
 
