@@ -219,3 +219,41 @@ async def test_retries_on_429_then_succeeds() -> None:
 
     assert archives == [MAY_URL, JUNE_URL]
     assert attempts == 2
+
+
+# RFC 9110 allows an HTTP-date Retry-After, which float() can't parse —
+# it must fall back to backoff (2^attempt = 1.0 on the first retry), not
+# crash the sync. Numeric values are clamped into [0, 60]: a huge value
+# must not park a request for hours, a negative one must not blow up
+# asyncio.sleep.
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [
+        ("Wed, 21 Oct 2026 07:28:00 GMT", 1.0),
+        ("86400", 60.0),
+        ("-5", 0.0),
+    ],
+)
+async def test_retry_after_is_parsed_defensively_and_capped(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str, expected_delay: float
+) -> None:
+    delays: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("chess_coach.ingestion.client.asyncio.sleep", record_sleep)
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": retry_after})
+        return httpx.Response(200, json=fixture("archives.json"))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        archives = await get_archives("TestUser", client=client)
+
+    assert archives == [MAY_URL, JUNE_URL]
+    assert delays == [expected_delay]
