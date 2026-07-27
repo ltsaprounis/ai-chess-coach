@@ -1648,3 +1648,48 @@ async def test_copilot_provider_explain_early_close_disconnects_session(
 def test_copilot_provider_satisfies_protocol() -> None:
     provider: CoachProvider = create_provider(LlmConfig(provider="github-copilot"))
     assert isinstance(provider, CopilotSdkProvider)
+
+
+async def test_copilot_provider_complete_times_out_when_session_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A session that never goes idle or errors (a wedged CLI runtime)
+    must fail the request instead of hanging it forever (scan finding
+    7, docs/CODEBASE-SCAN-2026-07.md)."""
+    captured: dict[str, object] = {}
+    script = [("text", "half an answer, then silence")]  # no idle, no error
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+    monkeypatch.setattr(providers_module, "_SESSION_STALL_TIMEOUT", 0.05)
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    with pytest.raises(CoachProviderError, match="stalled"):
+        await asyncio.wait_for(provider.complete("coach me"), timeout=1)
+    # The timeout path still tears the session down.
+    assert captured["session_disconnected"] is True
+
+
+async def test_copilot_provider_explain_times_out_when_session_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same stall guard for the drain loop: events already streamed
+    stand, then silence surfaces as an error instead of a hang."""
+    captured: dict[str, object] = {}
+    script = [("text", "The bishop was ")]  # never idles
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_copilot_client(script, captured)
+    )
+    monkeypatch.setattr(providers_module, "_SESSION_STALL_TIMEOUT", 0.05)
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    streamed: list[str] = []
+    with pytest.raises(CoachProviderError, match="stalled"):
+
+        async def drain() -> None:
+            async for event in provider.explain("explain", stub_analyst):
+                streamed.append(event.text)
+
+        await asyncio.wait_for(drain(), timeout=1)
+    assert streamed == ["The bishop was "]
+    assert captured["session_disconnected"] is True

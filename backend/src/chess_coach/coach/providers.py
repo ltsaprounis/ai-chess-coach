@@ -235,6 +235,12 @@ _ANALYZE_TOOL_SCHEMA: dict[str, Any] = {
     "required": ["fen"],
 }
 
+# A Copilot session that neither errors nor goes idle (a wedged CLI
+# runtime) would otherwise hang its request forever — the SDK offers no
+# deadline of its own. Generous: a report run with engine tool calls
+# takes minutes, and explain's drain resets the clock on every event.
+_SESSION_STALL_TIMEOUT = 600.0
+
 # What analyze_position returns instead of calling the engine again once the
 # budget is spent — both for the one-time grace round and for every runaway
 # call after it, steering the model to wrap up rather than looping. Shared by
@@ -348,11 +354,17 @@ class CopilotSdkProvider:
                     unsubscribe = session.on(handle_event)
                     try:
                         await session.send(prompt)
-                        await idle.wait()
+                        async with asyncio.timeout(_SESSION_STALL_TIMEOUT):
+                            await idle.wait()
                     finally:
                         unsubscribe()
         except CoachProviderError:
             raise
+        except TimeoutError as exc:
+            raise CoachProviderError(
+                "github-copilot-sdk session stalled — no completion or "
+                f"error within {int(_SESSION_STALL_TIMEOUT)}s"
+            ) from exc
         except Exception as exc:  # runtime missing, process death, transport
             raise CoachProviderError(
                 f"github-copilot-sdk failed: {exc} — is the Copilot CLI "
@@ -453,7 +465,15 @@ class CopilotSdkProvider:
                     unsubscribe = session.on(handle_event)
                     try:
                         await session.send(prompt)
-                        while (item := await queue.get()) is not None:
+                        while True:
+                            # Per-event stall clock: a healthy session
+                            # keeps events coming; only silence times
+                            # out. The yield sits outside the timeout so
+                            # consumer time never counts against it.
+                            async with asyncio.timeout(_SESSION_STALL_TIMEOUT):
+                                item = await queue.get()
+                            if item is None:
+                                break
                             if isinstance(item, Exception):
                                 raise item
                             yield item
@@ -461,6 +481,11 @@ class CopilotSdkProvider:
                         unsubscribe()
         except CoachProviderError:
             raise
+        except TimeoutError as exc:
+            raise CoachProviderError(
+                "github-copilot-sdk session stalled — no event within "
+                f"{int(_SESSION_STALL_TIMEOUT)}s"
+            ) from exc
         except Exception as exc:  # runtime missing, process death, transport
             raise CoachProviderError(
                 f"github-copilot-sdk failed: {exc} — is the Copilot CLI "
