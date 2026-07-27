@@ -23,8 +23,9 @@ serialization once storage work moved onto threads (`f0a3a70`).
 The architecture holds. Both import-linter contracts pass, no component
 imports another, only config touches the environment, and both
 `OpeningStats` producers implement the documented rules with a shared
-agreement test. All gates are green: 241 backend tests, 118 frontend
-tests, ruff, pyright config intact.
+agreement test. All gates were green at scan time: 241 backend tests,
+118 frontend tests, ruff, pyright config intact. (At close-out: 260
+backend tests — every fix carried its own regression tests.)
 
 Findings, most severe first:
 
@@ -284,3 +285,55 @@ pyproject already gates that).
   `resolve()`).
 - Gates: 241 backend tests pass, 118 frontend tests pass, ruff and
   import-linter clean.
+
+## Close-out notes (2026-07-27)
+
+Thirteen of the fourteen findings needed action; twelve are fixed on
+main, one is planned, one is deliberately parked. The work landed in
+three passes — `scan-fixes` (findings 2, 3, 4, 8), `perspective-ids`
+(finding 1), and a main-branch run (11, then the 5/6/7/9/10/13
+hardening sweep) — one commit per fix throughout.
+
+Points worth keeping:
+
+- **The scan's two blind spots were both concurrency.** Neither the
+  transaction-interleaving InterfaceError nor the statement-cache
+  segfault appears in the findings above. Both were latent until
+  fix 8 moved storage work onto worker threads, and each surfaced
+  through the test suite while a later fix landed. The lesson lives
+  in `Db`'s docstring: serialized sqlite3 guards single C calls, not
+  usage patterns — everything on the shared connection now runs
+  under one re-entrant lock, statements fully fetched inside it.
+- **Perspective ids preserved the exit.** Finding 1's cheap fix kept
+  the door open to the rejected remodel: `games.chesscom_uuid` groups
+  the rows a future normalization (or cross-perspective eval reuse)
+  would need, and the id itself parses back into (uuid, username).
+  See
+  [future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
+- **Aggregates at write time, not read time.** Finding 11's shape —
+  derive at save, backfill by migration, serve from summed columns —
+  is the template if any other read-path parsing shows up hot as the
+  archive grows.
+- **SSE error events need names EventSource can hear.** A server-sent
+  event literally named `error` is indistinguishable from the
+  browser's own network-error event, and a cleanly ended stream
+  triggers auto-reconnect; `/eval` therefore ends failures with
+  `engine_error`, and any future SSE endpoint should follow suit.
+- Migrations 006 and 007 apply on the next server start; cached
+  reports and explanations survive both. A player synced before
+  perspective ids only needs a Full re-sync if they shared games
+  with another tracked player (none in the current database).
+
+Remaining:
+
+- **Finding 12 — planned, not scheduled.** Prompt versions become
+  content fingerprints and the explanation cache gains one
+  ([future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md)).
+  Deliberately deferred until the explain prompt next changes
+  materially, so the key change and its cache invalidation land
+  together instead of re-billing every cached explanation for a
+  wording-neutral refactor.
+- **Finding 14 — parked.** Default engine/book paths assume a source
+  checkout; only relevant if the backend is ever distributed, which
+  pyproject's GPL note already gates. Revisit alongside any
+  distribution decision, together with that license question.
