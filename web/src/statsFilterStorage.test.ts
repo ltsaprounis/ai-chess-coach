@@ -26,8 +26,6 @@ const throwingStore = {
   },
 };
 
-const DEFAULTS = { windowDays: null, pickedClass: null };
-
 describe("stored stats filters", () => {
   it("round-trips a stored selection", () => {
     const store = memoryStore();
@@ -47,10 +45,8 @@ describe("stored stats filters", () => {
     });
   });
 
-  it("returns defaults when nothing is stored", () => {
-    expect(getStoredStatsFilters(ALLOWED_DAYS, memoryStore())).toEqual(
-      DEFAULTS,
-    );
+  it("returns null when nothing is stored, for the caller's default", () => {
+    expect(getStoredStatsFilters(ALLOWED_DAYS, memoryStore())).toBeNull();
   });
 
   it("swallows storage failures", () => {
@@ -60,21 +56,19 @@ describe("stored stats filters", () => {
         throwingStore,
       ),
     ).not.toThrow();
-    expect(getStoredStatsFilters(ALLOWED_DAYS, throwingStore)).toEqual(
-      DEFAULTS,
-    );
+    expect(getStoredStatsFilters(ALLOWED_DAYS, throwingStore)).toBeNull();
   });
 
-  it("returns defaults for malformed JSON", () => {
+  it("returns null for malformed JSON", () => {
     const store = memoryStore();
     store.setItem("statsFilters", "{not json");
-    expect(getStoredStatsFilters(ALLOWED_DAYS, store)).toEqual(DEFAULTS);
+    expect(getStoredStatsFilters(ALLOWED_DAYS, store)).toBeNull();
   });
 
-  it("returns defaults for non-object JSON", () => {
+  it("returns null for non-object JSON", () => {
     const store = memoryStore();
     store.setItem("statsFilters", '"blitz"');
-    expect(getStoredStatsFilters(ALLOWED_DAYS, store)).toEqual(DEFAULTS);
+    expect(getStoredStatsFilters(ALLOWED_DAYS, store)).toBeNull();
   });
 
   it("drops a window no longer in the allowed list, keeping the class", () => {

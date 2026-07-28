@@ -16,21 +16,37 @@ export type StoredStatsFilters = {
   pickedClass: string | null;
 };
 
-/** The pre-persistence behavior: all-time, most-played class. */
-const defaults = (): StoredStatsFilters => ({
-  windowDays: null,
-  pickedClass: null,
-});
-
-/** Narrows untrusted parsed JSON field-by-field, so one bad field
- *  (say, a window value dropped from `WINDOWS` in a later release)
- *  falls back alone instead of discarding the whole selection. */
-function narrow(
-  parsed: unknown,
+/**
+ * The stored selection, or null when nothing usable is stored (first
+ * visit, storage blocked, unparseable value) — the caller applies its
+ * own default then. A stored *object* with one bad field (say, a
+ * window value dropped from `WINDOWS` in a later release) degrades
+ * that field alone to null (all-time / auto class) instead of
+ * discarding the whole selection. `allowedDays` is the caller's list
+ * of valid window values (`WINDOWS` in `useStatsFilters.ts` — passed
+ * in rather than imported to keep this module dependency-free).
+ */
+export function getStoredStatsFilters(
   allowedDays: readonly (number | null)[],
-): StoredStatsFilters {
+  store: FilterStore = localStorage,
+): StoredStatsFilters | null {
+  let raw: string | null;
+  try {
+    raw = store.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (raw === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
   if (typeof parsed !== "object" || parsed === null) {
-    return defaults();
+    return null;
   }
   const record = parsed as Record<string, unknown>;
   const rawDays = record.windowDays;
@@ -43,32 +59,6 @@ function narrow(
         : null,
     pickedClass: typeof rawClass === "string" ? rawClass : null,
   };
-}
-
-/**
- * The stored selection, or the defaults when nothing valid is stored
- * or storage is unavailable. `allowedDays` is the caller's list of
- * valid window values (`WINDOWS` in `useStatsFilters.ts` — passed in
- * rather than imported to keep this module dependency-free).
- */
-export function getStoredStatsFilters(
-  allowedDays: readonly (number | null)[],
-  store: FilterStore = localStorage,
-): StoredStatsFilters {
-  let raw: string | null;
-  try {
-    raw = store.getItem(STORAGE_KEY);
-  } catch {
-    return defaults();
-  }
-  if (raw === null) {
-    return defaults();
-  }
-  try {
-    return narrow(JSON.parse(raw), allowedDays);
-  } catch {
-    return defaults();
-  }
 }
 
 export function setStoredStatsFilters(

@@ -11,6 +11,7 @@ import type { GameSummary, TimeClass } from "./api.ts";
 import { type ClassRating, latestRatings } from "./stats.ts";
 import {
   getStoredStatsFilters,
+  type StoredStatsFilters,
   setStoredStatsFilters,
 } from "./statsFilterStorage.ts";
 
@@ -27,6 +28,16 @@ export const WINDOWS = [
 const WINDOW_DAYS: readonly (number | null)[] = WINDOWS.map(
   (window) => window.days,
 );
+
+/** First-visit defaults, before anything is stored: recent form in
+ *  one control rather than an all-time mixed view. `windowDays` must
+ *  be a `WINDOWS` value; a player with no rapid games in the window
+ *  falls back to their most-played class via the `timeClass`
+ *  resolution below. */
+const DEFAULT_FILTERS: StoredStatsFilters = {
+  windowDays: 182,
+  pickedClass: "rapid",
+};
 
 const DAY_SECONDS = 86_400;
 
@@ -61,15 +72,16 @@ export type StatsFiltersState = {
 export function useStatsFilters(
   games: readonly GameSummary[],
 ): StatsFiltersState {
-  // Seeded from localStorage and written back on every pick, so the
-  // selection survives leaving the page (both pages unmount on any
-  // navigation) and reloads, and Dashboard and Coach share one
-  // selection — the "same controls" contract in docs/08-frontend.md.
+  // Seeded from localStorage (falling back to DEFAULT_FILTERS on the
+  // first visit) and written back on every pick, so the selection
+  // survives leaving the page (both pages unmount on any navigation)
+  // and reloads, and Dashboard and Coach share one selection — the
+  // "same controls" contract in docs/08-frontend.md.
   const [windowDays, setWindowDaysState] = useState<number | null>(
-    () => getStoredStatsFilters(WINDOW_DAYS).windowDays,
+    () => (getStoredStatsFilters(WINDOW_DAYS) ?? DEFAULT_FILTERS).windowDays,
   );
   const [pickedClass, setPickedClassState] = useState<string | null>(
-    () => getStoredStatsFilters(WINDOW_DAYS).pickedClass,
+    () => (getStoredStatsFilters(WINDOW_DAYS) ?? DEFAULT_FILTERS).pickedClass,
   );
 
   const setWindowDays = (days: number | null): void => {

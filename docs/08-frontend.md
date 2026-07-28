@@ -118,16 +118,17 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    "show all N" toggle so an all-time window cannot flood the page.
 
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
-   (per class, defaulting to the most-played so stats are never mixed
-   across controls) filters scope the whole page: games-derived stats
-   are filtered client-side, while report, openings, and highlights
-   are re-fetched with the `since` window and `time_class`. The
-   selection persists in localStorage (`statsFilterStorage.ts`) as
-   one selection shared with the Coach page, so navigating away —
-   into a game, say — and back keeps the chosen scope; a stored
-   time control absent from the current window falls back to the
-   most-played as usual. Charts are custom SVG components — no chart
-   library.
+   (per class; never mixed across controls unless "All classes" is
+   picked) filters scope the whole page: games-derived stats are
+   filtered client-side, while report, openings, and highlights are
+   re-fetched with the `since` window and `time_class`. A first
+   visit defaults to the last 6 months of rapid; the selection then
+   persists in localStorage (`statsFilterStorage.ts`) as one
+   selection shared with the Coach page, so navigating away — into
+   a game, say — and back keeps the chosen scope. A picked time
+   control absent from the current window (default rapid included,
+   for a player with no rapid games) falls back to the most-played.
+   Charts are custom SVG components — no chart library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback). The same time-window and
