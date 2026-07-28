@@ -28,7 +28,6 @@ thresholds:        # centipawn loss per judgment
 #       label: Claude
 #       provider: claude-agent-sdk
 #       model: claude-opus-4-8
-#       max_tokens: 4096
 #     - id: copilot
 #       label: Copilot
 #       provider: github-copilot
