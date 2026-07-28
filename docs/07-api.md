@@ -65,8 +65,12 @@ unexpected to 500.
   Archive-scale backfills ride this endpoint too:
   `backend/scripts/backfill.py` (`make backfill`) loops scoped
   requests until `queued=0, remaining=0`, treating 409 as "batch
-  still running". It is an HTTP client only — it never touches the
-  DB or imports components (docs/fixes-2026-07/07-analysis-coverage.md).
+  still running", and follows `analyze/progress` for the per-game
+  x/X line — a second consumer of that stream besides the UI, and a
+  purely optional one: if the stream drops it falls back to the 409
+  poll, which is the authoritative liveness signal. It is an HTTP
+  client only — it never touches the DB or imports components
+  (docs/fixes-2026-07/07-analysis-coverage.md).
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report. That exclusion must
   never be silent: both `/report` and `/coach` pass `build_report`

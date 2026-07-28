@@ -158,8 +158,35 @@ make backfill ARGS="<user> --since 2026-01-27 --time-class rapid"
 
 Add `--dry-run` to see the remaining count without enqueueing
 anything; `--until YYYY-MM-DD` bounds the window (exclusive, UTC
-midnight); omit all filters to mean the whole archive. Progress
-prints per batch; `done: N game(s) analyzed …` is the end.
+midnight); omit all filters to mean the whole archive.
+`--max-games N` stops after roughly N games (a smoke test that
+proves the whole path in a minute); `--log-every S` sets how often
+progress lines land when output is redirected (default 30s).
+
+Progress is reported at two granularities, because a batch is 100
+games and an hour is a long time to look at nothing:
+
+```
+[07:12:00] scope: <user> · rapid · since 2026-01-27 · http://localhost:8000
+[07:12:00] 1,445 game(s) need analysis
+[07:12:00] batch 1: analyzing 100 · 1,345 left after it
+[07:19:31] batch 1 · games 47/100 · overall 47/1,445 (3%) · 9.6s/game · ETA …
+[07:28:04] batch 1 done: 100 analyzed in 16m 04s · overall 100/1,445 (6%) …
+…
+[10:41:22] done: 1,445 game(s) analyzed in 15 batch(es) over 3h 29m
+```
+
+The per-game line comes from the same `analyze/progress` SSE stream
+the Coach page watches (a dropped stream degrades to the 409 poll,
+never to a wrong answer). On a terminal it rewrites one line live;
+redirected to a file it prints every `--log-every` seconds, so a
+night's run leaves a readable log rather than 8,000 lines. Batch
+totals are the server's own counts — the drop in `queued +
+remaining` between requests, i.e. games actually *saved*, not games
+enqueued. Games the engine fails on stay in scope and get retried
+by the next batch; the line says so (`98 of 100 analyzed, 2 still
+unanalyzed`), and two consecutive batches that save nothing abort
+the run instead of retrying the same failures until morning.
 
 Caveats, all learned the practical way:
 
@@ -168,6 +195,13 @@ Caveats, all learned the practical way:
   before the filters existed will not error — it will silently run
   an *unscoped* newest-first backfill. Restart the backend after
   pulling backend changes, always.
+- **`storage.db_path` is relative to the server's working
+  directory.** `make dev-api` runs from `backend/`, so the archive
+  lives in `backend/data/coach.sqlite3`; a server started from the
+  repo root (the `.claude/launch.json` preview config does exactly
+  that) opens an empty `data/coach.sqlite3` instead and the
+  backfill cheerfully reports "nothing to do". Check the game count
+  before trusting a zero: `curl -s localhost:8000/api/players`.
 - **`make dev-api` reloads on file edits.** A reload aborts the
   in-flight batch; the CLI then exits with "backend unreachable".
   Nothing is lost — analyses save per game; re-run to resume. For
