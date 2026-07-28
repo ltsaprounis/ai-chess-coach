@@ -5,8 +5,9 @@ per-position `ucinewgame` at both call sites, `engine.eval_timeout`
 containment with a force-kill retire path, and an `analysis_version`
 column (stored rows grandfathered as version 1, current version 2)
 so `games_needing_analysis` re-queues every pre-fix row. Re-analysis
-of the stored games is the remaining step. Original report follows,
-unchanged. The
+of all 1,202 stored games completed the same day — see the addendum
+at the end for the results and one default the re-run corrected.
+Original report follows, unchanged. The
 defect lives in [04-engine.md](../04-engine.md)'s component; the
 reasons nobody noticed for forty minutes at a time are spread across
 [07-api.md](../07-api.md) and `backend/scripts/backfill.py`.
@@ -360,3 +361,45 @@ Stated so the next person does not mistake absence for evidence:
 - `ps -o pid,etime,time,%cpu,command -ax | grep '[s]tockfish'` for the
   first check; for the second, watch the stream:
   `curl -sN --max-time 60 localhost:8000/api/players/<user>/analyze/progress`
+
+## Addendum: the 2026-07-28 re-analysis, run after the fix landed
+
+All 1,202 stored games were re-analysed through the production
+`POST /analyze` path (explicit `game_ids`, 13 batches) in 1h58m on
+two workers, with zero hangs and steady ~10-minute batches.
+
+**Determinism confirmed end-to-end.** All five games spot-checked
+against this report's deterministic reference matched to the
+decimal, including the two headline corrections: `29c44e31` 326.1 →
+114.4 and `4decdfd1` 258.6 → 84.6 ACPL. The production pipeline now
+reproduces an independent cleared-engine run bit-identically.
+
+**The honest tail is longer than the containment default assumed.**
+Three games (0.25%) timed out reproducibly at the same ply under the
+initial 30 s `eval_timeout` — deterministic evals make timeouts
+deterministic too, so no number of retries can ever complete such a
+game. Measured cold at depth 16, those positions are expensive but
+honest, not wedged:
+
+| Position (b to move)                  | Time     | Nodes       |
+|---------------------------------------|----------|-------------|
+| `3k3r/...` ply 35 of `e522f5a2`       | 29.30 s  | 44,329,717  |
+| `8/6pk/...` ply 104 of `bdd48a94`     | 45.15 s  | 102,183,207 |
+| `8/p2kRQ2/...` ply 68 of `33375377`   | 103.62 s | 234,816,354 |
+
+All three are sharp tactical positions searching to ±~1000 cp. The
+default therefore moved to 300 s: typical positions stay three
+orders of magnitude inside it, the measured tail clears it with ~3×
+margin (slower machines stretch the tail, hence the margin), and a
+genuine wedge still self-clears in five minutes instead of needing a
+manual `kill`. This resolves the "generality of the 3.8%" caveat
+above in the direction the report warned about: a fixed-depth search
+has a fat tail even on a cold engine, so any bound must sit far
+above the observed maximum, not near the mean.
+
+One cosmetic issue remains open: each force-kill of a wedged worker
+logs an asyncio `InvalidStateError` traceback from python-chess's
+`connection_lost` callback (nine were logged for the nine kills of
+this run, one per kill). Harmless — the pool retired and respawned
+correctly every time — but worth suppressing if it ever misleads
+anyone reading the server log.

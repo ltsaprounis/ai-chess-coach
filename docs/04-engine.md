@@ -92,8 +92,10 @@ Searches are bounded as well as cleared (below). `create_pool` takes
 `eval_timeout` (seconds, injected from config): `analyze_game` bounds
 each position eval by it, and the streaming paths apply it to the gap
 between consecutive engine infos — which also bounds time to first
-info. A healthy search finishes orders of magnitude inside the
-default, so tripping the bound means a wedged process, not a slow
+info. A typical search finishes three orders of magnitude inside the
+default, and the default deliberately clears the honest tail — the
+slowest cold depth-16 search measured across 1,202 real games was
+~104 s — so tripping the bound means a wedged process, not a slow
 position: the call raises `EngineError` and the worker is retired
 exactly as above, except that a wedged engine ignores `quit`, so the
 close step falls back to killing the process (`Engine.kill`, via the

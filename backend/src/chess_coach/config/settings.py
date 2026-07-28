@@ -27,8 +27,10 @@ class EngineConfig(BaseModel):
     multipv: int = Field(default=5, ge=1, le=10)
     # seconds capping each position search and the gap between
     # streamed infos; tripping it means a wedged engine worker that
-    # the pool kills and retires (see docs/04-engine.md).
-    eval_timeout: float = Field(default=30.0, gt=0)
+    # the pool kills and retires (see docs/04-engine.md). The default
+    # sits well above the slowest honest search measured (~104s cold
+    # at depth 16) so it only ever fires on a genuine wedge.
+    eval_timeout: float = Field(default=300.0, gt=0)
 
 
 class ServerConfig(BaseModel):

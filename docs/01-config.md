@@ -24,12 +24,14 @@ class AppConfig(BaseModel):
                                 # multipv=5 (1-10; candidate lines for
                                 # live eval and the coach's engine
                                 # tool — batch analysis stays 1);
-                                # eval_timeout=30.0 (seconds, > 0; cap
-                                # per position search and on the gap
-                                # between streamed infos — tripping it
-                                # means a wedged worker, which the
-                                # pool kills and retires — see
-                                # docs/04-engine.md);
+                                # eval_timeout=300.0 (seconds, > 0;
+                                # cap per position search and on the
+                                # gap between streamed infos —
+                                # tripping it means a wedged worker,
+                                # which the pool kills and retires;
+                                # the default clears the slowest
+                                # honest search measured, ~104s cold —
+                                # see docs/04-engine.md);
                                 # bin_path None -> repo submodule build
     thresholds: Thresholds      # centipawn loss: inaccuracy=50,
                                 # mistake=100, blunder=200
