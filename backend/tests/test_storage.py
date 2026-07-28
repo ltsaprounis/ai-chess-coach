@@ -213,8 +213,8 @@ def test_games_needing_analysis_respects_depth(db: Db) -> None:
 def test_games_needing_analysis_respects_version(db: Db) -> None:
     """A game analysed at the configured depth but under an older
     `analysis_version` still needs (re-)analysis; one saved at the
-    current version does not (docs/future-improvements/
-    engine-search-hangs.md, "Re-analysing the existing rows")."""
+    current version does not (docs/archive/engine-search-hangs.md,
+    "Re-analysing the existing rows")."""
     upsert_games(db, [make_game()])
     save_analysis(db, make_analysis(depth=16), version=1)
     assert games_needing_analysis(db, "testuser", 16, 1) == []
@@ -1200,8 +1200,8 @@ def test_migration_008_grandfathers_existing_analyses_as_version_1(
     reading as version 1 -- the carried-state semantic migration 008's
     DEFAULT deliberately assigns -- so a later engine version bump can
     mark every pre-existing row stale at once, without a data migration
-    re-deriving anything (docs/future-improvements/
-    engine-search-hangs.md, "Re-analysing the existing rows")."""
+    re-deriving anything (docs/archive/engine-search-hangs.md,
+    "Re-analysing the existing rows")."""
     path = tmp_path / "legacy-version.sqlite3"
     legacy = sqlite3.connect(path)
     legacy.executescript(_LEGACY_V5_SCHEMA)

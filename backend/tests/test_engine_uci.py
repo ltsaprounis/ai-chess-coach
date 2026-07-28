@@ -7,7 +7,7 @@ assert `Engine.evaluate`/`stream_infos` pass a fresh `game` token to
 `analyse`/`analysis` on every call, which is what makes python-chess send
 `ucinewgame` before every search and stops a worker's transposition table
 from carrying state across unrelated positions
-(docs/future-improvements/engine-search-hangs.md).
+(docs/archive/engine-search-hangs.md).
 """
 
 import asyncio

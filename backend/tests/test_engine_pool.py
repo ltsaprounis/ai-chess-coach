@@ -238,7 +238,7 @@ async def test_without_a_respawner_the_worker_is_recycled_as_before() -> None:
 async def test_wedged_worker_trips_the_eval_timeout_and_is_killed() -> None:
     """A worker that never answers must not block `analyze_game` forever.
 
-    docs/future-improvements/engine-search-hangs.md: a wedged Stockfish
+    docs/archive/engine-search-hangs.md: a wedged Stockfish
     process can spin at 100% CPU for 20-40 minutes with nothing raising
     an error. `eval_timeout` bounds the wait, and the worker must be
     force-killed (not just cancelled) so it stops burning a core.

@@ -69,7 +69,7 @@ class Engine:
             # A fresh `game` object every call makes python-chess send
             # `ucinewgame` before every search: the engine's transposition
             # table and history never carry state between positions
-            # (docs/future-improvements/engine-search-hangs.md).
+            # (docs/archive/engine-search-hangs.md).
             info = await self._engine.analyse(
                 board, chess.engine.Limit(depth=depth), game=object()
             )
@@ -116,7 +116,7 @@ class Engine:
         closing its pipes makes python-chess's protocol error out
         instead of leaving a caller waiting forever, and stops the
         process from burning a core indefinitely
-        (docs/future-improvements/engine-search-hangs.md). Safe to call
+        (docs/archive/engine-search-hangs.md). Safe to call
         on an already-dead process.
         """
         with suppress(ProcessLookupError):

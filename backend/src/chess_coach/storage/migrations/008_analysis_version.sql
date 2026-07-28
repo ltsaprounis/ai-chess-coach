@@ -3,6 +3,6 @@
 -- The DEFAULT deliberately grandfathers every pre-existing row as
 -- version 1 -- the carried-state semantic that predates versioning --
 -- so a future version bump marks them all stale at once, exactly like
--- a depth bump does (docs/future-improvements/engine-search-hangs.md,
+-- a depth bump does (docs/archive/engine-search-hangs.md,
 -- "Re-analysing the existing rows").
 ALTER TABLE analyses ADD COLUMN analysis_version INTEGER NOT NULL DEFAULT 1;

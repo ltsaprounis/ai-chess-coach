@@ -12,7 +12,10 @@ iteration to that rework; and
 whole-codebase scan, with its open findings; and
 [future-improvements/](future-improvements/) holds designs that were
 evaluated but not built yet — deliberately deferred, or planned and
-not yet scheduled — each with its reasoning. Each
+not yet scheduled — each with its reasoning; and
+[archive/](archive/) holds resolved reports kept for their
+measurements and reasoning (currently the engine search-hangs
+postmortem, whose fix landed 2026-07-28). Each
 component below has its own build plan. Components are decoupled: the API layer is the
 only module that composes them, and everything else communicates through
 the shared domain types and plain function interfaces.

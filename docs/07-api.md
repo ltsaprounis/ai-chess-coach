@@ -68,7 +68,7 @@ unexpected to 500.
   otherwise). A position that exceeds `engine.eval_timeout` surfaces
   as `EngineError`: that one game fails, the run continues, and the
   pool respawns the killed worker — a hang costs seconds now, not a
-  manual kill (docs/future-improvements/engine-search-hangs.md).
+  manual kill (docs/archive/engine-search-hangs.md).
   Archive-scale backfills ride this endpoint too:
   `backend/scripts/backfill.py` (`make backfill`) loops scoped
   requests until `queued=0, remaining=0`, treating 409 as "batch

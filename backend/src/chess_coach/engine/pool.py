@@ -49,7 +49,7 @@ async def _bounded[T](
     suspended waiting for a UCI reply that will never come, and cancelling
     that await alone frees this coroutine but leaves the OS process
     running at 100% CPU forever — the exact failure this bound exists to
-    contain (docs/future-improvements/engine-search-hangs.md). So on
+    contain (docs/archive/engine-search-hangs.md). So on
     expiry we kill the process FIRST — closing its pipes makes
     python-chess's protocol error out — and only then cancel and await
     the task, so the caller never waits past ~`timeout` and no task is
@@ -140,7 +140,7 @@ class AnalysisPool:
         A wedged engine ignores `quit` (it never replies), so a close
         that times out or errors falls back to killing the process —
         otherwise a timed-out worker keeps burning a core forever
-        (docs/future-improvements/engine-search-hangs.md).
+        (docs/archive/engine-search-hangs.md).
         """
         if self._respawn is None:
             self._idle.put_nowait(engine)

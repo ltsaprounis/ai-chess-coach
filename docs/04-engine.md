@@ -101,7 +101,7 @@ exactly as above, except that a wedged engine ignores `quit`, so the
 close step falls back to killing the process (`Engine.kill`, via the
 transport) when the quit does not complete promptly. Without that
 fallback a timed-out worker would keep burning a core forever
-(docs/future-improvements/engine-search-hangs.md).
+(docs/archive/engine-search-hangs.md).
 `AnalysisPool.close` applies the same bounded quit-then-kill
 discipline to every worker, so one wedged engine cannot hang
 shutdown.
@@ -134,7 +134,7 @@ and history heuristics never carry over between positions, making an
 eval a pure function of (position, depth, multipv, binary). Carried
 state is measurably worth ~nothing on ordinary games (~4%) while
 being the cause of unbounded search blow-ups and irreproducible
-evals (docs/future-improvements/engine-search-hangs.md).
+evals (docs/archive/engine-search-hangs.md).
 `ANALYSIS_VERSION` names this semantic: the API layer stores it
 beside each analysis and passes it back into storage queries, so a
 bump marks every older row stale (see [03-storage.md](03-storage.md)).
