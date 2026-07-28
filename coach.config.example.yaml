@@ -42,7 +42,7 @@ server:
                    # browser-preview launcher — change both together
 
 storage:
-  db_path: data/coach.sqlite3   # gitignored; created on demand
+  db_path: data/coach.sqlite3   # repo-root relative; created on demand
 
 # openings:
 #   book_dir: vendor/chess-openings   # default: the repo submodule

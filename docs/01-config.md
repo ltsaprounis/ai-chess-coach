@@ -9,7 +9,9 @@ at paths injected from this config.
 ## Interface
 
 ```python
-DEFAULT_CONFIG_PATH = Path("coach.config.yaml")
+REPO_ROOT: Path  # source-checkout root, from the package location
+
+DEFAULT_CONFIG_PATH = REPO_ROOT / "coach.config.yaml"
 
 class ConfigError(Exception): ...  # invalid config file or environment
 
@@ -53,13 +55,24 @@ class CoachConfig(BaseModel):
 adding `id` + `label`) are domain types — [engine](04-engine.md),
 [coach](06-coach.md), and the [API layer](07-api.md) consume them
 too. The other sub-models (`EngineConfig`, `CoachConfig`,
-`ServerConfig`, `StorageConfig`) are config-local.
+`ServerConfig`, `StorageConfig`, `OpeningsConfig`) are config-local.
 
 Validation beyond field types: agent ids must be non-empty and
 unique, `agents` must not be empty, and `default_agent` must match a
 configured id (when omitted it resolves to the first agent's id).
 The retired top-level `llm:` key fails fast with a migration hint
 pointing at `coach.agents`.
+
+Paths are anchored, never cwd-relative: a relative `storage.db_path`,
+`engine.bin_path`, or `openings.book_dir` is resolved against
+`REPO_ROOT` during validation, so every path the returned
+`AppConfig` carries is absolute (`bin_path` and `book_dir` may also
+stay `None`, resolved to their submodule defaults by the API
+layer) and every entry point — server, scripts,
+tests — opens the same files regardless of working directory.
+Absolute paths pass through untouched. The default `db_path`
+therefore resolves to `<repo root>/data/coach.sqlite3`, and the
+config file itself is looked up at the repo root.
 
 Secrets come from the environment, not the file: `ANTHROPIC_API_KEY`
 is read into `anthropic_api_key` but no shipped provider uses it —

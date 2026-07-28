@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from chess_coach.config import AppConfig, ConfigError, load_config
+from chess_coach.config import (
+    DEFAULT_CONFIG_PATH,
+    REPO_ROOT,
+    AppConfig,
+    ConfigError,
+    load_config,
+)
 
 KEY_ENV = {"ANTHROPIC_API_KEY": "sk-test"}
 
@@ -37,6 +43,36 @@ def test_partial_override_keeps_other_defaults(tmp_path: Path) -> None:
     config = load_config(path, env=KEY_ENV)
     assert config.engine.depth == 20
     assert config.engine.workers == 2
+
+
+def test_default_paths_anchor_at_repo_root(tmp_path: Path) -> None:
+    # Pin REPO_ROOT independently of the parents[4] the package uses,
+    # so a miscounted level fails here rather than passing throughout.
+    assert Path(__file__).resolve().parents[2] == REPO_ROOT
+    assert DEFAULT_CONFIG_PATH == REPO_ROOT / "coach.config.yaml"
+    config = load_config(tmp_path / "nope.yaml", env=KEY_ENV)
+    assert config.storage.db_path == REPO_ROOT / "data" / "coach.sqlite3"
+    assert config.engine.bin_path is None
+    assert config.openings.book_dir is None
+
+
+def test_relative_paths_resolve_against_repo_root(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "storage:\n  db_path: elsewhere/games.sqlite3\n"
+        "engine:\n  bin_path: engines/custom/stockfish\n"
+        "openings:\n  book_dir: vendor/other-book\n",
+    )
+    config = load_config(path, env=KEY_ENV)
+    assert config.storage.db_path == REPO_ROOT / "elsewhere" / "games.sqlite3"
+    assert config.engine.bin_path == REPO_ROOT / "engines" / "custom" / "stockfish"
+    assert config.openings.book_dir == REPO_ROOT / "vendor" / "other-book"
+
+
+def test_absolute_paths_pass_through_unchanged(tmp_path: Path) -> None:
+    db = tmp_path / "games.sqlite3"
+    config = load_config(write(tmp_path, f"storage:\n  db_path: {db}\n"), env=KEY_ENV)
+    assert config.storage.db_path == db
 
 
 def test_invalid_value_raises_config_error(tmp_path: Path) -> None:

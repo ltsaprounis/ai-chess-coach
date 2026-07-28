@@ -8,8 +8,9 @@ wires them together behind an HTTP API and owns all orchestration
 
 1. `load_config()` — [config](01-config.md)
 2. `open_db(cfg.storage.db_path)` — [storage](03-storage.md)
-3. `load_opening_book(Path("vendor/chess-openings"))` —
-   [openings](05-openings.md)
+3. `load_opening_book(cfg.openings.book_dir or _DEFAULT_BOOK_DIR)`
+   — [openings](05-openings.md); the default is the submodule under
+   config's `REPO_ROOT`
 4. `await create_pool(bin_path, cfg.engine.workers,
    cfg.engine.eval_timeout)` — [engine](04-engine.md)
 5. `create_provider(agent, cfg.anthropic_api_key)` for each agent in

@@ -261,12 +261,14 @@ wrong `remaining`). Harmless in single-user use; two lines to tighten.
 
 ### 14. Default engine/book paths assume a source checkout
 
-`app.py:21-24` derives `_REPO_ROOT` via `Path(__file__).parents[4]`,
-which points into `site-packages`' ancestry if the package is ever
-installed as a wheel. Config overrides exist, so this is only a
-packaging landmine — worth a comment or a `importlib.resources`-style
-guard if distribution ever happens (noting the GPL concern in
-pyproject already gates that).
+`config/settings.py:16` derives `REPO_ROOT` via
+`Path(__file__).parents[4]` (moved there from `app.py` when path
+anchoring landed; the code comment this finding asked for exists
+now), which points into `site-packages`' ancestry if the package is
+ever installed as a wheel. Config overrides exist, so this is only a
+packaging landmine — worth an `importlib.resources`-style guard if
+distribution ever happens (noting the GPL concern in pyproject
+already gates that).
 
 ## What was checked and found clean
 

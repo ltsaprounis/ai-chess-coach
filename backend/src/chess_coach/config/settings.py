@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from chess_coach.domain import CoachAgent, Thresholds
 
-DEFAULT_CONFIG_PATH = Path("coach.config.yaml")
+# Source-checkout root (four parents above this file). Relative
+# config paths anchor here, never at the cwd, so the server, scripts,
+# and tests all open the same files no matter where they run from.
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+DEFAULT_CONFIG_PATH = REPO_ROOT / "coach.config.yaml"
 
 
 class ConfigError(Exception):
@@ -38,7 +43,7 @@ class ServerConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    db_path: Path = Path("data/coach.sqlite3")  # created on demand
+    db_path: Path = Path("data/coach.sqlite3")  # repo-root relative; created on demand
 
 
 class OpeningsConfig(BaseModel):
@@ -83,6 +88,19 @@ class AppConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     openings: OpeningsConfig = Field(default_factory=OpeningsConfig)
     anthropic_api_key: str | None = None
+
+    @model_validator(mode="after")
+    def _anchor_paths(self) -> Self:
+        self.storage.db_path = _anchored(self.storage.db_path)
+        if self.engine.bin_path is not None:
+            self.engine.bin_path = _anchored(self.engine.bin_path)
+        if self.openings.book_dir is not None:
+            self.openings.book_dir = _anchored(self.openings.book_dir)
+        return self
+
+
+def _anchored(path: Path) -> Path:
+    return path if path.is_absolute() else REPO_ROOT / path
 
 
 def load_config(

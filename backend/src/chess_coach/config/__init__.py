@@ -2,6 +2,7 @@
 
 from chess_coach.config.settings import (
     DEFAULT_CONFIG_PATH,
+    REPO_ROOT,
     AppConfig,
     CoachConfig,
     ConfigError,
@@ -14,6 +15,7 @@ from chess_coach.config.settings import (
 
 __all__ = [
     "DEFAULT_CONFIG_PATH",
+    "REPO_ROOT",
     "AppConfig",
     "CoachConfig",
     "ConfigError",

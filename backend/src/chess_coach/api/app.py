@@ -3,7 +3,6 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,16 +11,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from chess_coach.api.routes import router
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import CoachProvider, create_provider
-from chess_coach.config import AppConfig, load_config
+from chess_coach.config import REPO_ROOT, AppConfig, load_config
 from chess_coach.engine import create_pool
 from chess_coach.ingestion import UnknownUserError
 from chess_coach.openings import load_opening_book
 from chess_coach.storage import open_db
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_WEB_DIST = _REPO_ROOT / "web" / "dist"
-_DEFAULT_BOOK_DIR = _REPO_ROOT / "vendor" / "chess-openings"
-_DEFAULT_ENGINE_BIN = _REPO_ROOT / "engines" / "stockfish" / "src" / "stockfish"
+_WEB_DIST = REPO_ROOT / "web" / "dist"
+_DEFAULT_BOOK_DIR = REPO_ROOT / "vendor" / "chess-openings"
+_DEFAULT_ENGINE_BIN = REPO_ROOT / "engines" / "stockfish" / "src" / "stockfish"
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
