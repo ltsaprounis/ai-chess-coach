@@ -8,6 +8,9 @@ engine:
   analyze_limit: 100   # max games per "analyze" run (newest first)
   multipv: 5       # candidate lines for live eval and the coach's
                    # engine tool (1-10); batch analysis stays single-PV
+  eval_timeout: 30.0   # seconds capping each position search and the
+                   # gap between streamed infos; tripping it means a
+                   # wedged engine worker that the pool kills and retires
   # bin_path: engines/stockfish/src/stockfish   # default: submodule build
 
 thresholds:        # centipawn loss per judgment

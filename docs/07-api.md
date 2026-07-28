@@ -10,8 +10,8 @@ wires them together behind an HTTP API and owns all orchestration
 2. `open_db(cfg.storage.db_path)` — [storage](03-storage.md)
 3. `load_opening_book(Path("vendor/chess-openings"))` —
    [openings](05-openings.md)
-4. `await create_pool(bin_path, cfg.engine.workers)` —
-   [engine](04-engine.md)
+4. `await create_pool(bin_path, cfg.engine.workers,
+   cfg.engine.eval_timeout)` — [engine](04-engine.md)
 5. `create_provider(agent, cfg.anthropic_api_key)` for each agent in
    `cfg.coach.agents` → `dict[agent_id, CoachProvider]` on
    `app.state.providers` — [coach](06-coach.md). A misconfigured
@@ -38,7 +38,7 @@ run. Active runs are never swept.
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging). Rows are slim `GameSummary` (no pgn/full moves — see docs/03-storage.md), so the frontend can page through the whole archive |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
-| POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
+| POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. "Unanalyzed" includes games whose stored analysis predates `engine.ANALYSIS_VERSION` (enqueue and `remaining` alike), so an engine version bump re-queues stored games automatically. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window and `time_class` |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
@@ -58,10 +58,17 @@ unexpected to 500.
 
 - Sync pipeline per batch: `upsert_games` → `classify` each →
   `set_opening`. Openings classification is cheap; do it at ingest.
-- Analysis flow: pool task resolves → `save_analysis`. Progress
-  events fan out to open SSE connections (sse-starlette). A missing
-  engine binary is not fatal at startup — analyze returns 503 with a
-  `make engine` hint; one run per player at a time (409 otherwise).
+- Analysis flow: pool task resolves → `save_analysis`, stamped with
+  `engine.ANALYSIS_VERSION` — the API layer is the one place that
+  imports the constant and threads it into storage (save and the
+  needing-analysis queries alike); components stay decoupled.
+  Progress events fan out to open SSE connections (sse-starlette). A
+  missing engine binary is not fatal at startup — analyze returns 503
+  with a `make engine` hint; one run per player at a time (409
+  otherwise). A position that exceeds `engine.eval_timeout` surfaces
+  as `EngineError`: that one game fails, the run continues, and the
+  pool respawns the killed worker — a hang costs seconds now, not a
+  manual kill (docs/future-improvements/engine-search-hangs.md).
   Archive-scale backfills ride this endpoint too:
   `backend/scripts/backfill.py` (`make backfill`) loops scoped
   requests until `queued=0, remaining=0`, treating 409 as "batch

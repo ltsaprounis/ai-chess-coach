@@ -8,9 +8,15 @@ from chess_coach.engine.pool import (
     ProgressCallback,
     create_pool,
 )
-from chess_coach.engine.uci import MATE_SCORE, EngineError, PositionEval
+from chess_coach.engine.uci import (
+    ANALYSIS_VERSION,
+    MATE_SCORE,
+    EngineError,
+    PositionEval,
+)
 
 __all__ = [
+    "ANALYSIS_VERSION",
     "MATE_SCORE",
     "AnalysisPool",
     "EngineError",

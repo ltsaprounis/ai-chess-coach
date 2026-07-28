@@ -63,7 +63,7 @@ class StubEngine(Engine):
 
 def make_pool(stub: StubEngine) -> AnalysisPool:
     engines: list[Engine] = [stub]
-    return AnalysisPool(engines)
+    return AnalysisPool(engines, eval_timeout=5.0)
 
 
 async def collect(stream: AsyncIterator[LiveEval]) -> list[LiveEval]:

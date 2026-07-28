@@ -33,6 +33,11 @@ games (
 analyses (
   game_id TEXT PRIMARY KEY REFERENCES games(id),
   depth INTEGER, evals TEXT,         -- JSON list[MoveEval]
+  -- engine.ANALYSIS_VERSION at save time (injected by the API layer;
+  -- storage never imports engine). The DEFAULT grandfathers rows
+  -- saved before versioning existed as version 1 — the carried-state
+  -- semantic — so a version bump marks them all stale at once
+  analysis_version INTEGER NOT NULL DEFAULT 1,
   overall_acpl REAL,                 -- the game's own mean cp loss
   acpl_by_phase TEXT, judgment_counts TEXT,
   -- per-perspective aggregates, derived from evals by save_analysis:
@@ -87,21 +92,27 @@ def get_game(db: Db, game_id: str) -> GameDetail | None
 def list_players(db: Db) -> list[PlayerSummary]  # saved-players picker
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int,
+                           version: int,
                            limit: int | None = None, *,
                            since: int | None = None,
                            until: int | None = None,
                            time_class: TimeClass | None = None
                            ) -> list[Game]
-def count_games_needing_analysis(db, username: str, depth: int, *,
+def count_games_needing_analysis(db, username: str, depth: int,
+                                 version: int, *,
                                  since: int | None = None,
                                  until: int | None = None,
                                  time_class: TimeClass | None = None
                                  ) -> int
-#   The optional window/time-class kwargs scope both functions the
-#   same way as list_analyzed_games/count_games (since inclusive,
-#   until exclusive), so an "analyze this window" run and its
-#   remaining count describe the same games. Newest-first order and
-#   the depth semantics are unchanged.
+#   Needing analysis = no analyses row, or one shallower than
+#   `depth`, or one saved under an `analysis_version` older than
+#   `version` (the caller passes engine.ANALYSIS_VERSION) — so an
+#   engine version bump re-queues every stored game with no endpoint
+#   change. The optional window/time-class kwargs scope both
+#   functions the same way as list_analyzed_games/count_games (since
+#   inclusive, until exclusive), so an "analyze this window" run and
+#   its remaining count describe the same games. Newest-first order
+#   is unchanged.
 def games_missing_opening(db: Db, username: str) -> list[Game]
 def list_analyzed_games(db, username: str, *, since: int | None = None,
                         until: int | None = None,
@@ -134,7 +145,10 @@ def opening_stats(db, username: str, *, since: int | None = None,
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
 # Analysis repo
-def save_analysis(db: Db, analysis: GameAnalysis) -> None
+def save_analysis(db: Db, analysis: GameAnalysis,
+                  version: int) -> None
+#   `version` is engine.ANALYSIS_VERSION, injected by the API layer
+#   like depth/thresholds are — storage records it, never defines it.
 
 # Explanation cache (coach move explanations are expensive; the API
 # layer reads before generating and writes after — one per

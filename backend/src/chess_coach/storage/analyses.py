@@ -11,7 +11,7 @@ def is_player_ply(ply: int, color: Color) -> bool:
     return ply % 2 == 1 if color == "white" else ply % 2 == 0
 
 
-def save_analysis(db: Db, analysis: GameAnalysis) -> None:
+def save_analysis(db: Db, analysis: GameAnalysis, version: int) -> None:
     """Persist the analysis plus its per-perspective aggregates.
 
     The four aggregate columns (player/opening move counts and summed
@@ -19,6 +19,13 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
     re-parsing every analyzed game's evals JSON per request; they are
     derived here, once, from the evals being saved. Migration 007
     backfilled them for rows saved before the columns existed.
+
+    `version` is `engine.ANALYSIS_VERSION`, injected by the API layer
+    exactly like `depth`/thresholds are — storage records the value,
+    never defines it (storage must not import the engine component).
+    Migration 008's DEFAULT grandfathers rows saved before versioning
+    existed as version 1, so a version bump marks them all stale at
+    once for `games_needing_analysis`.
     """
     # The color read runs inside the write transaction: the lock `with
     # db:` takes is what keeps any statement safe against a concurrent
@@ -44,13 +51,14 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
         db.execute(
             """
             INSERT INTO analyses
-                (game_id, depth, evals, overall_acpl,
+                (game_id, depth, evals, analysis_version, overall_acpl,
                  acpl_by_phase, judgment_counts,
                  player_moves, player_loss, opening_moves, opening_loss)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (game_id) DO UPDATE SET
                 depth = excluded.depth,
                 evals = excluded.evals,
+                analysis_version = excluded.analysis_version,
                 overall_acpl = excluded.overall_acpl,
                 acpl_by_phase = excluded.acpl_by_phase,
                 judgment_counts = excluded.judgment_counts,
@@ -63,6 +71,7 @@ def save_analysis(db: Db, analysis: GameAnalysis) -> None:
                 analysis.game_id,
                 analysis.depth,
                 json.dumps([e.model_dump() for e in analysis.evals]),
+                version,
                 analysis.overall_acpl,
                 json.dumps(analysis.acpl_by_phase),
                 json.dumps(analysis.judgment_counts),

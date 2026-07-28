@@ -30,7 +30,9 @@ class EngineOptions(BaseModel):
     depth: int
     thresholds: Thresholds    # domain type; values come from config
 
-async def create_pool(bin_path: Path, workers: int) -> AnalysisPool
+async def create_pool(
+    bin_path: Path, workers: int, eval_timeout: float
+) -> AnalysisPool
 
 class AnalysisPool:
     async def analyze_game(
@@ -66,6 +68,12 @@ class PositionEval(BaseModel):       # white-POV eval of one position
 class EngineError(Exception): ...    # engine failed to start/misbehaved
 
 MATE_SCORE = 10_000                  # domain constant, re-exported here
+
+ANALYSIS_VERSION = 2                 # what a stored eval means; bump on
+                                     # any semantic change so storage
+                                     # can mark older rows stale
+                                     # (1 = carried-state searches,
+                                     #  2 = per-position cleared state)
 ```
 
 All engine start-up and protocol failures surface as `EngineError`,
@@ -79,6 +87,22 @@ pool closes the retired worker (best effort) and spawns a replacement
 at the next checkout; if that respawn fails, the call fails fast and
 the empty slot stays available for the attempt after. `create_pool`
 wires the respawner; `AnalysisPool.close` covers respawned workers.
+
+Searches are bounded as well as cleared (below). `create_pool` takes
+`eval_timeout` (seconds, injected from config): `analyze_game` bounds
+each position eval by it, and the streaming paths apply it to the gap
+between consecutive engine infos — which also bounds time to first
+info. A healthy search finishes orders of magnitude inside the
+default, so tripping the bound means a wedged process, not a slow
+position: the call raises `EngineError` and the worker is retired
+exactly as above, except that a wedged engine ignores `quit`, so the
+close step falls back to killing the process (`Engine.kill`, via the
+transport) when the quit does not complete promptly. Without that
+fallback a timed-out worker would keep burning a core forever
+(docs/future-improvements/engine-search-hangs.md).
+`AnalysisPool.close` applies the same bounded quit-then-kill
+discipline to every worker, so one wedged engine cannot hang
+shutdown.
 
 `stream_eval` powers the live analysis board: it parses the FEN
 eagerly (raising `ValueError` on an invalid one, before any engine
@@ -101,7 +125,17 @@ moves naturally (the engine reports fewer lines).
 Internally each worker holds one engine from
 `chess.engine.popen_uci(bin_path)` (async API) and calls
 `engine.analyse(board, chess.engine.Limit(depth=...))` per position;
-live searches pass `multipv=` through to `engine.analysis(...)`.
+live searches pass `multipv=` through to `engine.analysis(...)`. Both
+calls pass a fresh `game` token every time so python-chess sends
+`ucinewgame` before every search: the engine's transposition table
+and history heuristics never carry over between positions, making an
+eval a pure function of (position, depth, multipv, binary). Carried
+state is measurably worth ~nothing on ordinary games (~4%) while
+being the cause of unbounded search blow-ups and irreproducible
+evals (docs/future-improvements/engine-search-hangs.md).
+`ANALYSIS_VERSION` names this semantic: the API layer stores it
+beside each analysis and passes it back into storage queries, so a
+bump marks every older row stale (see [03-storage.md](03-storage.md)).
 
 ## Analysis logic
 
