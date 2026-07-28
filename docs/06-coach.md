@@ -112,6 +112,17 @@ class CoachProvider(Protocol):
 # LlmConfig subclass) to build the selectable-provider map.
 def create_provider(cfg: LlmConfig,
                     api_key: str | None = None) -> CoachProvider
+
+# The concrete classes behind the factory — exported so tests can
+# construct one directly and isinstance-check the factory's choice.
+# See "Providers" below for what each wraps.
+class ClaudeAgentSdkProvider: ...  # claude-agent-sdk (default)
+class CopilotSdkProvider: ...      # github-copilot-sdk
+
+# The typed error both providers raise when a run fails (CLI
+# missing, run failure, empty output). The API layer maps it to
+# 502, or to an SSE error event once a stream has started.
+class CoachProviderError(Exception): ...
 ```
 
 ## Report and prompt
