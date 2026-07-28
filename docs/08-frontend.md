@@ -133,7 +133,11 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    Charts are custom SVG components — no chart library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
-   button (the manual-use fallback). The same time-window and
+   button (the manual-use fallback). Advice anchors open in a new tab
+   (`target="_blank"`): the advice carries app-relative game links
+   (06-coach.md "Game links"), and the panel is mutation state — a
+   same-tab navigation into a game would blank the advice on return
+   until the next "Get advice". The same time-window and
    time-control controls the Dashboard uses scope the request, so the
    advice covers the period the student is looking at rather than
    every game they have ever played. The page reads `games_analyzed`

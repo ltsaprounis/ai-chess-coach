@@ -8,6 +8,7 @@ from chess_coach.coach.highlights import (
 )
 from chess_coach.coach.prompt import (
     PROMPT_VERSION,
+    append_game_links,
     render_explain_prompt,
     render_prompt,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "MoveContext",
     "PlayerHighlights",
     "PositionAnalystFn",
+    "append_game_links",
     "build_highlights",
     "build_move_context",
     "build_report",

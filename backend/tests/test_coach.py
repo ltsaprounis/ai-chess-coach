@@ -35,6 +35,7 @@ from chess_coach.coach import (
     CopilotSdkProvider,
     ExplainEvent,
     MoveContext,
+    append_game_links,
     build_move_context,
     build_report,
     create_provider,
@@ -43,11 +44,13 @@ from chess_coach.coach import (
 )
 from chess_coach.domain import (
     AnalyzedGame,
+    ErrorPattern,
     EvalLine,
     LlmConfig,
     MoveEval,
     Opening,
     Phase,
+    PlayerReport,
     Record,
     TimeClass,
 )
@@ -656,6 +659,223 @@ def test_turning_point_entries_carry_their_fen() -> None:
     assert report.critical_positions  # the fixture produces turning points
     for position in report.critical_positions:
         assert f"FEN: `{position.fen}`" in prompt
+
+
+# --- game links (docs/06-coach.md, "Game links") ---------------------------
+
+
+def test_instructions_contain_new_citation_rule() -> None:
+    prompt = render_prompt(build_report("testuser", scenario_games()))
+    assert (
+        "written as a markdown reference link through the entry's `cite` "
+        "handle" in prompt
+    )
+    assert "never an invented handle" in prompt
+
+
+def test_turning_point_and_error_example_handles_assigned_in_order() -> None:
+    """docs/06-coach.md: handles are assigned `g1`, `g2`, ... in render
+    order over distinct `(game_id, ply)` targets -- turning points first,
+    then error-pattern examples -- and the numbering is stable across
+    renders."""
+    report = build_report("testuser", scenario_games())
+    prompt = render_prompt(report)
+
+    assert prompt == render_prompt(report)  # stable numbering
+
+    turning_points_section = prompt.split("## Turning points")[1].split(
+        "## Instructions"
+    )[0]
+    for n in range(1, len(report.critical_positions) + 1):
+        assert f"-- cite [g{n}]" in turning_points_section
+
+    # The fixture's two error patterns (Back-rank vulnerability, Walked
+    # into a forced mate) share one example position distinct from every
+    # turning point (tests/coach_scenario.py) -- both rows must cite one
+    # handle freshly minted after the last turning-point handle, not two
+    # different ones.
+    shared_handle = f"g{len(report.critical_positions) + 1}"
+    error_section = prompt.split("## Recurring error patterns")[1].split(
+        "## Turning points"
+    )[0]
+    assert error_section.count(f"(cite [{shared_handle}])") == 2
+
+
+def test_error_example_reuses_turning_point_handle_for_shared_position() -> None:
+    """docs/06-coach.md: an error-pattern example landing on the exact
+    `(game_id, ply)` a turning point already names must reuse that turning
+    point's handle instead of minting a second one for the same
+    position."""
+    report = build_report("testuser", scenario_games())
+    turning_point = report.critical_positions[0]  # renders as "### 1. ... [g1]"
+    shared_example = ErrorPattern(
+        pattern="hangs_piece",
+        label="Hung a piece",
+        count=1,
+        share_of_blunders=1.0,
+        example_game_id=turning_point.game_id,
+        example_ply=turning_point.ply,
+        example_end_time=turning_point.end_time,
+        example_move_number=turning_point.move_number,
+    )
+    report = report.model_copy(update={"error_patterns": [shared_example]})
+    prompt = render_prompt(report)
+
+    error_section = prompt.split("## Recurring error patterns")[1].split(
+        "## Turning points"
+    )[0]
+    assert "(cite [g1])" in error_section
+    assert error_section.count("cite [") == 1  # reused, not a fresh handle
+
+
+def test_error_example_without_position_renders_no_handle() -> None:
+    """The "n/a" path -- an error pattern with no example fields -- must
+    render without a cite handle; there is nothing to cite."""
+    report = build_report("testuser", scenario_games())
+    no_example = ErrorPattern(
+        pattern="missed_win",
+        label="Let a winning position slip",
+        count=3,
+        share_of_blunders=0.5,
+    )
+    report = report.model_copy(update={"error_patterns": [no_example]})
+    prompt = render_prompt(report)
+
+    error_section = prompt.split("## Recurring error patterns")[1].split(
+        "## Turning points"
+    )[0]
+    assert "| n/a |" in error_section
+    assert "cite [" not in error_section
+
+
+def _two_link_report() -> PlayerReport:
+    """A minimal report with exactly two citable positions -- handles `g1`
+    and `g2` -- for `append_game_links` tests that need known, stable
+    handles rather than the full 9-handle scenario fixture."""
+    report = build_report("testuser", scenario_games())
+    return report.model_copy(
+        update={
+            "critical_positions": report.critical_positions[:2],
+            "error_patterns": [],
+        }
+    )
+
+
+def test_append_game_links_appends_correct_definitions() -> None:
+    report = _two_link_report()
+    first, second = report.critical_positions
+    advice = "See [your move][g1] and [the other one][g2]."
+
+    result = append_game_links(advice, report)
+
+    assert result == (
+        f"{advice}\n\n"
+        f"[g1]: /games/{first.game_id}?ply={first.ply}\n"
+        f"[g2]: /games/{second.game_id}?ply={second.ply}"
+    )
+
+
+def test_append_game_links_normalizes_inline_slip() -> None:
+    """`[text](gN)` -- the model reaching for inline markdown syntax
+    instead of the reference form the instructions ask for -- normalizes
+    to reference style so it resolves through the appended definition."""
+    report = _two_link_report()
+    first = report.critical_positions[0]
+    advice = "Check [your blunder](g1) here."
+
+    result = append_game_links(advice, report)
+
+    assert result.startswith("Check [your blunder][g1] here.\n\n")
+    assert f"[g1]: /games/{first.game_id}?ply={first.ply}" in result
+
+
+def test_append_game_links_strips_unoffered_handle_to_plain_text() -> None:
+    """An invented handle -- one the prompt never offered -- is exactly
+    as unfindable as no citation at all, so it degrades to plain text
+    rather than resolving to nothing or crashing."""
+    report = _two_link_report()
+    advice = "This cites [a bogus game][g9] that was never offered."
+
+    result = append_game_links(advice, report)
+
+    assert "[a bogus game][g9]" not in result
+    assert result.startswith("This cites a bogus game that was never offered.\n\n")
+
+
+def test_append_game_links_degrades_unoffered_inline_slip_too() -> None:
+    """An inline-style citation `[text](gN)` through an unoffered handle
+    must degrade exactly like a reference-style one -- not survive as a
+    live anchor with a broken "gN" href (docs/06-coach.md: "an invented
+    handle renders as its text, in inline or reference form alike")."""
+    report = _two_link_report()
+    advice = "This cites [a bogus game](g9) that was never offered."
+
+    result = append_game_links(advice, report)
+
+    assert "(g9)" not in result
+    assert "[a bogus game]" not in result
+    assert result.startswith("This cites a bogus game that was never offered.\n\n")
+
+
+def test_append_game_links_leaves_non_handle_reference_links_alone() -> None:
+    report = _two_link_report()
+    advice = "See [the docs][docs-ref] for background."
+
+    result = append_game_links(advice, report)
+
+    assert result.startswith(advice)
+    assert "[the docs][docs-ref]" in result
+
+
+def test_append_game_links_strips_model_authored_definition_hijack() -> None:
+    """CommonMark resolves a repeated reference definition to the *first*
+    one in the document, so a model-authored `[gN]: ...` line would win
+    against the minted definition appended below and could point a
+    handle anywhere -- it must be stripped, leaving only the minted one
+    standing, even though the citation through that same handle is
+    legitimate and must still resolve."""
+    report = _two_link_report()
+    first, second = report.critical_positions
+    advice = (
+        "See [your move][g1] for the idea.\n"
+        "[g1]: https://evil.example/x\n"
+        "Keep training."
+    )
+
+    result = append_game_links(advice, report)
+
+    assert "https://evil.example/x" not in result
+    assert "See [your move][g1] for the idea." in result
+    assert "Keep training." in result
+    assert result.count(f"[g1]: /games/{first.game_id}?ply={first.ply}") == 1
+    assert f"[g2]: /games/{second.game_id}?ply={second.ply}" in result
+
+
+def test_append_game_links_strips_definition_hijack_even_for_unoffered_handle() -> None:
+    """The stripping rule applies unconditionally -- a model-authored
+    definition line for a handle the prompt never even offered is still
+    a hijack attempt against whatever a later, legitimate run might mint,
+    so it is stripped regardless."""
+    report = _two_link_report()
+    advice = "Ignore this.\n[g9]: https://evil.example/y\nMore text."
+
+    result = append_game_links(advice, report)
+
+    assert "https://evil.example/y" not in result
+    assert "[g9]:" not in result
+
+
+def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() -> None:
+    """With no citable games every handle is "unknown", so the normalize
+    and degrade passes still run -- an invented citation degrades to
+    plain text -- but there are no offered handles, so nothing is
+    appended."""
+    report = build_report("testuser", [])  # no games -> nothing citable
+    advice = "Keep grinding tactics. [stray][g1] link here too."
+
+    result = append_game_links(advice, report)
+
+    assert result == "Keep grinding tactics. stray link here too."
 
 
 async def test_agent_sdk_provider_collects_text(

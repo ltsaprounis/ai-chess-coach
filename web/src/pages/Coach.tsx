@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import { api, type PlayerReport } from "../api.ts";
 import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
@@ -15,6 +15,18 @@ import { useAnalysisProgress } from "../useAnalysisProgress.ts";
 import { useStatsFilters } from "../useStatsFilters.ts";
 
 type CoachOptions = { refresh?: boolean };
+
+// The advice's citations are markdown reference links whose
+// definitions the backend mints as app-relative game deep links
+// (docs/06-coach.md "Game links": `[text][g1]` +
+// `[g1]: /games/{id}?ply={n}`). `coach.data` is `useMutation` state,
+// so a same-tab navigation into a game would blank the advice panel
+// until the next "Get advice" (docs/08-frontend.md, Coach page) —
+// open advice links in a new tab instead. Exported so the override
+// is unit-testable without rendering the whole page.
+export const adviceMarkdownComponents: Components = {
+  a: ({ node, ...props }) => <a target="_blank" rel="noreferrer" {...props} />,
+};
 
 export default function Coach() {
   const { username = "" } = useParams();
@@ -277,7 +289,9 @@ export default function Coach() {
             </p>
           )}
           <article className="advice">
-            <Markdown>{coach.data.advice}</Markdown>
+            <Markdown components={adviceMarkdownComponents}>
+              {coach.data.advice}
+            </Markdown>
           </article>
           <details>
             <summary>

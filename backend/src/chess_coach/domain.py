@@ -277,9 +277,10 @@ class ErrorPattern(BaseModel):
     count: int
     share_of_blunders: float  # count ÷ total blunders, 0-1
     # One instance the student can go and look at. Carries the same
-    # identity a CriticalPosition does — the citation rule is "date and
-    # move number", and a bare game id is exactly the unfindable handle
-    # that rule exists to ban.
+    # identity a CriticalPosition does — the prompt cites it by date
+    # and move number through a [gN] link handle, and game_id/ply are
+    # what the handle's /games/{id}?ply= link is minted from
+    # (docs/06-coach.md, "Game links").
     example_game_id: str | None = None
     example_ply: int | None = None
     example_end_time: int | None = None

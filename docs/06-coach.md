@@ -27,6 +27,16 @@ def build_report(username: str, games: list[AnalyzedGame], *,
 # Deterministic markdown template, also shown/copyable in the UI.
 def render_prompt(report: PlayerReport) -> str
 
+# Post-processes the model's advice so its handle citations resolve
+# to real links: normalizes inline `[text](gN)` to reference style,
+# degrades citations with handles the prompt never offered to their
+# plain text, and appends one `[gN]: /games/{id}?ply={n}` reference
+# definition per offered handle (definitions the advice never cites
+# render as nothing). URLs are minted here from the report, never
+# written by the model. The API layer calls this on the provider's
+# advice before caching, so cached advice is self-contained.
+def append_game_links(advice: str, report: PlayerReport) -> str
+
 # --- Highlights (Dashboard-only; deliberately outside PlayerReport
 # --- so the coaching prompt doesn't grow thousands of rows) ---
 
@@ -385,8 +395,10 @@ weaknesses, and carries the rules the data alone cannot enforce:
   repertoire lists it under their color in "Systems you chose". Never
   advise dropping a line from the "What you face" table — recommend a
   response to it.
-- **Citation.** Refer to positions by date and move number, never by
-  list position.
+- **Citation.** Refer to positions by date and move number, written
+  as a markdown reference link through the entry's link handle —
+  "[your 26...Nb6 in the June 14 blitz game][g3]" — never a raw URL,
+  never an invented handle, never a list position.
 - **Register.** The explain prompt's style contract applies here too:
   a club player, pawns never centipawns, the idea before the number.
 - **Honesty.** Say when the data does not support a conclusion instead
@@ -401,6 +413,38 @@ weaknesses, and carries the rules the data alone cannot enforce:
   rendered entry. It stays conditional on tool availability because
   the same template serves analyst-less runs — the cache is keyed on
   `PROMPT_VERSION`, not tool availability.
+
+### Game links
+
+Citations must survive the trip through the model without the model
+ever writing a URL — game ids are UUID-plus-username strings, and one
+mistyped character is a broken link. So the prompt and a
+post-processing step split the job:
+
+- Every turning-point entry and error-pattern example carries a short
+  **link handle** — `[g1]`, `[g2]`, … — assigned in render order over
+  distinct `(game_id, ply)` targets, turning points first, then error
+  examples. A move cited by both sections shares one handle.
+- The citation rule (above) has the model write each citation as a
+  markdown *reference* link through the handle: the visible text
+  stays the human identity ("your 26...Nb6 in the June 14 blitz
+  game"), the handle is all the model must copy.
+- `append_game_links` then makes the handles resolve: it normalizes
+  inline `[text](gN)` slips to reference style, degrades citations
+  with unknown handles to their plain text, and appends one
+  `[gN]: /games/{game_id}?ply={ply}` definition per offered handle.
+  Definitions the advice never cites are invisible when rendered, so
+  over-appending is free.
+
+Link targets deliberately couple to the frontend's Game-page route
+and `?ply=` deep link (docs/08-frontend.md) — the exact link the
+Dashboard's highlight lists already use. The failure modes all
+degrade soft: a model that ignores the rule yields today's plain-text
+citation, an invented handle renders as its text (in inline or
+reference form alike), and a correct handle can only resolve to a
+URL minted from the report itself — model-authored `[gN]:`
+definition lines are stripped before the minted block is appended,
+so a handle cannot be redefined from inside the advice.
 
 ## Providers
 

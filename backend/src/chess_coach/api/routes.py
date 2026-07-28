@@ -18,6 +18,7 @@ from chess_coach.coach import (
     CoachProviderError,
     PlayerHighlights,
     PositionAnalystFn,
+    append_game_links,
     build_highlights,
     build_move_context,
     build_report,
@@ -768,6 +769,12 @@ async def coach_player(
         advice = await provider.complete(prompt, analyst)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Post-process before caching: the handles the model cited become real
+    # links here (docs/06-coach.md, "Game links"), and the cached row must
+    # hold this post-processed advice so a cache hit is self-contained and
+    # never re-processed on the read path.
+    advice = append_game_links(advice, report)
 
     generated_at = await run_in_threadpool(
         save_report, db, key, prompt, advice, report.games_analyzed

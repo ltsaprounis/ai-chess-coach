@@ -6,6 +6,7 @@ and user-visible (the UI shows them with a copy button), so changes here
 are effectively UI changes too.
 """
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,7 +25,7 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-fen-coverage"
+PROMPT_VERSION = "2026-07-game-links"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -54,9 +55,12 @@ _INSTRUCTIONS = (
     'repertoire lists it under their color in "Systems you chose". Never '
     'advise dropping a line from the "What you face" table -- recommend '
     "a response to it instead.\n"
-    "- **Citation.** Refer to positions and games by date and move "
-    'number (e.g. "your 26...Nb6 in the June 14 blitz game"), never by '
-    "list position or table row.\n"
+    "- **Citation.** Refer to positions by date and move number, "
+    "written as a markdown reference link through the entry's `cite` "
+    'handle -- e.g. "[your 26...Nb6 in the June 14 blitz game][g3]" -- '
+    "never a raw URL, never an invented handle, never a list position "
+    "or table row. Every mention of a handled position should cite "
+    "this way.\n"
     "- **One biggest lever.** Open with the single change most likely to "
     "raise this student's results, not a flat list of co-equal "
     "weaknesses. Order everything else by impact behind it.\n"
@@ -75,14 +79,19 @@ _INSTRUCTIONS = (
 
 
 def render_prompt(report: PlayerReport) -> str:
+    # One handle assignment, shared by both sections that cite a position
+    # and by `append_game_links` after the model has run (docs/06-coach.md,
+    # "Game links") -- so a position can never be numbered two different
+    # ways depending on who is asking.
+    handles = _game_link_handles(report)
     sections = [
         _student_section(report),
         _phase_section(report),
         _trend_section(report),
         _terminations_section(report),
         _repertoire_section(report),
-        _error_patterns_section(report),
-        _turning_points_section(report),
+        _error_patterns_section(report, handles),
+        _turning_points_section(report, handles),
         _INSTRUCTIONS,
     ]
     return "\n\n".join(section for section in sections if section)
@@ -524,7 +533,9 @@ def _family_score(f: _FamilyRecord) -> str:
 # --- error patterns ------------------------------------------------------
 
 
-def _error_patterns_section(report: PlayerReport) -> str:
+def _error_patterns_section(
+    report: PlayerReport, handles: dict[tuple[str, int], str]
+) -> str:
     if not report.error_patterns:
         return ""
     lines = [
@@ -535,17 +546,22 @@ def _error_patterns_section(report: PlayerReport) -> str:
     for e in report.error_patterns:
         lines.append(
             f"| {e.label} | {e.count} | {e.share_of_blunders * 100:.1f}% "
-            f"| {_error_example(e)} |"
+            f"| {_error_example(e, handles)} |"
         )
     return "\n".join(lines)
 
 
-def _error_example(e: ErrorPattern) -> str:
-    """Date and move number, with side -- the same citation rule turning
-    points already follow. A bare game id/ply is exactly the unfindable
-    handle the citation rule (docs/06-coach.md) bans."""
+def _error_example(e: ErrorPattern, handles: dict[tuple[str, int], str]) -> str:
+    """Date and move number, with side, plus a `(cite [gN])` handle so the
+    model can cite this instance the same way it cites a turning point
+    (docs/06-coach.md, "Game links") -- a bare game id/ply is exactly the
+    unfindable handle the citation rule bans, and a plain date and move
+    number alone gives the model nothing it is allowed to link through.
+    The "n/a" path (an example field missing) carries no handle -- there
+    is nothing to cite."""
     if (
-        e.example_end_time is None
+        e.example_game_id is None
+        or e.example_end_time is None
         or e.example_move_number is None
         or e.example_ply is None
     ):
@@ -555,29 +571,33 @@ def _error_example(e: ErrorPattern) -> str:
     # which needs a move after it to read as notation instead of as a
     # typo. Turning points can use the glyphs; this cell has no move.
     side = "White" if e.example_ply % 2 == 1 else "Black"
-    return f"{date}, {side}'s move {e.example_move_number}"
+    base = f"{date}, {side}'s move {e.example_move_number}"
+    handle = handles.get((e.example_game_id, e.example_ply))
+    return f"{base} (cite [{handle}])" if handle else base
 
 
 # --- turning points -------------------------------------------------------
 
 
-def _turning_points_section(report: PlayerReport) -> str:
+def _turning_points_section(
+    report: PlayerReport, handles: dict[tuple[str, int], str]
+) -> str:
     if not report.critical_positions:
         return ""
     lines = ["## Turning points"]
     for n, p in enumerate(report.critical_positions, start=1):
-        lines.append(_turning_point_entry(n, p))
+        lines.append(_turning_point_entry(n, p, handles[(p.game_id, p.ply)]))
     return "\n".join(lines)
 
 
-def _turning_point_entry(n: int, p: CriticalPosition) -> str:
+def _turning_point_entry(n: int, p: CriticalPosition, handle: str) -> str:
     date = _format_date(p.end_time)
     color_word = "White" if p.color == "white" else "Black"
     opening = f", {p.opening_name}" if p.opening_name else ""
     move_label = f"{p.move_number}." if p.color == "white" else f"{p.move_number}..."
     lines = [
         f"### {n}. {date}, {p.time_class}, as {color_word}{opening} "
-        f"-- move {p.move_number}"
+        f"-- move {p.move_number} -- cite [{handle}]"
     ]
     if p.leading_up:
         lines.append(f"Leading up: {' '.join(p.leading_up)}")
@@ -593,6 +613,96 @@ def _turning_point_entry(n: int, p: CriticalPosition) -> str:
         f"{swing}. Engine preferred **{p.best}**."
     )
     return "\n".join(lines)
+
+
+# --- game links (docs/06-coach.md, "Game links") --------------------------
+#
+# Citations must survive the trip through the model without it ever
+# writing a URL -- game ids are UUID-plus-username strings, and one
+# mistyped character is a broken link. `_game_link_handles` is the one
+# source of truth for the `[g1]`, `[g2]`, ... assignment; `render_prompt`
+# renders each handle visibly next to the position it names, and
+# `append_game_links` (run on the model's advice afterwards) is the only
+# place a handle ever turns into a real URL.
+
+
+def _game_link_handles(report: PlayerReport) -> dict[tuple[str, int], str]:
+    """Assign `g1`, `g2`, ... to every distinct `(game_id, ply)` a citable
+    position points at -- turning points first, in render order, then
+    error-pattern examples that carry one. An error example landing on
+    the exact position a turning point already names reuses that turning
+    point's handle rather than minting a second one for the same place.
+    """
+    handles: dict[tuple[str, int], str] = {}
+    for p in report.critical_positions:
+        handles.setdefault((p.game_id, p.ply), f"g{len(handles) + 1}")
+    for e in report.error_patterns:
+        if e.example_game_id is None or e.example_ply is None:
+            continue
+        handles.setdefault((e.example_game_id, e.example_ply), f"g{len(handles) + 1}")
+    return handles
+
+
+# Matches an inline-link slip `[text](gN)` -- the model reaching for the
+# more familiar inline markdown form instead of the reference form the
+# instructions ask for. Always rewritten to reference form, offered
+# handle or not -- the offered/unknown split happens once, in
+# `_HANDLE_REFERENCE`'s pass below, so an inline slip through an
+# unoffered handle degrades exactly like a reference citation through
+# one would (docs/06-coach.md: "an invented handle renders as its text,
+# in inline or reference form alike"). Link text is assumed
+# bracket-free, which every citation this prompt asks for is.
+_INLINE_HANDLE_SLIP = re.compile(r"\[([^\[\]]*)\]\((g\d+)\)")
+# Matches a reference-style citation `[text][gN]`, offered or not -- the
+# offered/unknown split happens in `_degrade_unknown`, not in the regex.
+_HANDLE_REFERENCE = re.compile(r"\[([^\[\]]*)\]\[(g\d+)\]")
+# Matches a model-authored reference *definition* line for a handle --
+# `[gN]: whatever`, at line start (allowing the up-to-3-space indent
+# CommonMark itself allows for a definition). CommonMark resolves a
+# repeated definition to the *first* one in document order, so an
+# unstripped line here would let the model's own line win against the
+# minted definition appended below and point a handle anywhere it
+# likes -- stripped unconditionally, offered handle or not.
+_MODEL_HANDLE_DEFINITION = re.compile(r"^ {0,3}\[g\d+\]:[^\n]*\n?", re.MULTILINE)
+
+
+def append_game_links(advice: str, report: PlayerReport) -> str:
+    """Post-process the model's advice so its handle citations resolve.
+
+    Three passes always run, even when the report has no citable games at
+    all: strip any model-authored `[gN]:` definition line (a hijack
+    attempt -- CommonMark lets the *first* definition of a label win, so
+    an unstripped one could redirect a handle anywhere), normalize an
+    inline `[text](gN)` slip to the reference form, and degrade a
+    citation through a handle the prompt never offered to its plain text,
+    in either form (an invented handle is exactly as unfindable as no
+    citation at all; with no citable games every handle is "unknown", so
+    every citation the model still wrote degrades). Only the last step is
+    conditional: appending one `[gN]: /games/{id}?ply={n}` reference
+    definition per offered handle -- markdown renders an unused
+    definition as nothing, so appending every offered handle is free, but
+    there is nothing to append when there are none. URLs are minted here
+    from the report; the model never writes one.
+    """
+    handles = _game_link_handles(report)
+    offered = set(handles.values())
+
+    def _degrade_unknown(match: re.Match[str]) -> str:
+        label, handle = match.group(1), match.group(2)
+        return match.group(0) if handle in offered else label
+
+    text = _MODEL_HANDLE_DEFINITION.sub("", advice)
+    text = _INLINE_HANDLE_SLIP.sub(r"[\1][\2]", text)
+    text = _HANDLE_REFERENCE.sub(_degrade_unknown, text)
+
+    if not handles:
+        return text
+
+    definitions = "\n".join(
+        f"[{handle}]: /games/{game_id}?ply={ply}"
+        for (game_id, ply), handle in handles.items()
+    )
+    return "\n\n".join([text, definitions])
 
 
 # --- shared formatting helpers -------------------------------------------

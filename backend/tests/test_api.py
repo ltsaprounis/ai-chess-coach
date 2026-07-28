@@ -15,7 +15,12 @@ import chess_coach.api.app as app_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
 from chess_coach.api.runs import AnalysisRun
-from chess_coach.coach import CoachProviderError, ExplainEvent, PositionAnalystFn
+from chess_coach.coach import (
+    CoachProviderError,
+    ExplainEvent,
+    PositionAnalystFn,
+    build_report,
+)
 from chess_coach.config import (
     AppConfig,
     CoachConfig,
@@ -48,6 +53,7 @@ from chess_coach.storage import (
     save_explanation,
     upsert_games,
 )
+from tests.coach_scenario import scenario_games
 from tests.factories import make_analysis, make_analyzed, make_game
 from tests.http import get, post
 
@@ -1180,6 +1186,39 @@ def test_coach_caches_and_a_repeat_is_a_cache_hit(
     # the analyst wrapper is even built.
     assert len(provider.prompts) == 1
     assert stub_pool(stub_registry).eval_lines_calls == []
+
+
+def test_coach_appends_game_links_and_caches_the_post_processed_advice(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md "Game links": the route runs `append_game_links` on
+    the provider's advice before caching (docs/07-api.md), so a `[gN]`
+    citation for an offered handle resolves to a real `/games/{id}?ply=`
+    link, and a cache hit serves that already-post-processed text verbatim
+    rather than re-running the post-processing step on the cached path."""
+    seed_analyzed(db_path, scenario_games())
+    report = build_report("testuser", scenario_games())
+    assert report.critical_positions  # the fixture actually has turning points
+    turning_point = report.critical_positions[0]
+
+    provider = stub_provider(stub_registry, "claude")
+    provider.advice = "see [your 26...Nb6 in the June 14 game][g1] for the key moment"
+
+    first: Any = post(client, "/api/players/testuser/coach").json()
+    assert first["cached"] is False
+    # The citation itself is untouched (g1 is an offered handle), and the
+    # definition block is appended after it, separated by a blank line.
+    assert first["advice"].startswith(provider.advice)
+    tail = first["advice"][len(provider.advice) :]
+    assert tail.startswith("\n\n")
+    assert f"[g1]: /games/{turning_point.game_id}?ply={turning_point.ply}" in tail
+
+    second: Any = post(client, "/api/players/testuser/coach").json()
+    assert second["cached"] is True
+    # Cached advice is the same post-processed string -- proof the cached
+    # row already holds processed advice rather than being re-processed
+    # (or double-processed) on the cache-hit read path.
+    assert second["advice"] == first["advice"]
 
 
 def test_coach_generated_at_survives_a_clock_tick(

@@ -503,6 +503,9 @@ def _error_patterns(games: list[AnalyzedGame]) -> list[ErrorPattern]:
     # (game_id, ply, end_time, move_number) -- carries the same identity a
     # CriticalPosition does, so the prompt can cite "date, move N" rather
     # than the unfindable bare game id the citation rule exists to ban.
+    # The leading (game_id, ply) pair doubles as the key prompt.py's
+    # `_game_link_handles` groups on to mint this example's `[gN]` link
+    # handle (docs/06-coach.md, "Game links").
     examples: dict[str, tuple[str, int, int, int]] = {}
     total_blunders = 0
 

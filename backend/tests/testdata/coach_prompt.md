@@ -58,39 +58,39 @@ No line yet reaches the 5-game sample floor.
 ## Recurring error patterns
 | Pattern | Count | % of blunders | Example |
 |---|---|---|---|
-| Back-rank vulnerability | 2 | 33.3% | 2026-05-14, White's move 8 |
-| Walked into a forced mate | 2 | 33.3% | 2026-05-14, White's move 8 |
+| Back-rank vulnerability | 2 | 33.3% | 2026-05-14, White's move 8 (cite [g9]) |
+| Walked into a forced mate | 2 | 33.3% | 2026-05-14, White's move 8 (cite [g9]) |
 
 ## Turning points
-### 1. 2026-06-04, blitz, as White, Queen's Pawn Game: Accelerated London System -- move 6
+### 1. 2026-06-04, blitz, as White, Queen's Pawn Game: Accelerated London System -- move 6 -- cite [g1]
 Leading up: Nf3 Bd6 Bg3 O-O
 FEN: `rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R w KQ - 4 6`
 You played **6.Bd3** (lost about 1.1 pawns): -0.65 to -1.75. Engine preferred **Bxd6**.
-### 2. 2026-06-01, bullet, as White, Ruy Lopez: Open Variation -- move 9
+### 2. 2026-06-01, bullet, as White, Ruy Lopez: Open Variation -- move 9 -- cite [g2]
 Leading up: Bb3 d5 dxe5 Be6
 FEN: `r2qkb1r/2p2ppp/p1n1b3/1p1pP3/4n3/1B3N2/PPP2PPP/RNBQ1RK1 w kq - 1 9`
 You played **9.c3** (lost about 3.1 pawns): -0.64 to -3.74. Engine preferred **Bxd5**.
-### 3. 2026-05-25, rapid, as Black, Pirc Defense: Austrian Attack -- move 6
+### 3. 2026-05-25, rapid, as Black, Pirc Defense: Austrian Attack -- move 6 -- cite [g3]
 Leading up: Bg7 Nf3 O-O Bd3
 FEN: `rnbq1rk1/ppp1ppbp/3p1np1/8/3PPP2/2NB1N2/PPP3PP/R1BQK2R b KQ - 4 6`
 You played **6...Na6** (lost about 1.1 pawns): +1.05 to +2.15. Engine preferred **Nxe4**.
-### 4. 2026-05-14, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 7
+### 4. 2026-05-14, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 7 -- cite [g4]
 Leading up: Bd2 Qxb2 Bc3 Bb4
 FEN: `r1b1k1nr/pppp1ppp/2n5/4P3/1b6/2B2N2/PqP1PPPP/RN1QKB1R w KQkq - 2 7`
 You played **7.Qd2** (lost about 1.3 pawns): -0.20 to -1.50. Engine preferred **Qxd7+**.
-### 5. 2026-04-30, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 6
+### 5. 2026-04-30, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 6 -- cite [g5]
 Leading up: Bf4 Qb4+ Bd2 Qxb2
 FEN: `r1b1kbnr/pppp1ppp/2n5/4P3/8/5N2/PqPBPPPP/RN1QKB1R w KQkq - 0 6`
 You played **6.Bc3** (lost about 1.1 pawns): -0.65 to -1.75. Engine preferred **a3**.
-### 6. 2026-04-23, blitz, as White, Queen's Pawn Game: Accelerated London System -- move 6
+### 6. 2026-04-23, blitz, as White, Queen's Pawn Game: Accelerated London System -- move 6 -- cite [g6]
 Leading up: Nf3 Bd6 Bg3 O-O
 FEN: `rnbq1rk1/ppp2ppp/3bpn2/3p4/3P4/4PNB1/PPP2PPP/RN1QKB1R w KQ - 4 6`
 You played **6.Bd3** (lost about 1.1 pawns): -0.65 to -1.75. Engine preferred **Bxd6**.
-### 7. 2026-04-12, rapid, as Black, Pirc Defense: Classical Variation -- move 6
+### 7. 2026-04-12, rapid, as Black, Pirc Defense: Classical Variation -- move 6 -- cite [g7]
 Leading up: Bg7 Be2 O-O O-O
 FEN: `rnbq1rk1/ppp1ppbp/3p1np1/8/3PP3/2N2N2/PPP1BPPP/R1BQ1RK1 b - - 5 6`
 You played **6...Bg4** (lost about 1.1 pawns): +1.05 to +2.15. Engine preferred **Nxe4**.
-### 8. 2026-03-31, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 7
+### 8. 2026-03-31, blitz, as White, Englund Gambit Complex: Englund Gambit -- move 7 -- cite [g8]
 Leading up: Bd2 Qxb2 Bc3 Bb4
 FEN: `r1b1k1nr/pppp1ppp/2n5/4P3/1b6/2B2N2/PqP1PPPP/RN1QKB1R w KQkq - 2 7`
 You played **7.Qd2** (lost about 1.3 pawns): -0.20 to -1.50. Engine preferred **Qxd7+**.
@@ -99,7 +99,7 @@ You played **7.Qd2** (lost about 1.3 pawns): -0.20 to -1.50. Engine preferred **
 Write the coaching brief now, following these rules:
 - **Audience and register.** Write for a club player, not a fellow engine: pawns, never centipawns, and lead with the idea -- the threat, the plan, what a line wins -- before any number.
 - **Attribution.** An opening is the student's own only where the repertoire lists it under their color in "Systems you chose". Never advise dropping a line from the "What you face" table -- recommend a response to it instead.
-- **Citation.** Refer to positions and games by date and move number (e.g. "your 26...Nb6 in the June 14 blitz game"), never by list position or table row.
+- **Citation.** Refer to positions by date and move number, written as a markdown reference link through the entry's `cite` handle -- e.g. "[your 26...Nb6 in the June 14 blitz game][g3]" -- never a raw URL, never an invented handle, never a list position or table row. Every mention of a handled position should cite this way.
 - **One biggest lever.** Open with the single change most likely to raise this student's results, not a flat list of co-equal weaknesses. Order everything else by impact behind it.
 - **Honesty.** If the data does not support a conclusion -- too few games, no sample past the floor -- say so plainly instead of filling the section anyway.
 - **Verification.** When the `analyze_position` tool is available: for each turning point the brief features, run the tool on that entry's FEN and state the refutation -- what the played move loses to, not just the better move's name -- and check any other concrete line before asserting it. Never present an unverified variation as fact.
