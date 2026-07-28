@@ -63,6 +63,20 @@ def test_multipv_out_of_range_raises_config_error(tmp_path: Path, value: int) ->
         load_config(path, env=KEY_ENV)
 
 
+def test_eval_timeout_defaults_to_thirty(tmp_path: Path) -> None:
+    config = load_config(tmp_path / "nope.yaml", env=KEY_ENV)
+    assert config.engine.eval_timeout == 30.0
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_eval_timeout_non_positive_raises_config_error(
+    tmp_path: Path, value: int
+) -> None:
+    path = write(tmp_path, f"engine:\n  eval_timeout: {value}\n")
+    with pytest.raises(ConfigError, match="invalid"):
+        load_config(path, env=KEY_ENV)
+
+
 def test_invalid_yaml_raises_config_error(tmp_path: Path) -> None:
     path = write(tmp_path, "engine: [unclosed\n")
     with pytest.raises(ConfigError, match="not valid YAML"):

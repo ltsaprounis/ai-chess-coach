@@ -35,7 +35,13 @@ from chess_coach.domain import (
     Result,
     TimeClass,
 )
-from chess_coach.engine import AnalysisPool, EngineError, EngineOptions, Progress
+from chess_coach.engine import (
+    ANALYSIS_VERSION,
+    AnalysisPool,
+    EngineError,
+    EngineOptions,
+    Progress,
+)
 from chess_coach.ingestion import sync_games
 from chess_coach.openings import OpeningBook
 from chess_coach.storage import (
@@ -260,7 +266,9 @@ async def analyze_player(
             if game is not None and game.username == user:
                 games.append(game)
         remaining = max(
-            0, count_games_needing_analysis(db, user, cfg.engine.depth) - len(games)
+            0,
+            count_games_needing_analysis(db, user, cfg.engine.depth, ANALYSIS_VERSION)
+            - len(games),
         )
     else:
         since = body.since if body is not None else None
@@ -273,6 +281,7 @@ async def analyze_player(
             db,
             user,
             cfg.engine.depth,
+            ANALYSIS_VERSION,
             limit,
             since=since,
             until=until,
@@ -284,6 +293,7 @@ async def analyze_player(
                 db,
                 user,
                 cfg.engine.depth,
+                ANALYSIS_VERSION,
                 since=since,
                 until=until,
                 time_class=time_class,
@@ -327,7 +337,7 @@ async def _run_analysis(
         analysis = await pool.analyze_game(game, opts, on_progress)
         # Threadpool: this task shares the event loop with every SSE
         # stream; the write serializes a full per-move eval list.
-        await run_in_threadpool(save_analysis, db, analysis)
+        await run_in_threadpool(save_analysis, db, analysis, ANALYSIS_VERSION)
         run.games_done += 1
         run.publish(run.event("game_done"))
 

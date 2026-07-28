@@ -2,13 +2,26 @@
 
 import asyncio
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from pathlib import Path
+from typing import Final
 
 import chess
 import chess.engine
 from pydantic import BaseModel
 
 from chess_coach.domain import MATE_SCORE
+
+# What a stored eval means; bump on any change to how an eval is
+# produced so storage can mark older rows stale (docs/04-engine.md).
+#   1 = carried-state searches (pre-fix): the engine's transposition
+#       table and history heuristics persisted across positions,
+#       making evals depend on unrelated search history and not
+#       reproducible on re-analysis.
+#   2 = per-position cleared state: a fresh `ucinewgame` before every
+#       search, so an eval is a pure function of (position, depth,
+#       multipv, binary).
+ANALYSIS_VERSION: Final[int] = 2
 
 
 class EngineError(Exception):
@@ -53,7 +66,13 @@ class Engine:
         if outcome is not None:
             return _terminal_eval(outcome)
         try:
-            info = await self._engine.analyse(board, chess.engine.Limit(depth=depth))
+            # A fresh `game` object every call makes python-chess send
+            # `ucinewgame` before every search: the engine's transposition
+            # table and history never carry state between positions
+            # (docs/future-improvements/engine-search-hangs.md).
+            info = await self._engine.analyse(
+                board, chess.engine.Limit(depth=depth), game=object()
+            )
         except chess.engine.EngineError as exc:
             raise EngineError(f"analysis failed for {fen}: {exc}") from exc
         score = info.get("score")
@@ -75,8 +94,11 @@ class Engine:
         fewer legal moves.
         """
         try:
+            # Same fresh-token requirement as `evaluate`: without it the
+            # live board and the coach's engine tool share carried search
+            # state across unrelated positions.
             analysis = await self._engine.analysis(
-                board, chess.engine.Limit(depth=depth), multipv=multipv
+                board, chess.engine.Limit(depth=depth), multipv=multipv, game=object()
             )
         except chess.engine.EngineError as exc:
             raise EngineError(f"analysis failed for {board.fen()}: {exc}") from exc
@@ -86,6 +108,19 @@ class Engine:
 
     async def close(self) -> None:
         await self._engine.quit()
+
+    def kill(self) -> None:
+        """Force-terminate the process (SIGKILL) via the transport.
+
+        For a worker wedged mid-search that will never answer `quit`:
+        closing its pipes makes python-chess's protocol error out
+        instead of leaving a caller waiting forever, and stops the
+        process from burning a core indefinitely
+        (docs/future-improvements/engine-search-hangs.md). Safe to call
+        on an already-dead process.
+        """
+        with suppress(ProcessLookupError):
+            self._transport.kill()
 
 
 def _terminal_eval(outcome: chess.Outcome) -> PositionEval:

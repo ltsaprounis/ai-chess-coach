@@ -32,6 +32,7 @@ from chess_coach.domain import (
     TimeClass,
 )
 from chess_coach.engine import (
+    ANALYSIS_VERSION,
     EngineError,
     EngineOptions,
     LiveEval,
@@ -202,7 +203,9 @@ def client(
     monkeypatch: pytest.MonkeyPatch,
     stub_registry: dict[str, object],
 ) -> Iterator[TestClient]:
-    async def fake_create_pool(bin_path: Path, workers: int) -> StubPool:
+    async def fake_create_pool(
+        bin_path: Path, workers: int, eval_timeout: float
+    ) -> StubPool:
         pool = StubPool()
         stub_registry["pool"] = pool
         return pool
@@ -235,11 +238,23 @@ def client(
         yield test_client
 
 
-def seed(db_path: Path, games: list[Game], analyzed: set[str] | None = None) -> None:
+def seed(
+    db_path: Path,
+    games: list[Game],
+    analyzed: set[str] | None = None,
+    stale: set[str] | None = None,
+) -> None:
+    """`stale` (a subset of `analyzed`) saves those games one version
+    behind `ANALYSIS_VERSION`, so a test can seed the "needs
+    re-analysis because the engine moved on" scenario without a real
+    engine version bump."""
     db = open_db(db_path)
     upsert_games(db, games)
     for game_id in analyzed or set():
-        save_analysis(db, make_analysis(game_id=game_id))
+        version = (
+            ANALYSIS_VERSION - 1 if game_id in (stale or set()) else ANALYSIS_VERSION
+        )
+        save_analysis(db, make_analysis(game_id=game_id), version)
     db.close()
 
 
@@ -677,6 +692,26 @@ def test_analyze_fully_analyzed_scope_returns_zero_and_zero(
     assert get(client, "/api/players/testuser/analyze/progress").status_code == 404
 
 
+def test_analyze_stale_analysis_version_counts_as_needing_reanalysis(
+    client: TestClient, db_path: Path
+) -> None:
+    """A game saved under an older `analysis_version` still counts as
+    needing analysis: the API layer threads `engine.ANALYSIS_VERSION`
+    into both the enqueue and remaining-count queries, so an engine
+    version bump re-queues stored games automatically (docs/07-api.md).
+    A `limit: 0` probe surfaces this without spinning up a real run."""
+    seed(
+        db_path,
+        [make_game(id="g-1", end_time=1, time_class="rapid")],
+        analyzed={"g-1"},
+        stale={"g-1"},
+    )
+
+    response = post(client, "/api/players/testuser/analyze", json={"limit": 0})
+    assert response.status_code == 202
+    assert response.json() == {"queued": 0, "remaining": 1}
+
+
 def test_analyze_game_ids_request_ignores_scope_fields(
     client: TestClient, db_path: Path
 ) -> None:
@@ -742,7 +777,9 @@ async def test_shutdown_awaits_cancelled_analysis_tasks_before_closing_the_pool(
         async def close(self) -> None:
             order.append("pool_close")
 
-    async def fake_create_pool(bin_path: Path, workers: int) -> RecordingPool:
+    async def fake_create_pool(
+        bin_path: Path, workers: int, eval_timeout: float
+    ) -> RecordingPool:
         return RecordingPool()
 
     def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:

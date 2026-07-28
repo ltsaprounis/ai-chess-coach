@@ -36,7 +36,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         engine_bin = cfg.engine.bin_path or _DEFAULT_ENGINE_BIN
         # No binary is not fatal: everything but analysis still works.
         app.state.pool = (
-            await create_pool(engine_bin, cfg.engine.workers)
+            await create_pool(engine_bin, cfg.engine.workers, cfg.engine.eval_timeout)
             if engine_bin.exists()
             else None
         )

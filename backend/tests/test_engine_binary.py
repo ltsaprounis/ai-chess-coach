@@ -53,7 +53,7 @@ async def test_pool_analyzes_a_real_game() -> None:
         color="white", san_moves=["f3", "e5", "g4", "Qh4#"], pgn="fools mate"
     )
     progress: list[Progress] = []
-    pool = await create_pool(STOCKFISH_BIN, workers=1)
+    pool = await create_pool(STOCKFISH_BIN, workers=1, eval_timeout=30.0)
     try:
         analysis = await pool.analyze_game(
             game,
@@ -74,7 +74,7 @@ async def test_stream_eval_reports_increasing_depths_live() -> None:
     if not STOCKFISH_BIN.exists():
         pytest.skip(f"no Stockfish binary at {STOCKFISH_BIN}; run `make engine`")
 
-    pool = await create_pool(STOCKFISH_BIN, workers=1)
+    pool = await create_pool(STOCKFISH_BIN, workers=1, eval_timeout=30.0)
     try:
         evals = [e async for e in pool.stream_eval(chess.STARTING_FEN, depth=8)]
     finally:
@@ -95,7 +95,7 @@ async def test_eval_lines_reports_multiple_candidate_lines() -> None:
     if not STOCKFISH_BIN.exists():
         pytest.skip(f"no Stockfish binary at {STOCKFISH_BIN}; run `make engine`")
 
-    pool = await create_pool(STOCKFISH_BIN, workers=1)
+    pool = await create_pool(STOCKFISH_BIN, workers=1, eval_timeout=30.0)
     try:
         lines = await pool.eval_lines(chess.STARTING_FEN, depth=8, multipv=3)
     finally:

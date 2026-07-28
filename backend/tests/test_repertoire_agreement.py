@@ -18,6 +18,7 @@ from pathlib import Path
 
 from chess_coach.coach import build_report
 from chess_coach.domain import AnalyzedGame, Opening, OpeningStats
+from chess_coach.engine import ANALYSIS_VERSION
 from chess_coach.storage import (
     open_db,
     opening_stats,
@@ -62,7 +63,7 @@ def _both_producers(
     for game in games:
         if game.opening is not None:
             set_opening(db, game.id, game.opening)
-        save_analysis(db, game.analysis)
+        save_analysis(db, game.analysis, ANALYSIS_VERSION)
     from_sql = {(o.color, o.eco, o.name): o for o in opening_stats(db, "testuser")}
     from_coach = {
         (o.color, o.eco, o.name): o for o in build_report("testuser", games).openings
@@ -177,7 +178,7 @@ def test_storage_and_coach_build_the_same_repertoire(tmp_path: Path) -> None:
     for game in games:
         if game.opening is not None:
             set_opening(db, game.id, game.opening)
-        save_analysis(db, game.analysis)
+        save_analysis(db, game.analysis, ANALYSIS_VERSION)
 
     from_sql = {(o.color, o.eco, o.name): o for o in opening_stats(db, "testuser")}
     from_coach = {

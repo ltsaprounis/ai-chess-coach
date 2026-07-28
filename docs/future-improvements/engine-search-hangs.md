@@ -1,6 +1,12 @@
 # Engine workers hang: fixed-depth search has no cost bound
 
-Status: analysed and measured 2026-07-28, fix not scheduled. The
+Status: analysed and measured 2026-07-28; fix landed the same day —
+per-position `ucinewgame` at both call sites, `engine.eval_timeout`
+containment with a force-kill retire path, and an `analysis_version`
+column (stored rows grandfathered as version 1, current version 2)
+so `games_needing_analysis` re-queues every pre-fix row. Re-analysis
+of the stored games is the remaining step. Original report follows,
+unchanged. The
 defect lives in [04-engine.md](../04-engine.md)'s component; the
 reasons nobody noticed for forty minutes at a time are spread across
 [07-api.md](../07-api.md) and `backend/scripts/backfill.py`.

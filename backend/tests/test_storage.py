@@ -99,7 +99,7 @@ def test_filters(db: Db) -> None:
     loss = make_game(id="g-loss", result="loss", time_class="rapid", end_time=2)
     upsert_games(db, [win, loss])
     set_opening(db, "g-win", RUY_LOPEZ)
-    save_analysis(db, make_analysis(game_id="g-loss"))
+    save_analysis(db, make_analysis(game_id="g-loss"), version=1)
 
     def ids(filters: GameFilters) -> list[str]:
         return [g.id for g in list_games(db, "testuser", filters)]
@@ -154,12 +154,30 @@ def test_get_game_returns_none_for_unknown_id(db: Db) -> None:
 def test_analysis_round_trip(db: Db) -> None:
     upsert_games(db, [make_game()])
     analysis = make_analysis()
-    save_analysis(db, analysis)
+    save_analysis(db, analysis, version=1)
 
     detail = get_game(db, "game-1")
     assert detail is not None
     assert detail.analysis == analysis
     assert [g.analysis for g in list_analyzed_games(db, "testuser")] == [analysis]
+
+
+def test_save_analysis_round_trips_version(db: Db) -> None:
+    """`version` is not part of `GameAnalysis` (the API layer injects it,
+    like depth/thresholds), so it is read back with a raw query."""
+    upsert_games(db, [make_game()])
+    save_analysis(db, make_analysis(), version=3)
+
+    (row,) = db.execute(
+        "SELECT analysis_version FROM analyses WHERE game_id = ?", ("game-1",)
+    ).fetchall()
+    assert row["analysis_version"] == 3
+
+    save_analysis(db, make_analysis(), version=4)  # upsert overwrites
+    (row,) = db.execute(
+        "SELECT analysis_version FROM analyses WHERE game_id = ?", ("game-1",)
+    ).fetchall()
+    assert row["analysis_version"] == 4
 
 
 def test_games_needing_analysis_limit_takes_newest(db: Db) -> None:
@@ -171,25 +189,45 @@ def test_games_needing_analysis_limit_takes_newest(db: Db) -> None:
             make_game(id="g-3", end_time=3),
         ],
     )
-    assert [g.id for g in games_needing_analysis(db, "testuser", 16, limit=2)] == [
+    assert [g.id for g in games_needing_analysis(db, "testuser", 16, 1, limit=2)] == [
         "g-3",
         "g-2",
     ]
-    assert count_games_needing_analysis(db, "testuser", 16) == 3
+    assert count_games_needing_analysis(db, "testuser", 16, 1) == 3
 
-    save_analysis(db, make_analysis(game_id="g-3"))
-    assert count_games_needing_analysis(db, "testuser", 16) == 2
+    save_analysis(db, make_analysis(game_id="g-3"), version=1)
+    assert count_games_needing_analysis(db, "testuser", 16, 1) == 2
 
 
 def test_games_needing_analysis_respects_depth(db: Db) -> None:
     upsert_games(db, [make_game()])
-    assert [g.id for g in games_needing_analysis(db, "testuser", 16)] == ["game-1"]
+    assert [g.id for g in games_needing_analysis(db, "testuser", 16, 1)] == ["game-1"]
 
-    save_analysis(db, make_analysis(depth=10))
-    assert [g.id for g in games_needing_analysis(db, "testuser", 16)] == ["game-1"]
+    save_analysis(db, make_analysis(depth=10), version=1)
+    assert [g.id for g in games_needing_analysis(db, "testuser", 16, 1)] == ["game-1"]
 
-    save_analysis(db, make_analysis(depth=16))
-    assert games_needing_analysis(db, "testuser", 16) == []
+    save_analysis(db, make_analysis(depth=16), version=1)
+    assert games_needing_analysis(db, "testuser", 16, 1) == []
+
+
+def test_games_needing_analysis_respects_version(db: Db) -> None:
+    """A game analysed at the configured depth but under an older
+    `analysis_version` still needs (re-)analysis; one saved at the
+    current version does not (docs/future-improvements/
+    engine-search-hangs.md, "Re-analysing the existing rows")."""
+    upsert_games(db, [make_game()])
+    save_analysis(db, make_analysis(depth=16), version=1)
+    assert games_needing_analysis(db, "testuser", 16, 1) == []
+    assert count_games_needing_analysis(db, "testuser", 16, 1) == 0
+
+    # depth still meets the bar, but the row was saved under version 1
+    # and the caller now wants version 2.
+    assert [g.id for g in games_needing_analysis(db, "testuser", 16, 2)] == ["game-1"]
+    assert count_games_needing_analysis(db, "testuser", 16, 2) == 1
+
+    save_analysis(db, make_analysis(depth=16), version=2)
+    assert games_needing_analysis(db, "testuser", 16, 2) == []
+    assert count_games_needing_analysis(db, "testuser", 16, 2) == 0
 
 
 def test_games_needing_analysis_time_window_edges(db: Db) -> None:
@@ -204,7 +242,7 @@ def test_games_needing_analysis_time_window_edges(db: Db) -> None:
         return [
             g.id
             for g in games_needing_analysis(
-                db, "testuser", 16, since=since, until=until
+                db, "testuser", 16, 1, since=since, until=until
             )
         ]
 
@@ -214,10 +252,10 @@ def test_games_needing_analysis_time_window_edges(db: Db) -> None:
     assert ids(since=200) == ["recent"]  # since is inclusive
     assert ids(until=200) == ["old"]  # until is exclusive
 
-    assert count_games_needing_analysis(db, "testuser", 16, since=150) == 1
-    assert count_games_needing_analysis(db, "testuser", 16, until=150) == 1
-    assert count_games_needing_analysis(db, "testuser", 16, since=200) == 1
-    assert count_games_needing_analysis(db, "testuser", 16, until=200) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, since=150) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, until=150) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, since=200) == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, until=200) == 1
 
 
 def test_games_needing_analysis_time_class_filter(db: Db) -> None:
@@ -230,10 +268,10 @@ def test_games_needing_analysis_time_class_filter(db: Db) -> None:
     )
 
     assert [
-        g.id for g in games_needing_analysis(db, "testuser", 16, time_class="rapid")
+        g.id for g in games_needing_analysis(db, "testuser", 16, 1, time_class="rapid")
     ] == ["rapid"]
-    assert count_games_needing_analysis(db, "testuser", 16, time_class="rapid") == 1
-    assert count_games_needing_analysis(db, "testuser", 16, time_class="blitz") == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, time_class="rapid") == 1
+    assert count_games_needing_analysis(db, "testuser", 16, 1, time_class="blitz") == 1
 
 
 def test_games_needing_analysis_and_count_agree_on_a_mixed_fixture(db: Db) -> None:
@@ -252,15 +290,15 @@ def test_games_needing_analysis_and_count_agree_on_a_mixed_fixture(db: Db) -> No
             make_game(id="future-unanalyzed", end_time=300, time_class="rapid"),
         ],
     )
-    save_analysis(db, make_analysis(game_id="old-analyzed", depth=16))
-    save_analysis(db, make_analysis(game_id="in-window-analyzed", depth=16))
-    save_analysis(db, make_analysis(game_id="in-window-shallow", depth=8))
+    save_analysis(db, make_analysis(game_id="old-analyzed", depth=16), version=1)
+    save_analysis(db, make_analysis(game_id="in-window-analyzed", depth=16), version=1)
+    save_analysis(db, make_analysis(game_id="in-window-shallow", depth=8), version=1)
 
     found = games_needing_analysis(
-        db, "testuser", 16, since=100, until=200, time_class="rapid"
+        db, "testuser", 16, 1, since=100, until=200, time_class="rapid"
     )
     count = count_games_needing_analysis(
-        db, "testuser", 16, since=100, until=200, time_class="rapid"
+        db, "testuser", 16, 1, since=100, until=200, time_class="rapid"
     )
 
     assert {g.id for g in found} == {
@@ -284,7 +322,7 @@ def test_games_needing_analysis_filters_compose_with_limit(db: Db) -> None:
     )
 
     result = games_needing_analysis(
-        db, "testuser", 16, limit=2, since=100, until=200, time_class="rapid"
+        db, "testuser", 16, 1, limit=2, since=100, until=200, time_class="rapid"
     )
     assert [g.id for g in result] == ["in-scope-3", "in-scope-2"]
 
@@ -561,6 +599,7 @@ def test_opening_stats_acpl_is_move_weighted_not_a_mean_of_means(db: Db) -> None
                 "blunder": 0,
             },
         ),
+        version=1,
     )
     save_analysis(
         db,
@@ -579,6 +618,7 @@ def test_opening_stats_acpl_is_move_weighted_not_a_mean_of_means(db: Db) -> None
                 "blunder": 0,
             },
         ),
+        version=1,
     )
 
     (stat,) = opening_stats(db, "testuser")
@@ -617,6 +657,7 @@ def test_opening_stats_opening_acpl_excludes_later_phases(db: Db) -> None:
                 "blunder": 1,
             },
         ),
+        version=1,
     )
 
     (stat,) = opening_stats(db, "testuser")
@@ -634,8 +675,8 @@ def test_list_analyzed_games_time_window(db: Db) -> None:
         db,
         [make_game(id="old", end_time=100), make_game(id="recent", end_time=200)],
     )
-    save_analysis(db, make_analysis(game_id="old"))
-    save_analysis(db, make_analysis(game_id="recent"))
+    save_analysis(db, make_analysis(game_id="old"), version=1)
+    save_analysis(db, make_analysis(game_id="recent"), version=1)
 
     def ids(*, since: int | None = None, until: int | None = None) -> list[str]:
         return [
@@ -657,8 +698,8 @@ def test_time_class_filter(db: Db) -> None:
             make_game(id="blitz", time_class="blitz"),
         ],
     )
-    save_analysis(db, make_analysis(game_id="rapid"))
-    save_analysis(db, make_analysis(game_id="blitz"))
+    save_analysis(db, make_analysis(game_id="rapid"), version=1)
+    save_analysis(db, make_analysis(game_id="blitz"), version=1)
     for game_id in ("rapid", "blitz"):
         set_opening(db, game_id, RUY_LOPEZ)
 
@@ -712,8 +753,8 @@ def test_count_games_includes_unanalyzed_games(db: Db) -> None:
             make_game(id="unanalyzed-2", end_time=4),
         ],
     )
-    save_analysis(db, make_analysis(game_id="analyzed-1"))
-    save_analysis(db, make_analysis(game_id="analyzed-2"))
+    save_analysis(db, make_analysis(game_id="analyzed-1"), version=1)
+    save_analysis(db, make_analysis(game_id="analyzed-2"), version=1)
 
     assert count_games(db, "testuser") == 4
     assert len(list_analyzed_games(db, "testuser")) == 2
@@ -929,7 +970,7 @@ def test_concurrent_statements_serialize(db: Db) -> None:
     def save_all() -> None:
         try:
             for n in range(50):
-                save_analysis(db, make_analysis(game_id=f"g-{n}"))
+                save_analysis(db, make_analysis(game_id=f"g-{n}"), version=1)
         except Exception as exc:  # any sqlite error fails the test
             errors.append(exc)
 
@@ -968,7 +1009,7 @@ def test_two_perspectives_of_one_game_coexist(db: Db) -> None:
             make_game(id="uuid-9:bob", username="bob", color="black", opponent="alice"),
         ],
     )
-    save_analysis(db, make_analysis(game_id="uuid-9:alice"))
+    save_analysis(db, make_analysis(game_id="uuid-9:alice"), version=1)
 
     assert [g.id for g in list_games(db, "alice", GameFilters())] == ["uuid-9:alice"]
     assert [g.id for g in list_games(db, "bob", GameFilters())] == ["uuid-9:bob"]
@@ -1142,13 +1183,45 @@ def test_migration_007_backfills_aggregates_from_stored_evals(
     legacy.commit()
     legacy.close()
 
-    migrated = open_db(path)  # applies migrations 006 and 007
+    migrated = open_db(path)  # applies migrations 006, 007, and 008
     (stat,) = opening_stats(migrated, "alice")
     assert stat.analyzed_games == 1
     assert stat.player_moves == 2  # plies 1 and 21; ply 2 is black's
     assert stat.opening_moves == 1  # only ply 1 is <= OPENING_PLIES
     assert stat.avg_cp_loss == 20.0  # (10 + 30) / 2
     assert stat.opening_acpl == 10.0
+    migrated.close()
+
+
+def test_migration_008_grandfathers_existing_analyses_as_version_1(
+    tmp_path: Path,
+) -> None:
+    """Analyses saved before `analysis_version` existed must come out
+    reading as version 1 -- the carried-state semantic migration 008's
+    DEFAULT deliberately assigns -- so a later engine version bump can
+    mark every pre-existing row stale at once, without a data migration
+    re-deriving anything (docs/future-improvements/
+    engine-search-hangs.md, "Re-analysing the existing rows")."""
+    path = tmp_path / "legacy-version.sqlite3"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(_LEGACY_V5_SCHEMA)
+    legacy.execute(
+        "INSERT INTO games (id, username, color, pgn, san_moves,"
+        " time_control, time_class, result, end_time, opponent,"
+        " player_rating, opponent_rating) VALUES ('uuid-1', 'alice',"
+        " 'white', '1. e4 *', '[\"e4\"]', '600', 'rapid', 'win', 100,"
+        " 'bob', 1500, 1490)"
+    )
+    legacy.execute(
+        "INSERT INTO analyses (game_id, depth, evals, acpl_by_phase,"
+        " judgment_counts) VALUES ('uuid-1', 16, '[]', '{}', '{}')"
+    )
+    legacy.commit()
+    legacy.close()
+
+    migrated = open_db(path)  # applies migrations 006, 007, and 008
+    (row,) = migrated.execute("SELECT analysis_version FROM analyses").fetchall()
+    assert row["analysis_version"] == 1
     migrated.close()
 
 

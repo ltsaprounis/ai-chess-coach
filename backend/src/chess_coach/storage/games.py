@@ -197,6 +197,7 @@ def latest_game_time(db: Db, username: str) -> int | None:
 def _needing_analysis_clauses(
     username: str,
     depth: int,
+    version: int,
     *,
     since: int | None,
     until: int | None,
@@ -206,10 +207,17 @@ def _needing_analysis_clauses(
 
     Mirrors `list_analyzed_games`/`count_games`'s window semantics
     exactly (`since` inclusive, `until` exclusive) so a scoped analyze
-    run and its remaining count describe the same games.
+    run and its remaining count describe the same games. A row shallower
+    than `depth` OR saved under an `analysis_version` older than
+    `version` both count as needing analysis, so an engine version bump
+    (migration 008's grandfathered version 1) re-queues every stored
+    game with no endpoint change.
     """
-    clauses = ["g.username = ?", "(a.game_id IS NULL OR a.depth < ?)"]
-    params: list[object] = [username, depth]
+    clauses = [
+        "g.username = ?",
+        "(a.game_id IS NULL OR a.depth < ? OR a.analysis_version < ?)",
+    ]
+    params: list[object] = [username, depth, version]
     if since is not None:
         clauses.append("g.end_time >= ?")
         params.append(since)
@@ -226,21 +234,24 @@ def games_needing_analysis(
     db: Db,
     username: str,
     depth: int,
+    version: int,
     limit: int | None = None,
     *,
     since: int | None = None,
     until: int | None = None,
     time_class: TimeClass | None = None,
 ) -> list[Game]:
-    """Newest games with no analysis, or one shallower than `depth`.
+    """Newest games with no analysis, one shallower than `depth`, or one
+    saved under an `analysis_version` older than `version`.
 
-    `since`/`until` (epoch seconds; `since` inclusive, `until`
-    exclusive) restrict to a time window; `time_class` restricts to one
-    time control. All default to the full history. Newest-first order
-    and the depth semantics are unchanged.
+    `version` is `engine.ANALYSIS_VERSION`, injected by the API layer
+    like `depth` — storage records it, never defines it. `since`/`until`
+    (epoch seconds; `since` inclusive, `until` exclusive) restrict to a
+    time window; `time_class` restricts to one time control. All
+    default to the full history. Newest-first order is unchanged.
     """
     clauses, params = _needing_analysis_clauses(
-        username, depth, since=since, until=until, time_class=time_class
+        username, depth, version, since=since, until=until, time_class=time_class
     )
     rows = db.execute(
         f"""
@@ -259,6 +270,7 @@ def count_games_needing_analysis(
     db: Db,
     username: str,
     depth: int,
+    version: int,
     *,
     since: int | None = None,
     until: int | None = None,
@@ -266,7 +278,7 @@ def count_games_needing_analysis(
 ) -> int:
     """Count of `games_needing_analysis`'s scope, same filters."""
     clauses, params = _needing_analysis_clauses(
-        username, depth, since=since, until=until, time_class=time_class
+        username, depth, version, since=since, until=until, time_class=time_class
     )
     (row,) = db.execute(
         f"""

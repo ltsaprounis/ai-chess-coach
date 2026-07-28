@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import aclosing, suppress
+from contextlib import aclosing
 from pathlib import Path
 
 import chess
@@ -39,6 +39,53 @@ _PV_SAN_CAP = 10  # plenty for display; PVs can run much longer
 _CLOSE_TIMEOUT = 3.0
 
 
+async def _bounded[T](
+    coro: Awaitable[T], engine: Engine, timeout: float, what: str
+) -> T:
+    """Run `coro` bounded by `timeout` seconds, killing `engine` on expiry.
+
+    `asyncio.wait_for` cancels and awaits its coroutine in one step, which
+    is not enough for a wedged engine: `Engine.evaluate`/`stream_infos` is
+    suspended waiting for a UCI reply that will never come, and cancelling
+    that await alone frees this coroutine but leaves the OS process
+    running at 100% CPU forever — the exact failure this bound exists to
+    contain (docs/future-improvements/engine-search-hangs.md). So on
+    expiry we kill the process FIRST — closing its pipes makes
+    python-chess's protocol error out — and only then cancel and await
+    the task, so the caller never waits past ~`timeout` and no task is
+    left dangling.
+
+    `asyncio.wait` does not cancel the futures it was given when *it*
+    is cancelled, so if our own caller is cancelled instead of timing
+    out (shutdown, an SSE client disconnecting, `aclosing()` unwinding
+    an early `stream_eval` close) the inner task must be cancelled and
+    drained here too, or it leaks: for the streaming path a still
+    in-flight `infos.__anext__()` task holds the async generator
+    "running", so the `aclosing()` cleanup that follows raises
+    `aclose(): ... already running` instead of stopping the search, and
+    the worker would go back to the idle queue mid-search.
+    """
+    task: asyncio.Task[T] = asyncio.ensure_future(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+    except asyncio.CancelledError:
+        task.cancel()
+        # No timeout and no suppress: asyncio.wait doesn't raise task's
+        # own exception (we don't need it — we're re-raising our own
+        # cancellation below), but it *does* propagate a second,
+        # independent cancellation of this coroutine straight through,
+        # which is exactly what should happen rather than being read as
+        # "the drain finished".
+        await asyncio.wait({task})
+        raise
+    if task in done:
+        return task.result()
+    engine.kill()
+    task.cancel()
+    await asyncio.wait({task})  # drain; see the comment above
+    raise EngineError(f"engine timed out {what} after {timeout}s")
+
+
 class AnalysisPool:
     """N engine processes behind a queue; analyze_game checks one out.
 
@@ -49,10 +96,15 @@ class AnalysisPool:
     """
 
     def __init__(
-        self, engines: list[Engine], respawn: EngineFactory | None = None
+        self,
+        engines: list[Engine],
+        respawn: EngineFactory | None = None,
+        *,
+        eval_timeout: float,
     ) -> None:
         self._engines = list(engines)
         self._respawn = respawn
+        self._eval_timeout = eval_timeout
         # None marks the empty slot of a retired worker, respawned at
         # the next checkout.
         self._idle: asyncio.Queue[Engine | None] = asyncio.Queue()
@@ -84,14 +136,21 @@ class AnalysisPool:
         empty slot instead of the engine. Without a respawner the old
         recycle behavior stands — better a flaky worker than a pool that
         shrinks to nothing.
+
+        A wedged engine ignores `quit` (it never replies), so a close
+        that times out or errors falls back to killing the process —
+        otherwise a timed-out worker keeps burning a core forever
+        (docs/future-improvements/engine-search-hangs.md).
         """
         if self._respawn is None:
             self._idle.put_nowait(engine)
             return
         if engine in self._engines:
             self._engines.remove(engine)
-        with suppress(Exception):
+        try:
             await asyncio.wait_for(engine.close(), timeout=_CLOSE_TIMEOUT)
+        except Exception:
+            engine.kill()
         self._idle.put_nowait(None)
 
     async def analyze_game(
@@ -108,7 +167,13 @@ class AnalysisPool:
 
             async def evaluate(fen: str) -> PositionEval:
                 nonlocal seen
-                result = await engine.evaluate(fen, opts.depth)
+                ply = min(seen + 1, total)  # 1-based position index, capped
+                result = await _bounded(
+                    engine.evaluate(fen, opts.depth),
+                    engine,
+                    self._eval_timeout,
+                    f"analyzing game {game.id} ply {ply} ({fen})",
+                )
                 seen += 1
                 if on_progress is not None:
                     # seen counts positions (plies + 1); clamp for display
@@ -172,7 +237,20 @@ class AnalysisPool:
             async with aclosing(engine.stream_infos(board, depth, multipv)) as infos:
                 lines_by_rank: dict[int, EvalLine] = {}
                 last_snapshot: list[EvalLine] | None = None
-                async for info in infos:
+                while True:
+                    # Bounds the gap between consecutive infos (which also
+                    # bounds time-to-first-info): a healthy search reports
+                    # depths often, so silence this long means a wedged
+                    # worker, not a slow one.
+                    try:
+                        info = await _bounded(
+                            infos.__anext__(),
+                            engine,
+                            self._eval_timeout,
+                            f"live eval of {board.fen()}",
+                        )
+                    except StopAsyncIteration:
+                        break
                     line = _eval_line(info, board)
                     if line is None:
                         continue
@@ -192,17 +270,25 @@ class AnalysisPool:
                 self._idle.put_nowait(engine)
 
     async def close(self) -> None:
+        """Quit every worker; a wedged one is killed rather than left
+        to hang shutdown forever (same discipline as `_retire`).
+        """
         for engine in self._engines:
-            await engine.close()
+            try:
+                await asyncio.wait_for(engine.close(), timeout=_CLOSE_TIMEOUT)
+            except Exception:
+                engine.kill()
 
 
-async def create_pool(bin_path: Path, workers: int) -> AnalysisPool:
+async def create_pool(
+    bin_path: Path, workers: int, eval_timeout: float
+) -> AnalysisPool:
     engines = [await Engine.open(bin_path) for _ in range(workers)]
 
     async def respawn() -> Engine:
         return await Engine.open(bin_path)
 
-    return AnalysisPool(engines, respawn=respawn)
+    return AnalysisPool(engines, respawn=respawn, eval_timeout=eval_timeout)
 
 
 def _eval_line(info: chess.engine.InfoDict, board: chess.Board) -> EvalLine | None:
