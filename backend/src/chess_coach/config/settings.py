@@ -8,7 +8,7 @@ from typing import Self, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from chess_coach.domain import CoachAgent, Thresholds
+from chess_coach.domain import BrilliantThresholds, CoachAgent, Thresholds
 
 # Source-checkout root (four parents above this file). Relative
 # config paths anchor here, never at the cwd, so the server, scripts,
@@ -83,6 +83,7 @@ class CoachConfig(BaseModel):
 class AppConfig(BaseModel):
     engine: EngineConfig = Field(default_factory=EngineConfig)
     thresholds: Thresholds = Field(default_factory=Thresholds)
+    brilliant: BrilliantThresholds = Field(default_factory=BrilliantThresholds)
     coach: CoachConfig = Field(default_factory=CoachConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)

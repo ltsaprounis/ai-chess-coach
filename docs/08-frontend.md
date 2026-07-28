@@ -30,7 +30,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 3. **Game** — `GET /games/{id}`: interactive board
    (`react-chessboard` + `chess.js` for replay), eval graph (custom
    SVG over `evals`), move list with judgment badges; clicking a
-   move syncs board + graph. On an analyzed game the board overlays
+   move syncs board + graph. The page supports ply deep-linking: a
+   `?ply=N` query param opens the board positioned after move N
+   (clamped to the game's range once moves load; absent or invalid
+   means the start position), so the Dashboard's highlight rows and
+   any shared link land on the exact move. Navigating moves afterwards
+   is local state; it does not rewrite the URL. On an analyzed game
+   the board overlays
    the analysis: the last move's squares are shaded by its judgment,
    and a green best-move arrow (from the stored `best_move`) appears at
    positions where the move actually played was an inaccuracy, mistake,
@@ -98,12 +104,25 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    respects `color` when present. The ACPL-by-phase chart shows the
    move count behind each bar and renders "no endgame moves" where the
    phase has none, rather than a zero bar that reads as flawless play.
+   Two highlight sections — **Brilliant moves** and **Blunders** —
+   render `GET /players/{u}/highlights` (fetched with the same
+   `since`/`time_class` as report and openings). Each row carries the
+   citation identity (date, opponent, color, the move as
+   `26...Nb6`-style SAN, result) plus the number that matters: the
+   player-POV eval after the move for brilliancies (folded from the
+   white-POV fields by `color`, mates rendered as `#N`), centipawn
+   loss for blunders. Every row links to `/games/{id}?ply={ply}` —
+   the Game page's ply deep link — so the student lands on the exact
+   position. Brilliancies are rare and render in full; the blunders
+   table caps its initial render (top rows by recency) behind a
+   "show all N" toggle so an all-time window cannot flood the page.
+
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
    (per class, defaulting to the most-played so stats are never mixed
    across controls) filters scope the whole page: games-derived stats
-   are filtered client-side, while report and openings are re-fetched
-   with the `since` window and `time_class`. Charts are custom SVG
-   components — no chart library.
+   are filtered client-side, while report, openings, and highlights
+   are re-fetched with the `since` window and `time_class`. Charts
+   are custom SVG components — no chart library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback). The same time-window and

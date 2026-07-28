@@ -233,6 +233,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/highlights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Highlights
+         * @description Blunders and brilliancies over the player's analyzed games.
+         *
+         *     `since`/`until` (epoch seconds) restrict to a time window;
+         *     `time_class` restricts to one time control — same as `/report`. An
+         *     unknown player simply has no analyzed games, so this returns empty
+         *     lists rather than 404ing, consistent with `/report`/`/openings`.
+         */
+        get: operations["player_highlights_api_players__username__highlights_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{username}/coach": {
         parameters: {
             query?: never;
@@ -535,6 +560,47 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HighlightMove
+         * @description One linkable move for the Dashboard's blunders/brilliancies lists.
+         */
+        HighlightMove: {
+            /** Game Id */
+            game_id: string;
+            /** End Time */
+            end_time: number;
+            /**
+             * Time Class
+             * @enum {string}
+             */
+            time_class: "bullet" | "blitz" | "rapid" | "daily";
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "win" | "loss" | "draw";
+            /** Opponent */
+            opponent: string;
+            /** Opening Name */
+            opening_name: string | null;
+            /** Ply */
+            ply: number;
+            /** Move Number */
+            move_number: number;
+            /** San */
+            san: string;
+            /** Cp Loss */
+            cp_loss: number;
+            /** Eval After Cp */
+            eval_after_cp: number | null;
+            /** Eval After Mate */
+            eval_after_mate: number | null;
+        };
+        /**
          * MonthStats
          * @description One calendar month — the trend row that says whether it helped.
          */
@@ -668,6 +734,13 @@ export interface components {
             judgment_counts: {
                 [key: string]: number;
             };
+        };
+        /** PlayerHighlights */
+        PlayerHighlights: {
+            /** Blunders */
+            blunders: components["schemas"]["HighlightMove"][];
+            /** Brilliancies */
+            brilliancies: components["schemas"]["HighlightMove"][];
         };
         /**
          * PlayerReport
@@ -1154,6 +1227,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_highlights_api_players__username__highlights_get: {
+        parameters: {
+            query?: {
+                since?: number | null;
+                until?: number | null;
+                time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
+            };
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerHighlights"];
                 };
             };
             /** @description Validation Error */

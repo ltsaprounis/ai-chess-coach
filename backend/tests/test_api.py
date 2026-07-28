@@ -48,7 +48,7 @@ from chess_coach.storage import (
     save_explanation,
     upsert_games,
 )
-from tests.factories import make_analysis, make_game
+from tests.factories import make_analysis, make_analyzed, make_game
 from tests.http import get, post
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -255,6 +255,23 @@ def seed(
             ANALYSIS_VERSION - 1 if game_id in (stale or set()) else ANALYSIS_VERSION
         )
         save_analysis(db, make_analysis(game_id=game_id), version)
+    db.close()
+
+
+def seed_analyzed(db_path: Path, games: list[AnalyzedGame]) -> None:
+    """Store `make_analyzed` games with their real (non-canned) analyses,
+    for tests that need actual judgments (blunders, brilliancies) rather
+    than `make_analysis`'s fixed two-move stub."""
+    db = open_db(db_path)
+    upsert_games(
+        db,
+        [
+            Game.model_validate(g.model_dump(exclude={"analysis", "opening"}))
+            for g in games
+        ],
+    )
+    for g in games:
+        save_analysis(db, g.analysis, ANALYSIS_VERSION)
     db.close()
 
 
@@ -991,6 +1008,72 @@ def test_report_without_filters_still_states_full_history_coverage(
     assert report["requested_until"] is None
     assert report["games_in_scope"] == 2
     assert report["games_analyzed"] == 1
+
+
+def test_highlights_blunder_shows_up_with_game_id_and_ply(
+    client: TestClient, db_path: Path
+) -> None:
+    ruy_moves = ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    # Player is white: moves at ply 1 (e4), 3 (Nf3), 5 (Bb5); the third
+    # loss (250, over the default 200 blunder cutoff) lands on ply 5.
+    seed_analyzed(
+        db_path,
+        [make_analyzed("g-1", ruy_moves, losses=(0, 0, 250))],
+    )
+
+    body: Any = get(client, "/api/players/testuser/highlights").json()
+
+    assert [b["game_id"] for b in body["blunders"]] == ["g-1"]
+    assert body["blunders"][0]["ply"] == 5
+    assert body["blunders"][0]["san"] == "Bb5"
+
+
+def test_highlights_since_and_time_class_filters_scope_the_result(
+    client: TestClient, db_path: Path
+) -> None:
+    ruy_moves = ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    seed_analyzed(
+        db_path,
+        [
+            make_analyzed(
+                "old",
+                ruy_moves,
+                end_time=100,
+                losses=(0, 0, 250),
+                time_class="rapid",
+            ),
+            make_analyzed(
+                "recent",
+                ruy_moves,
+                end_time=200,
+                losses=(0, 0, 250),
+                time_class="rapid",
+            ),
+        ],
+    )
+
+    full: Any = get(client, "/api/players/testuser/highlights").json()
+    # Newest game first.
+    assert [b["game_id"] for b in full["blunders"]] == ["recent", "old"]
+
+    since = {"since": "150"}  # excludes the old game (end_time 100)
+    windowed: Any = get(client, "/api/players/testuser/highlights", params=since).json()
+    assert [b["game_id"] for b in windowed["blunders"]] == ["recent"]
+
+    # Both seeded games are rapid, so a blitz filter empties both lists.
+    blitz: Any = get(
+        client, "/api/players/testuser/highlights", params={"time_class": "blitz"}
+    ).json()
+    assert blitz["blunders"] == []
+    assert blitz["brilliancies"] == []
+
+
+def test_highlights_unknown_player_returns_empty_lists(client: TestClient) -> None:
+    """No stored games at all -- empty lists, not a 404, consistent with
+    `/report` and `/openings`."""
+    body: Any = get(client, "/api/players/nobody-here/highlights").json()
+
+    assert body == {"blunders": [], "brilliancies": []}
 
 
 def test_coach_cache_miss_prompt_states_coverage_when_games_are_unanalyzed(

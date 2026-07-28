@@ -27,6 +27,32 @@ def build_report(username: str, games: list[AnalyzedGame], *,
 # Deterministic markdown template, also shown/copyable in the UI.
 def render_prompt(report: PlayerReport) -> str
 
+# --- Highlights (Dashboard-only; deliberately outside PlayerReport
+# --- so the coaching prompt doesn't grow thousands of rows) ---
+
+class HighlightMove(BaseModel):    # one linkable move: identity the
+    game_id: str; end_time: int    # student can find (date, opponent,
+    time_class: TimeClass          # move number) plus the numbers the
+    color: Color; result: Result   # row renders
+    opponent: str
+    opening_name: str | None
+    ply: int                       # 1-based, matches MoveEval.ply
+    move_number: int               # the "26" in "26...Nb6"
+    san: str
+    cp_loss: int
+    eval_after_cp: int | None      # after the move, white POV like
+    eval_after_mate: int | None    # MoveEval — the UI folds by color
+
+class PlayerHighlights(BaseModel):
+    blunders: list[HighlightMove]      # newest game first, then ply
+    brilliancies: list[HighlightMove]  # same order
+
+# Pure static analysis over stored analyses — SEE + stored evals; no
+# engine calls, no LLM. `thresholds` comes from config's `brilliant`
+# section (a domain type, like judgment `Thresholds`).
+def build_highlights(games: list[AnalyzedGame], *,
+                     thresholds: BrilliantThresholds) -> PlayerHighlights
+
 # Bumped whenever the template changes materially. The API layer keys
 # the report cache on it, so a reworded prompt invalidates old advice
 # instead of serving it against a template that no longer exists.
@@ -278,6 +304,58 @@ Each tag must be deterministic and unit-tested. The refutation is the
 opponent's `best_move` at the following ply, which the stored evals
 already carry.
 
+### Highlights: blunders and brilliancies
+
+`build_highlights` produces the Dashboard's two highlight lists from
+already-stored analyses — no re-analysis, no engine calls, no LLM —
+and stays **out of `PlayerReport`**: the report feeds the coaching
+prompt, and thousands of per-move rows are display data, not coaching
+signal.
+
+**Blunders** are simply the player's moves with
+`MoveEval.judgment == "blunder"` — the stored judgment is the source
+of truth, never re-derived here. An illegal SAN mid-replay ends that
+game's walk (the same tolerance `classify` applies in 05), keeping
+whatever the walk had collected up to that point.
+
+**Brilliancies** follow chess.com's post-2021 definition — a *sound
+piece sacrifice* — approximated over single-PV analyses
+(github issue #1). A player move is brilliant iff all four hold,
+cutoffs from `BrilliantThresholds`:
+
+1. **Engine-best**: `cp_loss <= best_tolerance_cp` (default 0 — the
+   move is the engine's choice or exactly as good).
+2. **Real sacrifice**: after the move, the opponent's best static
+   exchange anywhere on the board nets at least `sac_points` (default
+   2) more than the move itself just captured. SEE is computed with
+   python-chess over *legal* captures (pins respected), least-valuable
+   attacker first, `PIECE_POINTS` values with a king attacker counting
+   as value 0 (it may capture, but a legal king capture implies no
+   recapture chain exists); "minus what the move
+   captured" is what makes an even trade or a queen-grab-leaving-a-
+   knight not a sacrifice, and the 2-point floor is what excludes
+   pure pawn sacs — a minor piece or the exchange is the entry bar.
+3. **Not already winning**: player-POV eval before the move
+   `<= winning_cap_cp` (default +200) — a flashy sac in a decided
+   game doesn't count. The before-eval is the previous ply's stored
+   eval, folded to the player's POV with mate at `±MATE_SCORE`; the
+   game's first move counts as equal.
+4. **Still sound after**: player-POV eval after the move
+   `>= sound_floor_cp` (default 0).
+
+Known divergence, accepted for v1: single-PV storage cannot tell
+whether a *safe* alternative existed, so moves chess.com would call
+"Great" (the sac was the only good move) are also awarded here.
+Closing that gap needs MultiPV at analysis time and a re-analyzed
+archive — recorded in github issue #1, not built.
+
+Both lists carry the citation identity this doc already requires
+(date, time class, color, opponent, opening, move number with side)
+plus `game_id` and `ply`, so the UI deep-links straight to the move
+on the Game page. Evals stay white-POV as stored; the consumer folds
+by `color`. Sorting is deterministic: newest game first
+(`end_time` desc, ties by `game_id`), then ascending `ply`.
+
 ### Prompt
 
 `render_prompt` renders the report into a fixed markdown template —
@@ -370,7 +448,8 @@ weaknesses, and carries the rules the data alone cannot enforce:
 - `chess_coach.domain`; `claude-agent-sdk` for the v1 provider;
   `github-copilot-sdk` for the github-copilot provider; python-chess,
   which replays each game to derive turning-point FENs, re-derive
-  phases for the move-weighted aggregates, and tag error patterns.
+  phases for the move-weighted aggregates, tag error patterns, and
+  run the highlights' static exchange evaluation.
 - Consumed by the [API layer](07-api.md), which assembles the
   input from [storage](03-storage.md) and injects each configured
   `CoachAgent` from `cfg.coach.agents` (+ the API key once the

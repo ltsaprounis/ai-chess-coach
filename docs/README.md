@@ -102,6 +102,10 @@ Phase = Literal["opening", "middlegame", "endgame"]
 class Thresholds(BaseModel):    # centipawn-loss judgment cutoffs
     inaccuracy: int; mistake: int; blunder: int
 
+class BrilliantThresholds(BaseModel):   # sound-sacrifice cutoffs
+    sac_points: int; best_tolerance_cp: int    # (docs/06-coach.md,
+    winning_cap_cp: int; sound_floor_cp: int   #  "Highlights")
+
 class Game(BaseModel):
     id: str; username: str; color: Color
     pgn: str; san_moves: list[str]; time_control: str

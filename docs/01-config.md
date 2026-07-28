@@ -37,6 +37,11 @@ class AppConfig(BaseModel):
                                 # bin_path None -> repo submodule build
     thresholds: Thresholds      # centipawn loss: inaccuracy=50,
                                 # mistake=100, blunder=200
+    brilliant: BrilliantThresholds  # sound-sacrifice cutoffs for the
+                                # coach highlights surface: sac_points
+                                # =2, best_tolerance_cp=0,
+                                # winning_cap_cp=200, sound_floor_cp=0
+                                # (docs/06-coach.md, "Highlights")
     coach: CoachConfig          # selectable coach agents (below)
     server: ServerConfig        # port
     storage: StorageConfig      # db_path
@@ -51,11 +56,12 @@ class CoachConfig(BaseModel):
     default_agent: str          # resolved: omitted -> first agent id
 ```
 
-`Thresholds`, `LlmConfig`, and `CoachAgent` (an `LlmConfig` subclass
-adding `id` + `label`) are domain types — [engine](04-engine.md),
-[coach](06-coach.md), and the [API layer](07-api.md) consume them
-too. The other sub-models (`EngineConfig`, `CoachConfig`,
-`ServerConfig`, `StorageConfig`, `OpeningsConfig`) are config-local.
+`Thresholds`, `BrilliantThresholds`, `LlmConfig`, and `CoachAgent`
+(an `LlmConfig` subclass adding `id` + `label`) are domain types —
+[engine](04-engine.md), [coach](06-coach.md), and the
+[API layer](07-api.md) consume them too. The other sub-models
+(`EngineConfig`, `CoachConfig`, `ServerConfig`, `StorageConfig`,
+`OpeningsConfig`) are config-local.
 
 Validation beyond field types: agent ids must be non-empty and
 unique, `agents` must not be empty, and `default_agent` must match a
@@ -86,8 +92,9 @@ file at the default path just means all defaults.
 
 ## Dependencies
 
-- `chess_coach.domain` (`Thresholds`, `LlmConfig`, `CoachAgent`).
-  Libraries: pydantic v2 and PyYAML (`yaml.safe_load` → validation).
+- `chess_coach.domain` (`Thresholds`, `BrilliantThresholds`,
+  `LlmConfig`, `CoachAgent`). Libraries: pydantic v2 and PyYAML
+  (`yaml.safe_load` → validation).
 - Consumed by the [API layer](07-api.md), which injects individual
   values into [engine](04-engine.md) and [coach](06-coach.md). Those
   components receive plain arguments and never import this module.

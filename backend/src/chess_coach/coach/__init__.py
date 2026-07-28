@@ -1,6 +1,11 @@
 """Coach component — see docs/06-coach.md."""
 
 from chess_coach.coach.context import MoveContext, build_move_context
+from chess_coach.coach.highlights import (
+    HighlightMove,
+    PlayerHighlights,
+    build_highlights,
+)
 from chess_coach.coach.prompt import (
     PROMPT_VERSION,
     render_explain_prompt,
@@ -24,8 +29,11 @@ __all__ = [
     "CoachProviderError",
     "CopilotSdkProvider",
     "ExplainEvent",
+    "HighlightMove",
     "MoveContext",
+    "PlayerHighlights",
     "PositionAnalystFn",
+    "build_highlights",
     "build_move_context",
     "build_report",
     "create_provider",

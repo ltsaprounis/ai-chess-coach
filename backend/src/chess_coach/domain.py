@@ -39,6 +39,21 @@ class Thresholds(BaseModel):
     blunder: int = 200
 
 
+class BrilliantThresholds(BaseModel):
+    """Cutoffs for tagging a stored move brilliant (docs/06-coach.md).
+
+    A brilliant move is a sound piece sacrifice: engine-approved, giving
+    up real material by static exchange, played from a position not
+    already won, and still at least holding afterwards. Loaded by config,
+    applied by coach — shared here like `Thresholds` for the same reason.
+    """
+
+    sac_points: int = 2  # min net material given up (SEE, pawn units)
+    best_tolerance_cp: int = 0  # max cp_loss to still count engine-best
+    winning_cap_cp: int = 200  # eval before (player POV) must be <= this
+    sound_floor_cp: int = 0  # eval after (player POV) must be >= this
+
+
 class LlmConfig(BaseModel):
     # claude-agent-sdk rides the local Claude Code login: no API key.
     # No token ceiling: neither shipped provider's SDK takes one (both

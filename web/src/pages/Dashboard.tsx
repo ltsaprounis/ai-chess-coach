@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type PlayerReport, score } from "../api.ts";
+import { api, type HighlightMove, type PlayerReport, score } from "../api.ts";
 import type { BarDatum } from "../components/BarChart.tsx";
 import BarChart from "../components/BarChart.tsx";
 import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
@@ -11,6 +11,12 @@ import MonthlyMetricChart from "../components/MonthlyMetricChart.tsx";
 import RatingChart from "../components/RatingChart.tsx";
 import RepertoireTable from "../components/RepertoireTable.tsx";
 import StatsFilters from "../components/StatsFilters.tsx";
+import {
+  foldToPlayerPov,
+  formatCpLoss,
+  formatPlayerEval,
+  moveLabel,
+} from "../highlights.ts";
 import { groupByFamily, type OpeningFamily } from "../openings.ts";
 import {
   latestRatings,
@@ -24,6 +30,12 @@ import {
 import { useStatsFilters } from "../useStatsFilters.ts";
 
 const JUDGMENTS = ["best", "good", "inaccuracy", "mistake", "blunder"] as const;
+
+/** Blunders shown before the "show all" toggle — brilliancies are
+ *  rare enough (chess.com's sound-sacrifice definition) to always
+ *  render in full, but an all-time blunders window could otherwise
+ *  flood the page. */
+const BLUNDER_PAGE = 20;
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
@@ -53,6 +65,53 @@ function Tile({ value, label }: { value: string | number; label: string }) {
     <div className="tile">
       <div className="tile-value">{value}</div>
       <div className="tile-label">{label}</div>
+    </div>
+  );
+}
+
+/** Shared table markup for both highlight sections — they differ only
+ *  in which "number that matters" column they show (player-POV eval
+ *  after for brilliancies, cp lost for blunders). Every row deep-links
+ *  to the Game page at its ply, docs/08-frontend.md's Game section. */
+function HighlightsTable({
+  moves,
+  numberHeader,
+  numberValue,
+}: {
+  moves: HighlightMove[];
+  numberHeader: string;
+  numberValue: (move: HighlightMove) => string;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Color</th>
+            <th>Opponent</th>
+            <th>Move</th>
+            <th>{numberHeader}</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {moves.map((move) => (
+            <tr key={`${move.game_id}-${move.ply}`}>
+              <td>
+                <Link to={`/games/${move.game_id}?ply=${move.ply}`}>
+                  {new Date(move.end_time * 1000).toLocaleDateString()}
+                </Link>
+              </td>
+              <td>{move.color}</td>
+              <td>{move.opponent}</td>
+              <td>{moveLabel(move)}</td>
+              <td>{numberValue(move)}</td>
+              <td className={`result-${move.result}`}>{move.result}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -97,6 +156,7 @@ function errorExampleLabel(
 export default function Dashboard() {
   const { username = "" } = useParams();
   const [minGames, setMinGames] = useState(5);
+  const [showAllBlunders, setShowAllBlunders] = useState(false);
 
   const games = useQuery({
     queryKey: ["allGames", username],
@@ -121,6 +181,10 @@ export default function Dashboard() {
   const report = useQuery({
     queryKey: ["report", username, windowDays, timeClass],
     queryFn: () => api.report(username, { since, time_class: classParam }),
+  });
+  const highlights = useQuery({
+    queryKey: ["highlights", username, windowDays, timeClass],
+    queryFn: () => api.highlights(username, { since, time_class: classParam }),
   });
 
   const scopedGames = useMemo(
@@ -240,6 +304,11 @@ export default function Dashboard() {
     }
     return `/players/${username}/games?${params.toString()}`;
   };
+
+  const blunders = highlights.data?.blunders ?? [];
+  const shownBlunders = showAllBlunders
+    ? blunders
+    : blunders.slice(0, BLUNDER_PAGE);
 
   const hasAnyGames = games.isSuccess && (games.data?.length ?? 0) > 0;
   const hasScopedGames = stats.overall.games > 0;
@@ -528,6 +597,57 @@ export default function Dashboard() {
           </>
         )}
       </section>
+
+      {hasScopedGames && (
+        <section>
+          <h2>Brilliant moves</h2>
+          {highlights.isPending && <p>Loading…</p>}
+          {highlights.isError && <p role="alert">{highlights.error.message}</p>}
+          {highlights.isSuccess &&
+            highlights.data.brilliancies.length === 0 && (
+              <p className="panel-empty">
+                No brilliant moves in this window yet — they're rare by design.
+              </p>
+            )}
+          {highlights.isSuccess && highlights.data.brilliancies.length > 0 && (
+            <HighlightsTable
+              moves={highlights.data.brilliancies}
+              numberHeader="Eval after (you)"
+              numberValue={(move) => formatPlayerEval(foldToPlayerPov(move))}
+            />
+          )}
+        </section>
+      )}
+
+      {hasScopedGames && (
+        <section>
+          <h2>Blunders</h2>
+          {highlights.isPending && <p>Loading…</p>}
+          {highlights.isError && <p role="alert">{highlights.error.message}</p>}
+          {highlights.isSuccess && blunders.length === 0 && (
+            <p className="panel-empty">No blunders in this window.</p>
+          )}
+          {highlights.isSuccess && blunders.length > 0 && (
+            <>
+              <HighlightsTable
+                moves={shownBlunders}
+                numberHeader="CP lost"
+                numberValue={(move) => formatCpLoss(move.cp_loss)}
+              />
+              {blunders.length > BLUNDER_PAGE && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllBlunders((shown) => !shown)}
+                >
+                  {showAllBlunders
+                    ? "Show fewer"
+                    : `Show all ${blunders.length}`}
+                </button>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {hasScopedGames && analyzed !== null && (
         <section>

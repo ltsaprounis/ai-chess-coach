@@ -42,6 +42,7 @@ run. Active runs are never swept.
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. "Unanalyzed" includes games whose stored analysis predates `engine.ANALYSIS_VERSION` (enqueue and `remaining` alike), so an engine version bump re-queues stored games automatically. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
 | GET    | `/api/players/{u}/report`              | `build_report` over stored analyses; optional `since`/`until` epoch-second window and `time_class` |
+| GET    | `/api/players/{u}/highlights`          | `build_highlights` over stored analyses — the Dashboard's blunders + brilliancies lists (`PlayerHighlights`), each entry deep-linkable to `/games/{id}` at its ply; same optional `since`/`until`/`time_class` as `/report`. Kept out of `PlayerReport` so the coach prompt isn't bloated; brilliant cutoffs injected from config's `brilliant` section |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider (agentic with the engine tool when the pool is up), cached. Optional body `{agent_id, since, until, time_class, refresh}` — the same window and time-control filters `/report` takes, so the coach reasons over the period the student is looking at (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id, cached, generated_at, games_analyzed}` |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
@@ -79,6 +80,12 @@ unexpected to 500.
   poll, which is the authoritative liveness signal. It is an HTTP
   client only — it never touches the DB or imports components
   (docs/fixes-2026-07/07-analysis-coverage.md).
+- Highlights (`/players/{u}/highlights`) is `list_analyzed_games` →
+  `build_highlights` with `cfg.brilliant`, mirroring `/report`'s shape:
+  same window/time-class query params, same threadpool execution (it
+  replays games with python-chess), and an unknown player returns
+  empty lists rather than 404, consistent with `/openings` and
+  `/report`.
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report. That exclusion must
   never be silent: both `/report` and `/coach` pass `build_report`

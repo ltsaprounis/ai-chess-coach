@@ -16,7 +16,9 @@ from chess_coach.coach import (
     PROMPT_VERSION,
     CoachProvider,
     CoachProviderError,
+    PlayerHighlights,
     PositionAnalystFn,
+    build_highlights,
     build_move_context,
     build_report,
     render_explain_prompt,
@@ -634,6 +636,29 @@ def player_report(
         requested_since=since,
         requested_until=until,
         games_in_scope=games_in_scope,
+    )
+
+
+@router.get("/players/{username}/highlights")
+def player_highlights(
+    username: str,
+    db: DbDep,
+    cfg: CfgDep,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> PlayerHighlights:
+    """Blunders and brilliancies over the player's analyzed games.
+
+    `since`/`until` (epoch seconds) restrict to a time window;
+    `time_class` restricts to one time control — same as `/report`. An
+    unknown player simply has no analyzed games, so this returns empty
+    lists rather than 404ing, consistent with `/report`/`/openings`.
+    """
+    user = username.lower()
+    return build_highlights(
+        list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
+        thresholds=cfg.brilliant,
     )
 
 

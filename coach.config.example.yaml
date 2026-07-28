@@ -18,6 +18,16 @@ thresholds:        # centipawn loss per judgment
   mistake: 100
   blunder: 200
 
+# brilliant:         # sound-sacrifice cutoffs for the coach's
+#                    # blunders/brilliant-moves highlights (see
+#                    # docs/06-coach.md, "Highlights")
+#   sac_points: 2        # min material (SEE, pawn units) given up
+#   best_tolerance_cp: 0  # max cp_loss to still count as engine-best
+#   winning_cap_cp: 200   # eval before the move must be <= this
+#                         # (player POV) — not already winning
+#   sound_floor_cp: 0     # eval after the move must be >= this
+#                         # (player POV) — still sound afterwards
+
 # coach:            # roster of selectable coaches shown in the UI
 #   # Providers: claude-agent-sdk rides your Claude Code login and
 #   # github-copilot rides your GitHub Copilot CLI login (no API

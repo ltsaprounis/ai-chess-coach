@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Chess } from "chess.js";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chessboard } from "react-chessboard";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api, type MoveEval } from "../api.ts";
 import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
 import EvalGraph from "../components/EvalGraph.tsx";
@@ -48,9 +48,29 @@ function storeLiveToggle(on: boolean): void {
   }
 }
 
+/** Parses `?ply=N` for the initial board position — an absent or
+ *  non-integer value means "start position" (0); a present value is
+ *  clamped to the game's actual range only once moves load, since the
+ *  move count isn't known yet at mount (docs/08-frontend.md's Game
+ *  section: "clamped to the game's range once moves load; absent or
+ *  invalid means the start position"). */
+function initialPlyFromSearch(searchParams: URLSearchParams): number {
+  const raw = searchParams.get("ply");
+  if (raw === null) {
+    return 0;
+  }
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
 export default function Game() {
   const { id = "" } = useParams();
-  const [ply, setPly] = useState(0); // 0 = start position
+  const [searchParams] = useSearchParams();
+  const [ply, setPly] = useState(() => initialPlyFromSearch(searchParams));
+  // Guards the one-time clamp below so it fires only once, when the
+  // game's moves first load — subsequent navigation is local state and
+  // must never be re-clamped or written back to the URL.
+  const clampedInitialPly = useRef(false);
   const [analyzing, setAnalyzing] = useState(false);
   const queryClient = useQueryClient();
 
@@ -102,6 +122,16 @@ export default function Game() {
     }
     return { fens: fenList, moveSquares: squares };
   }, [game.data]);
+
+  // The `?ply=N` deep link's target isn't known to be in range until
+  // the game's moves have loaded (fens.length depends on san_moves) —
+  // clamp exactly once here, then leave `ply` to local navigation.
+  useEffect(() => {
+    if (game.data && !clampedInitialPly.current) {
+      clampedInitialPly.current = true;
+      setPly((current) => Math.max(0, Math.min(fens.length - 1, current)));
+    }
+  }, [game.data, fens.length]);
 
   const [live, setLive] = useState(readLiveToggle);
   const liveEval = useLiveEval(live && game.data ? (fens[ply] ?? null) : null);

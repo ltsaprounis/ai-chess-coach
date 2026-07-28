@@ -21,6 +21,9 @@ export type GameAnalysis = NonNullable<GameDetail["analysis"]>;
 export type MoveEval = GameAnalysis["evals"][number];
 export type PlayerReport =
   paths["/api/players/{username}/report"]["get"]["responses"]["200"]["content"]["application/json"];
+export type PlayerHighlights =
+  paths["/api/players/{username}/highlights"]["get"]["responses"]["200"]["content"]["application/json"];
+export type HighlightMove = PlayerHighlights["blunders"][number];
 export type PlayerSummary =
   paths["/api/players"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type CoachResponse =
@@ -189,6 +192,17 @@ export const api = {
     json(
       await fetch(
         `/api/players/${encodeURIComponent(username)}/report${queryString(query)}`,
+      ),
+    ),
+  /** Dashboard's blunders + brilliancies lists — same `since`/`time_class`
+   *  scoping as `report`/`openings`. */
+  highlights: async (
+    username: string,
+    query: StatsQuery = {},
+  ): Promise<PlayerHighlights> =>
+    json(
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/highlights${queryString(query)}`,
       ),
     ),
   coach: async (
