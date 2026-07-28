@@ -113,9 +113,11 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    white-POV fields by `color`, mates rendered as `#N`), centipawn
    loss for blunders. Every row links to `/games/{id}?ply={ply}` —
    the Game page's ply deep link — so the student lands on the exact
-   position. Brilliancies are rare and render in full; the blunders
-   table caps its initial render (top rows by recency) behind a
-   "show all N" toggle so an all-time window cannot flood the page.
+   position. Both tables page at 20 rows through a classic numbered
+   pager (`components/Pagination.tsx`; ‹ 1 … 4 5 6 … N ›) — rows are
+   newest-first, so higher pages reach older moves. The pager hides
+   itself when one page fits (the usual case for brilliancies), and
+   a filter or player change snaps both tables back to page one.
 
    Time-window (all-time / 30d / 90d / 6mo / 1yr) and time-control
    (per class; never mixed across controls unless "All classes" is

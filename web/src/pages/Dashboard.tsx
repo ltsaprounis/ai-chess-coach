@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type HighlightMove, type PlayerReport, score } from "../api.ts";
 import type { BarDatum } from "../components/BarChart.tsx";
@@ -8,6 +8,7 @@ import { JUDGMENT_COLORS } from "../components/chartTheme.ts";
 import Layout from "../components/Layout.tsx";
 import MonthlyActivityChart from "../components/MonthlyActivityChart.tsx";
 import MonthlyMetricChart from "../components/MonthlyMetricChart.tsx";
+import Pagination from "../components/Pagination.tsx";
 import RatingChart from "../components/RatingChart.tsx";
 import RepertoireTable from "../components/RepertoireTable.tsx";
 import StatsFilters from "../components/StatsFilters.tsx";
@@ -18,6 +19,7 @@ import {
   moveLabel,
 } from "../highlights.ts";
 import { groupByFamily, type OpeningFamily } from "../openings.ts";
+import { clampPage, pageCount } from "../pagination.ts";
 import {
   latestRatings,
   monthlyActivity,
@@ -31,11 +33,12 @@ import { useStatsFilters } from "../useStatsFilters.ts";
 
 const JUDGMENTS = ["best", "good", "inaccuracy", "mistake", "blunder"] as const;
 
-/** Blunders shown before the "show all" toggle — brilliancies are
- *  rare enough (chess.com's sound-sacrifice definition) to always
- *  render in full, but an all-time blunders window could otherwise
- *  flood the page. */
-const BLUNDER_PAGE = 20;
+/** Rows per page in both highlight tables. Blunders over a wide
+ *  window run to hundreds, so the classic pager keeps the page
+ *  bounded (newest first — higher pages reach older moves);
+ *  brilliancies are rare enough (chess.com's sound-sacrifice
+ *  definition) to usually fit one page, which hides their pager. */
+const HIGHLIGHT_PAGE = 20;
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
@@ -156,7 +159,8 @@ function errorExampleLabel(
 export default function Dashboard() {
   const { username = "" } = useParams();
   const [minGames, setMinGames] = useState(5);
-  const [showAllBlunders, setShowAllBlunders] = useState(false);
+  const [blunderPage, setBlunderPage] = useState(1);
+  const [brilliancyPage, setBrilliancyPage] = useState(1);
 
   const games = useQuery({
     queryKey: ["allGames", username],
@@ -173,6 +177,14 @@ export default function Dashboard() {
     since,
     classParam,
   } = useStatsFilters(games.data ?? []);
+
+  // Snap both highlight tables back to page one when the list under
+  // them changes identity — new filters or a different player.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on scope change only
+  useEffect(() => {
+    setBlunderPage(1);
+    setBrilliancyPage(1);
+  }, [username, windowDays, timeClass]);
 
   const openings = useQuery({
     queryKey: ["openings", username, windowDays, timeClass],
@@ -306,9 +318,20 @@ export default function Dashboard() {
   };
 
   const blunders = highlights.data?.blunders ?? [];
-  const shownBlunders = showAllBlunders
-    ? blunders
-    : blunders.slice(0, BLUNDER_PAGE);
+  const blunderPages = pageCount(blunders.length, HIGHLIGHT_PAGE);
+  const currentBlunderPage = clampPage(blunderPage, blunderPages);
+  const shownBlunders = blunders.slice(
+    (currentBlunderPage - 1) * HIGHLIGHT_PAGE,
+    currentBlunderPage * HIGHLIGHT_PAGE,
+  );
+
+  const brilliancies = highlights.data?.brilliancies ?? [];
+  const brilliancyPages = pageCount(brilliancies.length, HIGHLIGHT_PAGE);
+  const currentBrilliancyPage = clampPage(brilliancyPage, brilliancyPages);
+  const shownBrilliancies = brilliancies.slice(
+    (currentBrilliancyPage - 1) * HIGHLIGHT_PAGE,
+    currentBrilliancyPage * HIGHLIGHT_PAGE,
+  );
 
   const hasAnyGames = games.isSuccess && (games.data?.length ?? 0) > 0;
   const hasScopedGames = stats.overall.games > 0;
@@ -603,18 +626,25 @@ export default function Dashboard() {
           <h2>Brilliant moves</h2>
           {highlights.isPending && <p>Loading…</p>}
           {highlights.isError && <p role="alert">{highlights.error.message}</p>}
-          {highlights.isSuccess &&
-            highlights.data.brilliancies.length === 0 && (
-              <p className="panel-empty">
-                No brilliant moves in this window yet — they're rare by design.
-              </p>
-            )}
-          {highlights.isSuccess && highlights.data.brilliancies.length > 0 && (
-            <HighlightsTable
-              moves={highlights.data.brilliancies}
-              numberHeader="Eval after (you)"
-              numberValue={(move) => formatPlayerEval(foldToPlayerPov(move))}
-            />
+          {highlights.isSuccess && brilliancies.length === 0 && (
+            <p className="panel-empty">
+              No brilliant moves in this window yet — they're rare by design.
+            </p>
+          )}
+          {highlights.isSuccess && brilliancies.length > 0 && (
+            <>
+              <HighlightsTable
+                moves={shownBrilliancies}
+                numberHeader="Eval after (you)"
+                numberValue={(move) => formatPlayerEval(foldToPlayerPov(move))}
+              />
+              <Pagination
+                page={currentBrilliancyPage}
+                pages={brilliancyPages}
+                onPage={setBrilliancyPage}
+                label="brilliant move pages"
+              />
+            </>
           )}
         </section>
       )}
@@ -634,16 +664,12 @@ export default function Dashboard() {
                 numberHeader="CP lost"
                 numberValue={(move) => formatCpLoss(move.cp_loss)}
               />
-              {blunders.length > BLUNDER_PAGE && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllBlunders((shown) => !shown)}
-                >
-                  {showAllBlunders
-                    ? "Show fewer"
-                    : `Show all ${blunders.length}`}
-                </button>
-              )}
+              <Pagination
+                page={currentBlunderPage}
+                pages={blunderPages}
+                onPage={setBlunderPage}
+                label="blunder pages"
+              />
             </>
           )}
         </section>
