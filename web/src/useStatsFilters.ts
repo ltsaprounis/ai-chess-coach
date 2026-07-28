@@ -2,11 +2,17 @@
 // Coach pages (docs/08-frontend.md): "the same time-window and
 // time-control controls the Dashboard uses" scope the coach request
 // too, so advice covers the period the student is looking at rather
-// than every game they have ever played.
+// than every game they have ever played. The selection is persisted
+// via statsFilterStorage.ts (localStorage), one selection for both
+// pages.
 
 import { useMemo, useState } from "react";
 import type { GameSummary, TimeClass } from "./api.ts";
 import { type ClassRating, latestRatings } from "./stats.ts";
+import {
+  getStoredStatsFilters,
+  setStoredStatsFilters,
+} from "./statsFilterStorage.ts";
 
 /** Time windows the filter can scope to; `days: null` is all-time. */
 export const WINDOWS = [
@@ -16,6 +22,11 @@ export const WINDOWS = [
   { label: "Last 6 months", days: 182 },
   { label: "Last year", days: 365 },
 ] as const;
+
+/** Valid `windowDays` values, for validating a stored selection. */
+const WINDOW_DAYS: readonly (number | null)[] = WINDOWS.map(
+  (window) => window.days,
+);
 
 const DAY_SECONDS = 86_400;
 
@@ -50,8 +61,25 @@ export type StatsFiltersState = {
 export function useStatsFilters(
   games: readonly GameSummary[],
 ): StatsFiltersState {
-  const [windowDays, setWindowDays] = useState<number | null>(null);
-  const [pickedClass, setPickedClass] = useState<string | null>(null);
+  // Seeded from localStorage and written back on every pick, so the
+  // selection survives leaving the page (both pages unmount on any
+  // navigation) and reloads, and Dashboard and Coach share one
+  // selection — the "same controls" contract in docs/08-frontend.md.
+  const [windowDays, setWindowDaysState] = useState<number | null>(
+    () => getStoredStatsFilters(WINDOW_DAYS).windowDays,
+  );
+  const [pickedClass, setPickedClassState] = useState<string | null>(
+    () => getStoredStatsFilters(WINDOW_DAYS).pickedClass,
+  );
+
+  const setWindowDays = (days: number | null): void => {
+    setWindowDaysState(days);
+    setStoredStatsFilters({ windowDays: days, pickedClass });
+  };
+  const setPickedClass = (value: string): void => {
+    setPickedClassState(value);
+    setStoredStatsFilters({ windowDays, pickedClass: value });
+  };
 
   // Cutoff recomputed only when the window changes, so it stays stable
   // across renders (a fresh Date.now() each render would thrash query

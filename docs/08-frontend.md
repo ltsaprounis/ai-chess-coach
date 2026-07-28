@@ -121,8 +121,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    (per class, defaulting to the most-played so stats are never mixed
    across controls) filters scope the whole page: games-derived stats
    are filtered client-side, while report, openings, and highlights
-   are re-fetched with the `since` window and `time_class`. Charts
-   are custom SVG components — no chart library.
+   are re-fetched with the `since` window and `time_class`. The
+   selection persists in localStorage (`statsFilterStorage.ts`) as
+   one selection shared with the Coach page, so navigating away —
+   into a game, say — and back keeps the chosen scope; a stored
+   time control absent from the current window falls back to the
+   most-played as usual. Charts are custom SVG components — no chart
+   library.
 5. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback). The same time-window and
