@@ -14,6 +14,10 @@ export type SyncResult =
 export type OpeningStats =
   paths["/api/players/{username}/openings"]["get"]["responses"]["200"]["content"]["application/json"][number];
 export type Color = OpeningStats["color"];
+export type RepertoireTree =
+  paths["/api/players/{username}/openings/tree"]["get"]["responses"]["200"]["content"]["application/json"];
+export type RepertoireNode = RepertoireTree["root"];
+export type BookMove = RepertoireNode["book_moves"][number];
 export type AnalyzeRequest = components["schemas"]["AnalyzeRequest"];
 export type AnalyzeResult =
   paths["/api/players/{username}/analyze"]["post"]["responses"]["202"]["content"]["application/json"];
@@ -62,6 +66,19 @@ export type StatsQuery = {
 export type CoachOptions = StatsQuery & {
   agentId?: string;
   refresh?: boolean;
+};
+
+/**
+ * Query for the repertoire move tree (Openings explorer page): the
+ * same window/time-control scope `report`/`openings` take, plus the
+ * color the tree is built for and an optional `min_games` prune
+ * override. The server defaults `min_games` to 2 (clamped 1-10); the
+ * page's "Show one-off lines" toggle sends 1 to include one-off
+ * deviations, and omits the field otherwise to keep the default.
+ */
+export type OpeningsTreeQuery = StatsQuery & {
+  color: Color;
+  min_games?: number;
 };
 
 /** Page size for the dashboard's fetch-everything helper. */
@@ -181,6 +198,19 @@ export const api = {
     json(
       await fetch(
         `/api/players/${encodeURIComponent(username)}/openings${queryString(query)}`,
+      ),
+    ),
+  /** Per-color repertoire move tree for the Openings explorer page —
+   *  one fetch per (color, filters); the page drills client-side with
+   *  no further requests (docs/future-improvements/
+   *  openings-explorer.md). */
+  openingsTree: async (
+    username: string,
+    query: OpeningsTreeQuery,
+  ): Promise<RepertoireTree> =>
+    json(
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/openings/tree${queryString(query)}`,
       ),
     ),
   game: async (gameId: string): Promise<GameDetail> =>

@@ -26,6 +26,7 @@ from chess_coach.storage import (
     list_analyzed_games,
     list_games,
     list_players,
+    list_repertoire_games,
     open_db,
     opening_stats,
     save_analysis,
@@ -774,6 +775,97 @@ def test_count_games_scopes_to_user_with_no_filters(db: Db) -> None:
     assert count_games(db, "alice") == 2
     assert count_games(db, "bob") == 1
     assert count_games(db, "someone-else") == 0
+
+
+def test_list_repertoire_games_includes_unanalyzed_with_none_evals(db: Db) -> None:
+    """All stored games come back, analyzed or not — the LEFT JOIN
+    leaves `evals` as None rather than dropping the row."""
+    upsert_games(
+        db,
+        [
+            make_game(id="analyzed", end_time=1),
+            make_game(id="unanalyzed", end_time=2),
+        ],
+    )
+    analysis = make_analysis(game_id="analyzed")
+    save_analysis(db, analysis, version=1)
+
+    games = {g.id: g for g in list_repertoire_games(db, "testuser", max_plies=30)}
+    assert games.keys() == {"analyzed", "unanalyzed"}
+    assert games["analyzed"].evals == analysis.evals
+    assert games["unanalyzed"].evals is None
+    assert games["unanalyzed"].san_moves == ["e4", "e5"]
+
+
+def test_list_repertoire_games_slices_san_moves_and_evals(db: Db) -> None:
+    """Both `san_moves` and `evals` are capped to `max_plies` inside
+    storage — the documented exception to `pgn`/full `san_moves` never
+    crossing the boundary (docs/03-storage.md)."""
+    moves = ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6"]
+    upsert_games(db, [make_game(san_moves=moves)])
+    analysis = GameAnalysis(
+        game_id="game-1",
+        depth=16,
+        evals=[_move_eval(ply, 0) for ply in range(1, len(moves) + 1)],
+        overall_acpl=0.0,
+        acpl_by_phase={"opening": 0.0, "middlegame": 0.0, "endgame": 0.0},
+        judgment_counts={
+            "best": len(moves),
+            "good": 0,
+            "inaccuracy": 0,
+            "mistake": 0,
+            "blunder": 0,
+        },
+    )
+    save_analysis(db, analysis, version=1)
+
+    (game,) = list_repertoire_games(db, "testuser", max_plies=4)
+    assert game.san_moves == moves[:4]
+    assert game.evals is not None
+    assert [e.ply for e in game.evals] == [1, 2, 3, 4]
+
+
+def test_list_repertoire_games_time_window(db: Db) -> None:
+    """Mirrors `list_analyzed_games`'s window semantics exactly: `since`
+    inclusive, `until` exclusive."""
+    upsert_games(
+        db,
+        [make_game(id="old", end_time=100), make_game(id="recent", end_time=200)],
+    )
+
+    def ids(*, since: int | None = None, until: int | None = None) -> list[str]:
+        return [
+            g.id
+            for g in list_repertoire_games(
+                db, "testuser", max_plies=30, since=since, until=until
+            )
+        ]
+
+    assert ids() == ["recent", "old"]  # newest first
+    assert ids(since=150) == ["recent"]
+    assert ids(until=150) == ["old"]
+    assert ids(since=200) == ["recent"]  # since is inclusive
+    assert ids(until=200) == ["old"]  # until is exclusive
+
+
+def test_list_repertoire_games_time_class_filter(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="rapid", time_class="rapid"),
+            make_game(id="blitz", time_class="blitz"),
+        ],
+    )
+
+    assert [
+        g.id
+        for g in list_repertoire_games(db, "testuser", max_plies=30, time_class="rapid")
+    ] == ["rapid"]
+
+
+def test_list_repertoire_games_unknown_username_returns_empty(db: Db) -> None:
+    upsert_games(db, [make_game()])
+    assert list_repertoire_games(db, "someone-else", max_plies=30) == []
 
 
 def test_games_missing_opening(db: Db) -> None:

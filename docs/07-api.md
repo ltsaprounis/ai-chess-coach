@@ -19,7 +19,10 @@ wires them together behind an HTTP API and owns all orchestration
    agent fails startup (fail fast, consistent with config).
 6. Register routers; serve the built frontend statically in prod
    (SPA fallback: unknown non-API paths serve index.html so
-   client-side routes survive refreshes and deep links).
+   client-side routes survive refreshes and deep links). Starlette's
+   `GZipMiddleware` (`minimum_size=1000`) is app-wide — the openings
+   tree (low hundreds of KB worst case) motivates it, but any JSON
+   response over the threshold benefits.
 
 Shutdown cancels any in-flight analysis-run tasks and awaits them
 before closing the pool and the DB. Instances live on `app.state`,
@@ -38,6 +41,7 @@ run. Active runs are never swept.
 | GET    | `/api/players`                         | Stored players (`{username, games, last_played}`), most games first — the saved-players picker |
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging). Rows are slim `GameSummary` (no pgn/full moves — see docs/03-storage.md), so the frontend can page through the whole archive |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
+| GET    | `/api/players/{u}/openings/tree`       | Repertoire move tree for one color (docs/future-improvements/openings-explorer.md). Query: `color` (required), `since`/`until`, `time_class` (same window semantics as `/openings`), `min_games` (default 2, clamped 1-10), `max_plies` (default 30, clamped 4-40) |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. "Unanalyzed" includes games whose stored analysis predates `engine.ANALYSIS_VERSION` (enqueue and `remaining` alike), so an engine version bump re-queues stored games automatically. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
@@ -86,6 +90,18 @@ unexpected to 500.
   replays games with python-chess), and an unknown player returns
   empty lists rather than 404, consistent with `/openings` and
   `/report`.
+- The openings tree (`/players/{u}/openings/tree`) is
+  `list_repertoire_games` → `build_repertoire`, one fetch per color —
+  the frontend drills client-side with no further requests. `color`
+  is required (a bad value 422s, per FastAPI's own Literal
+  validation); `min_games`/`max_plies` clamp silently (max/min, no
+  422), like `/api/eval`'s depth/multipv, and both are passed through
+  to `list_repertoire_games` and `build_repertoire` identically so the
+  two components agree on the ply cap. An unknown player has no
+  stored games, so the route returns an empty tree (`games=0`, a
+  childless root) rather than 404ing, consistent with `/openings` and
+  `/report`. The route reads the built root's own `record.games`/
+  `analyzed` for the response's scope totals rather than re-counting.
 - The coach route reads everything from storage — a game with no
   analysis is simply excluded from the report. That exclusion must
   never be silent: both `/report` and `/coach` pass `build_report`

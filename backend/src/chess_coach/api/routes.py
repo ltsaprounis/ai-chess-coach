@@ -27,6 +27,7 @@ from chess_coach.coach import (
 )
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
+    Color,
     EvalLine,
     Game,
     GameDetail,
@@ -46,7 +47,7 @@ from chess_coach.engine import (
     Progress,
 )
 from chess_coach.ingestion import sync_games
-from chess_coach.openings import OpeningBook
+from chess_coach.openings import OpeningBook, RepertoireNode, build_repertoire
 from chess_coach.storage import (
     Db,
     GameFilters,
@@ -62,6 +63,7 @@ from chess_coach.storage import (
     list_analyzed_games,
     list_games,
     list_players,
+    list_repertoire_games,
     opening_stats,
     save_analysis,
     save_explanation,
@@ -170,6 +172,66 @@ def player_openings(
     """
     return opening_stats(
         db, username.lower(), since=since, until=until, time_class=time_class
+    )
+
+
+class RepertoireTree(BaseModel):
+    username: str
+    color: Color
+    games: int  # scope totals for this color
+    analyzed: int
+    root: RepertoireNode
+
+
+@router.get("/players/{username}/openings/tree")
+def player_openings_tree(
+    username: str,
+    db: DbDep,
+    book: BookDep,
+    color: Color,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+    min_games: int = 2,
+    max_plies: int = 30,
+) -> RepertoireTree:
+    """Per-color repertoire move tree (docs/future-improvements/
+    openings-explorer.md): drill from 1.e4 into any line, with games,
+    score, eval, book status, and continuations at every node.
+
+    `since`/`until`/`time_class` scope the games exactly like
+    `/openings`. `min_games` (default 2, clamped 1-10) prunes one-off
+    deviations; `max_plies` (default 30, clamped 4-40) caps tree depth,
+    mirroring `classify`'s book-ply cap. Both clamps are silent
+    (max/min, no 422), like `/api/eval`'s depth/multipv. An unknown
+    player has no stored games, so this returns an empty tree
+    (`games=0`, a childless root) rather than 404ing, consistent with
+    `/openings` and `/report`.
+    """
+    user = username.lower()
+    clamped_min_games = max(1, min(10, min_games))
+    clamped_max_plies = max(4, min(40, max_plies))
+    games = list_repertoire_games(
+        db,
+        user,
+        max_plies=clamped_max_plies,
+        since=since,
+        until=until,
+        time_class=time_class,
+    )
+    root = build_repertoire(
+        book,
+        games,
+        color=color,
+        min_games=clamped_min_games,
+        max_plies=clamped_max_plies,
+    )
+    return RepertoireTree(
+        username=user,
+        color=color,
+        games=root.record.games,
+        analyzed=root.analyzed,
+        root=root,
     )
 
 

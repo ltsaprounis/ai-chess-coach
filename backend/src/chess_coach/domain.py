@@ -384,6 +384,25 @@ class GameSummary(BaseModel):
     analyzed: bool = False
 
 
+class RepertoireGame(BaseModel):
+    """One game as the repertoire tree consumes it — moves and, when
+    analyzed, per-ply evals, both sliced to the caller's ply cap.
+
+    Produced by storage (docs/03-storage.md, `list_repertoire_games`),
+    consumed by openings (`build_repertoire`), which is what makes it a
+    domain type. Slicing happens inside storage: rows stay bounded and
+    `pgn` never rides along, so the type can cross the boundary without
+    re-opening the uncapped-archive problem `GameSummary` exists to
+    avoid.
+    """
+
+    id: str
+    color: Color
+    result: Result
+    san_moves: list[str]  # sliced to the requested cap
+    evals: list[MoveEval] | None  # same slice; None if unanalyzed
+
+
 class GameDetail(Game):
     opening: Opening | None = None
     analysis: GameAnalysis | None = None

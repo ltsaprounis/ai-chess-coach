@@ -144,6 +144,24 @@ def opening_stats(db, username: str, *, since: int | None = None,
 #   (a per-game mean), so the columns stay move-weighted.
 def set_opening(db: Db, game_id: str, opening: Opening) -> None
 
+def list_repertoire_games(
+    db: Db, username: str, *, max_plies: int,
+    since: int | None = None, until: int | None = None,
+    time_class: TimeClass | None = None) -> list[RepertoireGame]
+#   The repertoire-tree input (docs/future-improvements/
+#   openings-explorer.md): every stored game in scope, analyzed or
+#   not — LEFT JOIN on analyses, so an unanalyzed game still comes
+#   back with `evals=None`. Window semantics are identical to
+#   list_analyzed_games (since inclusive, until exclusive; time_class
+#   optional; all default to the full history). Newest-first order.
+#   `san_moves` and `evals` are both sliced to `max_plies` inside
+#   storage, and `pgn` is never selected — the documented exception to
+#   "san_moves never crosses the boundary" (see `GameSummary` above):
+#   rows stay bounded by the cap and the consumer is server-side (the
+#   openings component), so the uncapped-archive-to-browser problem
+#   that rule exists to prevent does not apply here. Evals are parsed
+#   from JSON before slicing (SQLite cannot slice a JSON array).
+
 # Analysis repo
 def save_analysis(db: Db, analysis: GameAnalysis,
                   version: int) -> None

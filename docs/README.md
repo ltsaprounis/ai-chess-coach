@@ -175,10 +175,10 @@ class PlayerReport(BaseModel):
 Composites elided above for brevity (`CriticalPosition`,
 `TimeClassStats`, `MonthStats`, `OpponentStats`, `TerminationStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
-`LlmConfig`, `CoachAgent`) also live in `domain.py` — the component
-docs state their shapes where they are used. Types may grow, but changes to
-them are contract changes — update the affected component docs in
-the same commit.
+`RepertoireGame`, `LlmConfig`, `CoachAgent`) also live in
+`domain.py` — the component docs state their shapes where they are
+used. Types may grow, but changes to them are contract changes —
+update the affected component docs in the same commit.
 
 `PlayerReport` and `OpeningStats` are read by both the coaching prompt
 and the Dashboard, and `OpeningStats` has two independent producers

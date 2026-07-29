@@ -31,9 +31,11 @@ from chess_coach.config import (
 from chess_coach.domain import (
     AnalyzedGame,
     CoachAgent,
+    Color,
     EvalLine,
     Game,
     GameAnalysis,
+    RepertoireGame,
     TimeClass,
 )
 from chess_coach.engine import (
@@ -45,6 +47,7 @@ from chess_coach.engine import (
     ProgressCallback,
 )
 from chess_coach.ingestion import UnknownUserError
+from chess_coach.openings import OpeningBook, RepertoireNode
 from chess_coach.storage import (
     Db,
     get_explanation,
@@ -488,6 +491,198 @@ def test_openings_endpoint_aggregates_records(
     ]
     assert all(s["avg_cp_loss"] is None for s in stats)
     assert all(s["analyzed_games"] == 0 for s in stats)
+
+
+def test_openings_tree_scopes_to_requested_color(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="w1", color="white", san_moves=["e4", "e5"], end_time=1),
+            make_game(id="w2", color="white", san_moves=["e4", "e5"], end_time=2),
+            make_game(id="b1", color="black", san_moves=["e4", "e5"], end_time=3),
+        ],
+    )
+
+    white_tree: Any = get(
+        client, "/api/players/TestUser/openings/tree", params={"color": "white"}
+    ).json()
+    assert white_tree["username"] == "testuser"  # lowered, like sibling routes
+    assert white_tree["color"] == "white"
+    assert white_tree["games"] == 2
+    assert white_tree["analyzed"] == 0
+    assert white_tree["root"]["record"]["games"] == 2
+
+    black_tree: Any = get(
+        client, "/api/players/testuser/openings/tree", params={"color": "black"}
+    ).json()
+    assert black_tree["games"] == 1
+    assert black_tree["root"]["record"]["games"] == 1
+
+
+def test_openings_tree_shared_prefix_aggregates_into_one_node(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(
+                id="a", san_moves=["e4", "e5", "Nf3", "Nc6"], color="white", end_time=1
+            ),
+            make_game(
+                id="b", san_moves=["e4", "e5", "Nf3", "Nf6"], color="white", end_time=2
+            ),
+        ],
+    )
+
+    # min_games=1 so neither one-off ply-4 branch is pruned away, letting
+    # the shape of the divergence show through.
+    tree: Any = get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "min_games": "1"},
+    ).json()
+    root = tree["root"]
+    e4_node = root["children"][0]
+    assert e4_node["san"] == "e4"
+    assert e4_node["record"]["games"] == 2  # both games share this node
+    e5_node = e4_node["children"][0]
+    assert e5_node["san"] == "e5"
+    assert e5_node["record"]["games"] == 2
+    nf3_node = e5_node["children"][0]
+    assert nf3_node["san"] == "Nf3"
+    assert nf3_node["record"]["games"] == 2
+    leaves = {c["san"]: c["record"]["games"] for c in nf3_node["children"]}
+    assert leaves == {"Nc6": 1, "Nf6": 1}
+
+
+def test_openings_tree_prunes_rare_branches_by_default(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(
+                id="a", san_moves=["e4", "e5", "Nf3", "Nc6"], color="white", end_time=1
+            ),
+            make_game(
+                id="b", san_moves=["e4", "e5", "Nf3", "Nf6"], color="white", end_time=2
+            ),
+        ],
+    )
+
+    tree: Any = get(
+        client, "/api/players/testuser/openings/tree", params={"color": "white"}
+    ).json()
+    assert tree["games"] == 2  # scope totals unaffected by pruning
+    nf3_node = tree["root"]["children"][0]["children"][0]["children"][0]
+    assert nf3_node["san"] == "Nf3"
+    assert nf3_node["record"]["games"] == 2  # parent counts untouched
+    assert nf3_node["children"] == []  # both 1-game branches pruned (min_games=2)
+
+
+def test_openings_tree_scoping_by_window_and_time_class(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(
+                id="old",
+                end_time=1,
+                time_class="blitz",
+                san_moves=["e4", "e5"],
+            ),
+            make_game(
+                id="new",
+                end_time=100,
+                time_class="rapid",
+                san_moves=["e4", "e5"],
+            ),
+        ],
+    )
+
+    since_tree: Any = get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "since": "50"},
+    ).json()
+    assert since_tree["games"] == 1  # only "new" (end_time=100 >= 50)
+
+    until_tree: Any = get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "until": "50"},
+    ).json()
+    assert until_tree["games"] == 1  # only "old" (until is exclusive of 100)
+
+    blitz_tree: Any = get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "time_class": "blitz"},
+    ).json()
+    assert blitz_tree["games"] == 1  # only "old" is blitz
+
+
+def test_openings_tree_clamps_min_games_and_max_plies(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1", san_moves=["e4", "e5"])])
+    calls: list[dict[str, int]] = []
+    real_build_repertoire = routes.build_repertoire
+
+    def spy(
+        book: OpeningBook,
+        games: list[RepertoireGame],
+        *,
+        color: Color,
+        min_games: int,
+        max_plies: int,
+    ) -> RepertoireNode:
+        calls.append({"min_games": min_games, "max_plies": max_plies})
+        return real_build_repertoire(
+            book, games, color=color, min_games=min_games, max_plies=max_plies
+        )
+
+    monkeypatch.setattr(routes, "build_repertoire", spy)
+
+    get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "min_games": "99", "max_plies": "1"},
+    )
+    assert calls[-1] == {"min_games": 10, "max_plies": 4}
+
+    get(
+        client,
+        "/api/players/testuser/openings/tree",
+        params={"color": "white", "min_games": "0", "max_plies": "1"},
+    )
+    assert calls[-1]["min_games"] == 1
+
+
+def test_openings_tree_missing_color_is_422(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")])
+    response = get(client, "/api/players/testuser/openings/tree")
+    assert response.status_code == 422
+
+
+def test_openings_tree_unknown_player_is_empty(client: TestClient) -> None:
+    tree: Any = get(
+        client, "/api/players/ghost/openings/tree", params={"color": "white"}
+    ).json()
+    assert tree["username"] == "ghost"
+    assert tree["color"] == "white"
+    assert tree["games"] == 0
+    assert tree["analyzed"] == 0
+    assert tree["root"]["record"] == {
+        "games": 0,
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+    }
+    assert tree["root"]["children"] == []
 
 
 def wait_until_analyzed(client: TestClient, username: str, expected: int) -> None:

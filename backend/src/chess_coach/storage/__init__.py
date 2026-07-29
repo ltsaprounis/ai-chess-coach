@@ -18,6 +18,7 @@ from chess_coach.storage.games import (
     set_opening,
     upsert_games,
 )
+from chess_coach.storage.repertoire import list_repertoire_games
 from chess_coach.storage.reports import CachedReport, ReportKey, get_report, save_report
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "list_analyzed_games",
     "list_games",
     "list_players",
+    "list_repertoire_games",
     "open_db",
     "opening_stats",
     "save_analysis",

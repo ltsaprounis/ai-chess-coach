@@ -139,7 +139,42 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    control absent from the current window (default rapid included,
    for a player with no rapid games) falls back to the most-played.
    Charts are custom SVG components — no chart library.
-5. **Coach** — `POST /coach` with the agent chosen in Settings;
+5. **Openings explorer** (`/players/{username}/openings`) — the
+   per-color repertoire move tree from `GET /players/{u}/openings/
+   tree` (docs/future-improvements/openings-explorer.md), one fetch
+   per (color, filters); every drill is client-side. A color toggle
+   (White/Black) plus the Dashboard's time-window/time-control
+   filters (`useStatsFilters`, same shared localStorage selection)
+   scope the fetch, alongside a "Show one-off lines" control that
+   flips the request's `min_games` between 2 (default, omitted) and
+   1 — reflected in the query key so the two results cache
+   separately. A coverage line ("N of M games in this window are
+   analyzed") sits above a "worst lines" strip: the top player-level
+   nodes by impact (games x avg loss), each clickable to jump the
+   drill state straight to that line. Below that, a breadcrumb (root
+   labelled "Start") and a children table — move, opening name
+   (inherited from the current node when a child or book move
+   carries none of its own), games, score, avg eval (player POV,
+   signed pawns), avg loss, a book badge, and exits when nonzero;
+   unplayed book continuations render as greyed "still to learn"
+   rows in the same table, never duplicating a played move. The
+   table's games/score/avg-eval/avg-loss columns sort via the shared
+   `useTableSort`/`SortableTh`, defaulting to the payload's
+   games-desc order. Levels are labelled "Your move"/"Their move"
+   from ply parity (`isPlayerPly`/`levelLabel`). A board panel
+   (`react-chessboard`) replays the current path client-side with
+   `chess.js` — the tree carries no FENs — oriented to the selected
+   color, with the Game page's live-eval toggle (`useLiveEval` +
+   `LiveEvalPanel`) for a user-triggered deeper look. The color and
+   drill path are encoded in the URL (`?color=white&path=e4,c5,Nf3`,
+   each SAN `encodeURIComponent`-escaped since SAN can contain `+`/
+   `#`) via `replaceState`-style navigation (no history spam); on
+   load the path is validated against the fetched tree and falls
+   back to the root if it no longer resolves (a stale link, a color
+   swap, or a line pruned by `min_games`). All the path/ranking/
+   formatting logic is pure and unit-tested in `repertoireTree.ts`
+   (kept apart from the Dashboard's flat-table `openings.ts`).
+6. **Coach** — `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback). Advice anchors open in a new tab
    (`target="_blank"`): the advice carries app-relative game links
@@ -176,7 +211,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    games, with a "Regenerate" action (`refresh: true`) — the same
    user-triggered rule as the in-game Explain button, since both spend
    LLM calls.
-6. **Settings** (`/settings`) — manages the two things a player
+7. **Settings** (`/settings`) — manages the two things a player
    configures: the saved players (list from `GET /api/players` + an
    add-a-player form) and the coach LLM (`AgentSelect`, persisted in
    localStorage and read by Coach + the in-game Explain button).
@@ -185,15 +220,15 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 
 - Vite + React + TypeScript; TanStack Query for data fetching and
   cache invalidation (sync/analyze invalidate games + report).
-- React Router for the six pages; a small typed API client module
+- React Router for the seven pages; a small typed API client module
   (`web/src/api.ts`) wraps the generated types and is the only place
   URLs appear.
 - A shared `Layout` (`web/src/components/Layout.tsx`) wraps every page
   with the app header — brand, a saved-players switcher (from
   `GET /api/players`), the always-available section tabs (Games /
-  Dashboard / Coach, pointing at the current player, remembered in
-  localStorage via `currentPlayer.ts`), and a Settings link — so
-  navigation lives in one place instead of per-page links.
+  Dashboard / Openings / Coach, pointing at the current player,
+  remembered in localStorage via `currentPlayer.ts`), and a Settings
+  link — so navigation lives in one place instead of per-page links.
 - Colors are CSS custom properties defined once in `index.css`
   (light + dark via `prefers-color-scheme`); the SVG charts read the
   same tokens through `components/chartTheme.ts`.

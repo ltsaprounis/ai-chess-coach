@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 
 from chess_coach.api.routes import router
 from chess_coach.api.runs import AnalysisRun
@@ -66,6 +67,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.db.close()
 
     app = FastAPI(title="AI Chess Coach", version="0.1.0", lifespan=lifespan)
+    # App-wide: the repertoire tree (low hundreds of KB worst case) is the
+    # motivating payload, but any JSON response over the threshold benefits.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.include_router(router, prefix="/api")
     app.add_exception_handler(UnknownUserError, _unknown_user)
     app.add_exception_handler(StarletteHTTPException, _http_error)

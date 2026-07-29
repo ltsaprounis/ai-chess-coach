@@ -73,6 +73,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/openings/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Openings Tree
+         * @description Per-color repertoire move tree (docs/future-improvements/
+         *     openings-explorer.md): drill from 1.e4 into any line, with games,
+         *     score, eval, book status, and continuations at every node.
+         *
+         *     `since`/`until`/`time_class` scope the games exactly like
+         *     `/openings`. `min_games` (default 2, clamped 1-10) prunes one-off
+         *     deviations; `max_plies` (default 30, clamped 4-40) caps tree depth,
+         *     mirroring `classify`'s book-ply cap. Both clamps are silent
+         *     (max/min, no 422), like `/api/eval`'s depth/multipv. An unknown
+         *     player has no stored games, so this returns an empty tree
+         *     (`games=0`, a childless root) rather than 404ing, consistent with
+         *     `/openings` and `/report`.
+         */
+        get: operations["player_openings_tree_api_players__username__openings_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{username}/games": {
         parameters: {
             query?: never;
@@ -307,6 +338,30 @@ export interface components {
             queued: number;
             /** Remaining */
             remaining: number;
+        };
+        /**
+         * BookMove
+         * @description One book continuation out of a position (docs/05-openings.md).
+         *
+         *     `eco`/`name` describe the position this move reaches, when that
+         *     position is itself a named entry — `None` for an interior book
+         *     position, in which case display inherits the caller's current
+         *     name. `played` is filled in by the repertoire builder; a bare
+         *     `OpeningBook.continuations()` call always returns `played=False`,
+         *     since the book alone has no notion of which games were played.
+         */
+        BookMove: {
+            /** San */
+            san: string;
+            /** Eco */
+            eco: string | null;
+            /** Name */
+            name: string | null;
+            /**
+             * Played
+             * @default false
+             */
+            played: boolean;
         };
         /**
          * CoachAgentInfo
@@ -837,6 +892,47 @@ export interface components {
              */
             draws: number;
         };
+        /** RepertoireNode */
+        RepertoireNode: {
+            /** San */
+            san: string;
+            /** Ply */
+            ply: number;
+            record: components["schemas"]["Record"];
+            /** Analyzed */
+            analyzed: number;
+            /** Eco */
+            eco: string | null;
+            /** Name */
+            name: string | null;
+            /** In Book */
+            in_book: boolean;
+            /** Avg Eval Cp */
+            avg_eval_cp: number | null;
+            /** Avg Cp Loss */
+            avg_cp_loss: number | null;
+            /** Exits */
+            exits: number;
+            /** Book Moves */
+            book_moves: components["schemas"]["BookMove"][];
+            /** Children */
+            children: components["schemas"]["RepertoireNode"][];
+        };
+        /** RepertoireTree */
+        RepertoireTree: {
+            /** Username */
+            username: string;
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /** Games */
+            games: number;
+            /** Analyzed */
+            analyzed: number;
+            root: components["schemas"]["RepertoireNode"];
+        };
         /** SyncResult */
         SyncResult: {
             /** Games Synced */
@@ -974,6 +1070,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpeningStats"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_openings_tree_api_players__username__openings_tree_get: {
+        parameters: {
+            query: {
+                color: "white" | "black";
+                since?: number | null;
+                until?: number | null;
+                time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
+                min_games?: number;
+                max_plies?: number;
+            };
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepertoireTree"];
                 };
             };
             /** @description Validation Error */

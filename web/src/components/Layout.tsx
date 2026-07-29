@@ -54,6 +54,12 @@ export default function Layout({ username, children }: Props) {
                 Dashboard
               </NavLink>
               <NavLink
+                to={`/players/${currentPlayer}/openings`}
+                className={navClass}
+              >
+                Openings
+              </NavLink>
+              <NavLink
                 to={`/players/${currentPlayer}/coach`}
                 className={navClass}
               >

@@ -893,3 +893,145 @@ th[aria-sort="descending"] .th-sort {
   border-radius: var(--radius);
   white-space: pre-wrap;
 }
+
+/* Openings explorer: color toggle, worst-lines strip, breadcrumb, book
+   badges, and the greyed "still to learn" rows. */
+
+.color-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.color-toggle-btn {
+  border: none;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.color-toggle-btn.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.color-toggle-btn:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+/* A button styled like a link, for a table cell's clickable move. */
+.link-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover:not(:disabled) {
+  border-color: transparent;
+  text-decoration: underline;
+}
+
+.worst-lines {
+  list-style: none;
+  margin: 0.5rem 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.worst-line-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-width: 12rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.worst-line-card:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.worst-line-moves {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.worst-line-stats {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  margin: 0.5rem 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.breadcrumb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.breadcrumb-sep {
+  color: var(--muted);
+  padding: 0 0.1rem;
+}
+
+.breadcrumb-item {
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.breadcrumb-item:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-2);
+}
+
+.breadcrumb-item:disabled {
+  color: var(--text);
+  font-weight: 600;
+  opacity: 1;
+  cursor: default;
+}
+
+.book-badge,
+.unplayed-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+}
+
+.book-badge {
+  color: var(--win);
+  background: color-mix(in srgb, var(--win) 15%, transparent);
+}
+
+.unplayed-badge {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.row-unplayed {
+  opacity: 0.65;
+  font-style: italic;
+}

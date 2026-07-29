@@ -8,3 +8,6 @@ A40	Queen's Pawn Game	1. d4
 D00	Queen's Pawn Game	1. d4 d5
 D02	Queen's Pawn Game: Zukertort Variation	1. d4 d5 2. Nf3
 D06	Queen's Gambit	1. d4 d5 2. c4
+C21	Center Game	1. e4 e5 2. d4
+C65	Ruy Lopez: Berlin Defense	1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 4. O-O
+D02	Queen's Pawn Game: Zukertort Variation, Two Knights	1. d4 d5 2. Nf3 Nf6

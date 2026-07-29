@@ -1,10 +1,9 @@
 # Openings explorer — hierarchical repertoire page
 
-Status: planned (2026-07), not yet built. This doc is the contract
-for the feature. When it is built, each surface below migrates into
-the owning component doc (03, 05, 07, 08, plus `domain`) in the same
-commit as the code, per the house rule; this doc then remains as the
-design record.
+Status: built (2026-07-29). Each surface below has migrated into its
+owning component doc (03, 05, 07, 08, plus `domain` in
+docs/README.md), which are now the living contracts; this doc remains
+as the design record. The "Deferred" section is still open backlog.
 
 ## What it is and why
 
