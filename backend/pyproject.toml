@@ -2,14 +2,17 @@
 name = "chess-coach"
 version = "0.1.0"
 description = "chess.com game analysis with Stockfish and LLM coaching"
-license = "MIT"
+license = "GPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     "claude-agent-sdk>=0.1",
-    # GPLv3+ and imported directly, so it makes the backend a combined
-    # work under the GPL. Latent — only an issue if we DISTRIBUTE the
-    # backend (then GPL it or replace this). Hosted-only is fine: it's
-    # GPL, not AGPL. (Stockfish runs as a subprocess, so it's separate.)
+    # GPLv3+ and imported directly, so the assembled app is a combined
+    # work under the GPL. That is now the project's own license too
+    # (GPL-3.0-or-later, matching upstream), so there is nothing latent
+    # left here — the label states what the combination already was.
+    # Keep it that way: a permissive relicense would need this
+    # dependency gone first. (Stockfish is a subprocess, so it stays a
+    # separate work regardless.)
     "chess>=1.11",
     "fastapi>=0.115",
     "github-copilot-sdk>=1.0.8",

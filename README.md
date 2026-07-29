@@ -98,10 +98,18 @@ API docs are at `http://localhost:8000/docs`.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+Copyright (C) 2026 ltsaprounis. Licensed under the [GNU General Public
+License v3.0 or later](LICENSE).
 
-Bundled dependencies keep their own licenses: Stockfish (GPLv3, run as a
-separate process) and the lichess openings database (CC0) are git
-submodules, and `python-chess` (GPLv3+) is a backend dependency — its
-copyleft only applies if you distribute the backend, not when hosting
-it as a service.
+The choice follows from `python-chess` (GPL-3.0-or-later), which the
+backend imports directly across its engine, coach, openings and
+ingestion components. The assembled application is therefore already a
+combined work covered by the GPL, and the project is licensed to say so
+rather than leave a permissive label on something that is not. Hosting
+it as a service is not distribution — this is the GPL, not the AGPL —
+but any build handed to someone else carries GPL terms and must come
+with its corresponding source.
+
+Other bundled dependencies keep their own licenses: Stockfish (GPLv3)
+runs as a separate process, and the lichess openings database (CC0) is a
+git submodule.
