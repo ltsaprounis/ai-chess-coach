@@ -306,7 +306,7 @@ export default function Dashboard() {
   // so the Games page can drill through to exactly the games this row
   // counted, transpositions included — matching by re-deriving the
   // system from each game's moves only ever caught the family's
-  // representative line (docs/fixes-2026-07/03-faced-openings.md).
+  // representative line (docs/archive/fixes-2026-07/03-faced-openings.md).
   const familyLink = (family: OpeningFamily): string => {
     const params = new URLSearchParams();
     params.set("family", family.family);

@@ -13,7 +13,7 @@ game (`username`, `color`, `player_rating`, `result`, `termination`,
 which names the game. When two tracked players played each other, the
 second player's sync hit the `ON CONFLICT (id)` upsert and their
 perspective was silently dropped
-([CODEBASE-SCAN-2026-07.md](../CODEBASE-SCAN-2026-07.md), finding 1).
+([codebase-scan-2026-07.md](../archive/codebase-scan-2026-07.md), finding 1).
 
 Two shapes fix the identity mismatch:
 

@@ -4,7 +4,7 @@
 `build_report` (Python, over analyzed games) independently build the
 same domain type for the same player. The component boundary makes the
 duplication structural — coach cannot import storage — so
-docs/COACH-REPORT-IMPROVEMENTS.md settles it by defining the semantics
+docs/archive/coach-report-improvements.md settles it by defining the semantics
 once, in docs/06-coach.md, and having both implement against that
 definition. Nothing but this test checks that they actually did.
 
@@ -35,7 +35,7 @@ from tests.factories import make_analyzed
 # this fixture analyzes everything, so the two must still line up.
 # `faced` is included for the same reason: both producers derive it from
 # the same `Opening.ply` parity-majority rule
-# (docs/fixes-2026-07/03-faced-openings.md), and a one-bit divergence
+# (docs/archive/fixes-2026-07/03-faced-openings.md), and a one-bit divergence
 # would split one family across the wrong side of the chosen/faced
 # rollup on the Dashboard without failing anything else.
 COMPARED = (
@@ -110,7 +110,7 @@ def test_both_producers_pick_the_player_system_not_the_commonest_full_line(
 # player's own (odd) ply -- 2 of 3 is a strict majority, so both
 # producers must resolve the row to faced (docs/06-coach.md,
 # "Repertoire: keyed by the side the player had";
-# docs/fixes-2026-07/03-faced-openings.md).
+# docs/archive/fixes-2026-07/03-faced-openings.md).
 _MAJORITY_FACED_GAMES = [
     ("mf-1", "d4 e5", 2),  # opponent-named (Black's 1...e5)
     ("mf-2", "d4 Nf6 c4 e5", 4),  # opponent-named (Black's 2...e5)

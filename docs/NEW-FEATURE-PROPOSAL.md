@@ -1,9 +1,9 @@
 # New Feature Proposal
 
-What to build next, given where the app stands after the MultiPV +
-explain-move work (July 2026). Each candidate is grounded in code
-that exists today, mapped to the components it touches, and sorted
-by value against two standing constraints:
+The live backlog: what to build next, first written after the MultiPV
++ explain-move work and last refreshed 2026-07-29. Each candidate is
+grounded in code that exists today, mapped to the components it
+touches, and sorted by value against two standing constraints:
 
 - **Engine time is free, LLM calls are not.** Features that run on
   Stockfish or stored data alone can be generous; anything LLM-backed
@@ -17,11 +17,19 @@ by value against two standing constraints:
 
 Sync from chess.com → SQLite; Stockfish analysis with per-move
 judgments, ACPL by phase, progress SSE; ECO opening classification;
-stats dashboard (record, ratings, activity, repertoire worst-first);
-live MultiPV candidate-lines panel on the game replay; on-demand,
-cached, regenerable coach explanations with the engine as an
-agentic tool; whole-report coaching advice. All gates green at
-130 backend / 60 frontend tests.
+stats dashboard (record, ratings, activity, monthly ACPL and blunder
+rate, repertoire split chosen-vs-faced, blunder and brilliancy
+highlights that deep-link to the move); persisted window and
+time-control filters shared by Dashboard and Coach; live MultiPV
+candidate-lines panel on the game replay; on-demand, cached,
+regenerable coach explanations with the engine as an agentic tool;
+whole-report coaching advice that states its own analysis coverage.
+All gates green at 313 backend / 153 frontend tests.
+
+Two review cycles closed in July 2026 — the coach report rework and
+its fix iteration, and the whole-codebase scan. Both are in
+[archive/](archive/README.md); what they left unbuilt is in
+[future-improvements/](future-improvements/), not here.
 
 ## Tier 1 — quick wins, zero LLM cost
 
@@ -39,6 +47,11 @@ for it.
 
 ### 2. Blunder puzzles from your own games
 
+Half-built since this was written: the Dashboard's blunder highlights
+(`GET /players/{u}/highlights`, shipped `523d85b`) already select and
+rank the positions and deep-link each to its ply. What is missing is
+the trainer — hide the answer, take a guess, reveal.
+
 Storage already holds every blunder: position (replayable from
 `san_moves` to the ply), the move played, the engine's best move,
 and the cost in pawns. That is a puzzle database of the player's
@@ -54,17 +67,13 @@ Far more personal than lichess puzzles, and it costs nothing.
   reuses `CriticalPosition` (extend with `ply`/`san_moves` prefix or
   derive FEN server-side).
 
-### 3. Progress-over-time on the dashboard
+### 3. Progress-over-time on the dashboard — **shipped**
 
-The dashboard trends ratings, but the improvement metrics that this
-app itself produces (ACPL, blunder rate) are shown only as all-time
-aggregates. Bucketing analyses by month (`games.end_time` is right
-there) turns the coach's core question — "am I getting better?" —
-into a chart.
-
-- Touches: storage (one aggregate query), api (extend report or a
-  small `/players/{u}/trends` endpoint), frontend (one more chart on
-  the existing custom-SVG kit).
+Delivered by the coach report rework rather than as its own feature:
+`PlayerReport.months` carries games, rating, ACPL and blunder rate
+per month, and the Dashboard charts the last two. Kept here as the
+record of why it was worth doing — "am I getting better?" is the
+question the app exists to answer.
 
 ## Tier 2 — medium efforts, still engine/data only
 
@@ -96,7 +105,12 @@ opening-phase ACPL mean what it says.
   book-exit ply; phase boundary uses it when present), api (pass it
   from the stored opening at analyze time), docs/04.
 - Caveat: changes phase attribution for future analyses; old ones
-  keep their stored numbers unless reanalyzed. Acceptable drift.
+  keep their stored numbers unless reanalyzed. Acceptable drift, and
+  cheaper than it was: `analysis_version` already exists to re-queue
+  affected rows.
+- The openings explorer
+  ([openings-explorer.md](future-improvements/openings-explorer.md))
+  wants the same book-exit ply, and is designed against it.
 
 ### 6. Lichess as a second game source
 
@@ -148,7 +162,9 @@ an explain tool loop. Unblocks users without a Claude Code login.
 - **Prompt-version the explanation cache**: cached explanations keep
   the style of the prompt that made them (bit us this week). A
   `prompt_version` column lets the UI badge stale ones instead of
-  relying on the user to regenerate.
+  relying on the user to regenerate. Designed, not scheduled —
+  [prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md)
+  bundles it with making both prompt versions content fingerprints.
 - **Eval cache keyed (fen, depth, multipv)**: stepping back and forth
   through a game re-searches identical positions; an LRU (memory or
   table) makes replay instant and cuts explain seeding cost.
@@ -161,9 +177,18 @@ an explain tool loop. Unblocks users without a Claude Code login.
 1. **Clickable candidate lines** (1) — days, pure frontend, completes
    the panel users already stare at.
 2. **Blunder puzzles** (2) — the best value-per-effort in the list;
-   makes the app a trainer, not just a reporter.
+   makes the app a trainer, not just a reporter, and the highlights
+   work already did its selection half.
 3. **One-click game review** (7) — the flagship coaching moment;
    every piece of infrastructure it needs already exists.
 
-Then 3 (trends) as a filler-sized win, and 4 (time management) as
-the next substantial analysis feature. 5, 6, 8, 9 as demand pulls.
+Then 4 (time management) as the next substantial analysis feature.
+5, 6, 8, 9 as demand pulls.
+
+Three designs sit outside this ordering, already written up in
+[future-improvements/](future-improvements/) and waiting on a
+trigger rather than on priority: the **player profile** (the context
+block every other prompt would embed), the **openings explorer**, and
+the **prompt-version fingerprint**, which wants the next material
+change to the explain prompt so the key change and its cache
+invalidation land together.

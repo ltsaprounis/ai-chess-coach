@@ -79,7 +79,7 @@ unexpected to 500.
   purely optional one: if the stream drops it falls back to the 409
   poll, which is the authoritative liveness signal. It is an HTTP
   client only — it never touches the DB or imports components
-  (docs/fixes-2026-07/07-analysis-coverage.md).
+  (docs/archive/fixes-2026-07/07-analysis-coverage.md).
 - Highlights (`/players/{u}/highlights`) is `list_analyzed_games` →
   `build_highlights` with `cfg.brilliant`, mirroring `/report`'s shape:
   same window/time-class query params, same threadpool execution (it

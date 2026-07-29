@@ -228,8 +228,8 @@ def test_critical_positions_replay_to_fen() -> None:
 
 
 def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
-    """The Englund regression (COACH-REPORT-IMPROVEMENTS.md finding 1) and
-    its faced/chosen split (docs/fixes-2026-07/03-faced-openings.md).
+    """The Englund regression (docs/archive/coach-report-improvements.md finding 1) and
+    its faced/chosen split (docs/archive/fixes-2026-07/03-faced-openings.md).
 
     The student is White; the Englund is the opponent's own gambit
     (1...e5!? in reply to 1.d4). The guarantee this protects is
@@ -1026,7 +1026,7 @@ async def test_agent_sdk_provider_wraps_failures(
 async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """docs/fixes-2026-07/04-report-engine-tool.md: given an analyst,
+    """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
     complete() reuses explain()'s MCP-wrapped tool mechanics under the
     report turn budget, and text across the whole tool loop -- before and
     after an engine call -- concatenates into the returned advice.
@@ -1638,7 +1638,7 @@ async def test_copilot_provider_complete_raises_on_empty_output(
 async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """docs/fixes-2026-07/04-report-engine-tool.md: given an analyst,
+    """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
     complete() registers analyze_position exactly as explain() does, and
     text either side of an engine call concatenates into the returned
     advice."""
@@ -1948,7 +1948,7 @@ async def test_copilot_provider_complete_times_out_when_session_stalls(
 ) -> None:
     """A session that never goes idle or errors (a wedged CLI runtime)
     must fail the request instead of hanging it forever (scan finding
-    7, docs/CODEBASE-SCAN-2026-07.md)."""
+    7, docs/archive/codebase-scan-2026-07.md)."""
     captured: dict[str, object] = {}
     script = [("text", "half an answer, then silence")]  # no idle, no error
     monkeypatch.setattr(

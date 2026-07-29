@@ -66,7 +66,7 @@ export type OpeningFamily = {
    *  rows this family counted, transpositions included, instead of
    *  re-deriving membership from a representative line that only some
    *  of the group's games actually played
-   *  (docs/fixes-2026-07/03-faced-openings.md). */
+   *  (docs/archive/fixes-2026-07/03-faced-openings.md). */
   members: { eco: string; name: string }[];
 };
 

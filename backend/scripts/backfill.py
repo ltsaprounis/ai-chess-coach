@@ -2,7 +2,7 @@
 
 An HTTP client only — no database access, no chess_coach imports;
 every decision is delegated to POST /api/players/{u}/analyze and its
-window filters (docs/fixes-2026-07/07-analysis-coverage.md). Run it
+window filters (docs/archive/fixes-2026-07/07-analysis-coverage.md). Run it
 via `make backfill ARGS="..."`, which also keeps a Mac awake for
 overnight jobs.
 

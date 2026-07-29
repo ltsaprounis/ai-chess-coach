@@ -72,7 +72,7 @@ export default function Games() {
   // drill-through on the dashboard. The current link format freezes the
   // family's member (eco, name) rows into repeated `opening` params, so
   // filtering matches exactly the games the repertoire row counted,
-  // transpositions included (docs/fixes-2026-07/03-faced-openings.md);
+  // transpositions included (docs/archive/fixes-2026-07/03-faced-openings.md);
   // `system` is a fallback for older links, and a bare `family` (with
   // `color`, when present) for even older ones. See gamesFilter.ts for
   // the precedence, kept pure and unit-tested there.

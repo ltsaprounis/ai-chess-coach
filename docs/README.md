@@ -1,26 +1,26 @@
 # AI Chess Coach — Documentation Index
 
-[PROPOSAL.md](PROPOSAL.md) is the high-level pitch;
+[PROPOSAL.md](PROPOSAL.md) is the high-level pitch and
 [NEW-FEATURE-PROPOSAL.md](NEW-FEATURE-PROPOSAL.md) holds the
-prioritized candidates for what to build next;
-[COACH-REPORT-IMPROVEMENTS.md](COACH-REPORT-IMPROVEMENTS.md) reviews
-the whole-report coaching output and the Dashboard views built on the
-same data, and plans their rework;
-[fixes-2026-07/](fixes-2026-07/README.md) is the follow-up fix
-iteration to that rework; and
-[CODEBASE-SCAN-2026-07.md](CODEBASE-SCAN-2026-07.md) is the July 2026
-whole-codebase scan, with its open findings; and
-[future-improvements/](future-improvements/) holds designs that were
-evaluated but not built yet — deliberately deferred, or planned and
-not yet scheduled — each with its reasoning; and
-[archive/](archive/) holds resolved reports kept for their
-measurements and reasoning (currently the engine search-hangs
-postmortem, whose fix landed 2026-07-28). Each
-component below has its own build plan. Components are decoupled: the API layer is the
-only module that composes them, and everything else communicates through
-the shared domain types and plain function interfaces.
+prioritized candidates for what to build next.
 [GUIDELINES.md](GUIDELINES.md) holds the cross-cutting engineering
-rules — toolchain, boundary enforcement, style, testing, CI.
+rules — toolchain, boundary enforcement, style, testing, CI. Each
+component below has its own build plan. Components are decoupled: the
+API layer is the only module that composes them, and everything else
+communicates through the shared domain types and plain function
+interfaces.
+
+Two directories hold work that is not a component:
+
+- [future-improvements/](future-improvements/) — designs evaluated
+  but not built, each with its reasoning: deliberately deferred, or
+  planned and not yet scheduled. A doc leaves here by being built
+  (its contracts migrate into the component docs) or by being
+  rejected outright.
+- [archive/](archive/README.md) — reviews, scans and fix iterations
+  that are closed out, kept for their measurements and reasoning.
+  Nothing here describes current plans; anything they left open was
+  handed to `future-improvements/` or to a component doc first.
 
 The backend is Python end to end; TypeScript appears only in the
 `web/` frontend.

@@ -9,7 +9,7 @@ carried no FENs to feed it — fixed by the wave-5 follow-up below.**
 
 The report path is `complete()` with `max_turns=1` and no tools, so
 the model asserts concrete lines it cannot verify — the single
-biggest remaining quality lever (COACH-REPORT-IMPROVEMENTS.md §9).
+biggest remaining quality lever (coach-report-improvements.md §9).
 The machinery already exists: `explain` runs agentically against
 `analyze_position` through `PositionAnalystFn`, in both shipped
 providers, including the Copilot turn-budget guard. Turning points

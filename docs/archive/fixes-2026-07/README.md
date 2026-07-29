@@ -1,7 +1,14 @@
 # Fixes iteration — July 2026
 
+Status: closed 2026-07-27, archived 2026-07-29. Items 1-5 and 7 all
+shipped (waves 1-7, `f90f97e` through the Coach-page warning); item 6
+was never started and moved on to
+[player-profile.md](../../future-improvements/player-profile.md).
+Kept for its decisions and measurements. Original text follows, with
+only the item-6 row and cross-doc links updated for the move.
+
 The follow-up iteration to the coach report rework
-([COACH-REPORT-IMPROVEMENTS.md](../COACH-REPORT-IMPROVEMENTS.md)).
+([coach-report-improvements.md](../coach-report-improvements.md)).
 That rework shipped findings 1-8, 10 and 12; this iteration closes
 what it left open, plus the games-list cap bug that predates it.
 
@@ -20,7 +27,7 @@ feature doc so implementers don't guess.
 | 3 | [03-faced-openings.md](03-faced-openings.md) | Chosen-vs-faced split in the repertoire | domain (main), storage-dev, coach-dev, frontend-dev | P1 | shipped `d2795a1`; label-coarseness revisit clause open |
 | 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 | shipped `8c340d4`; live run 2026-07-27 exposed the FEN gap → wave-5 follow-up |
 | 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 | shipped `f90f97e` |
-| 6 | [06-player-profile.md](06-player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | parked — a later iteration |
+| 6 | [player-profile.md](../../future-improvements/player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | never started; moved to `future-improvements/` on archival |
 | 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | complete: waves 5-7 (`c2f9f2c`, `0c836f0`, Coach-page warning 2026-07-27) |
 
 ## Decisions already made
@@ -70,9 +77,10 @@ slices.
 - **Wave 3 (shipped `8c340d4`):** 04. Edits `coach/prompt.py` and
   the snapshot again; after 03 so `PROMPT_VERSION` and the snapshot
   churn once per wave, not per keystroke.
-- **Wave 4 (parked — a later iteration):** 06. Reuses 03's
-  aggregation and 04's provider path; do not start it before both
-  settle, and not in this iteration.
+- **Wave 4 (never run):** 06. Reuses 03's aggregation and 04's
+  provider path; both settled on 2026-07-25, so the work is
+  unblocked for whichever iteration picks it up — it just isn't this
+  one. The design moved to `future-improvements/` on archival.
 - **Wave 5 (shipped `c2f9f2c`):** 04's live-run follow-up
   (turning-point FENs, affirmative verification rule) + 07's
   report/prompt slice (coverage statement). One wave because both
@@ -82,8 +90,8 @@ slices.
   filters (storage-dev → api-dev) + the backfill CLI (main
   session — an HTTP-only client, owned by no component).
 - **Wave 7 (shipped 2026-07-27):** 07's Coach-page coverage warning
-  + "Analyze the rest" chaining (frontend-dev). Closes item 7; the
-  iteration's only open item is 06, parked.
+  + "Analyze the rest" chaining (frontend-dev). Closes item 7 and,
+  with 06 handed on, the iteration.
 
 `PROMPT_VERSION` bumps in waves 2, 3 and 5; each bump invalidates
 the report cache by design. That is expected, not a regression.

@@ -137,7 +137,7 @@ async def test_illegal_san_raises() -> None:
 # decoupling rule 1). Both read the boundaries from `domain`, but each
 # applies them itself, so this asserts the two implementations stay in
 # step — the drift would be silent, and it would land squarely on the
-# endgame numbers that COACH-REPORT-IMPROVEMENTS.md finding 4 is about.
+# endgame numbers that docs/archive/coach-report-improvements.md finding 4 is about.
 #
 # Reaching past both public surfaces is deliberate: what needs pinning
 # is the rule itself, at its boundaries, and no pair of public calls

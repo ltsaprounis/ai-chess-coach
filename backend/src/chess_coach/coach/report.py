@@ -75,7 +75,7 @@ _MISSED_WIN_THRESHOLD = 300
 
 # ± rating points: opposition within this band of the player counts as
 # "similar"; outside it, "stronger" or "weaker". A round, documented
-# choice -- COACH-REPORT-IMPROVEMENTS.md suggests it as a sensible band.
+# choice -- docs/archive/coach-report-improvements.md suggests it as a sensible band.
 _OPPONENT_BAND = 50
 
 _ERROR_TAGS: tuple[str, ...] = (

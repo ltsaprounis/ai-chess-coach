@@ -192,7 +192,7 @@ derive the player's system client-side. Deliberately **not** a
 `san_moves` never crosses the boundary (it is read and sliced to
 `first_plies` inside storage), which is what lets the frontend fetch
 the whole archive uncapped
-(docs/fixes-2026-07/01-games-list-uncap.md). `GameDetail`
+(docs/archive/fixes-2026-07/01-games-list-uncap.md). `GameDetail`
 (Game + optional analysis + opening) stays the full record;
 `GameFilters` (opening/result/time_class/analyzed/paging) is
 storage's own public parameter type.

@@ -187,7 +187,7 @@ async def test_perspective_ids_keep_both_tracked_players_separate() -> None:
     """One game, synced from each player's own archive: the two copies
     get distinct ids, so the second player's sync can no longer collide
     with the first's stored row and silently drop their perspective
-    (docs/CODEBASE-SCAN-2026-07.md, finding 1)."""
+    (docs/archive/codebase-scan-2026-07.md, finding 1)."""
     standard_pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 1-0"
     async with make_single_game_client(standard_pgn) as client:
         as_white = await all_games(client)

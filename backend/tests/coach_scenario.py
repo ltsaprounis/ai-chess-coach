@@ -2,7 +2,7 @@
 
 One fixed cast of analyzed games, shared by the prompt snapshot and the
 regression tests around it. It is modelled on the real 515-game report
-that prompted docs/COACH-REPORT-IMPROVEMENTS.md: someone who opens
+that prompted docs/archive/coach-report-improvements.md: someone who opens
 1.d4 as White and answers 1.e4 with the Pirc, and whose opponents keep
 meeting the d4 with the Englund Gambit. It is built so a fix shows up
 as a readable diff of `testdata/coach_prompt.md`:
@@ -13,7 +13,7 @@ as a readable diff of `testdata/coach_prompt.md`:
   burying the line in the long tail. It is `faced` (named by the
   opponent's own move) and above the floor, so it must appear under
   "What you face as White" and nowhere in "Systems you chose"
-  (docs/fixes-2026-07/03-faced-openings.md).
+  (docs/archive/fixes-2026-07/03-faced-openings.md).
 - the **London** and the **Pirc** are the student's own systems --
   `faced` is False for both -- the Pirc split across two lichess names
   that must roll up into one family (finding 2), beside a two-game Ruy

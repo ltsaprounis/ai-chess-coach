@@ -1,7 +1,7 @@
 # Automatic prompt versions — content fingerprints
 
 Status: planned (2026-07-27), not yet scheduled. Bundles scan finding
-12 ([CODEBASE-SCAN-2026-07.md](../CODEBASE-SCAN-2026-07.md),
+12 ([codebase-scan-2026-07.md](../archive/codebase-scan-2026-07.md),
 "Explanation cache ignores `PROMPT_VERSION`") because both items are
 the same question — *what identifies the prompt a cached LLM answer
 was produced from* — and fixing one without the other means touching
@@ -25,7 +25,7 @@ serving explanations generated from a template that no longer exists.
 - **It is a promise, not a mechanism.** Nothing fails when the
   template changes and the string does not; the failure is silent and
   arrives later as stale advice attributed to the current prompt.
-- **It has already needed choreography.** `fixes-2026-07/README.md`
+- **It has already needed choreography.** `archive/fixes-2026-07/README.md`
   sequences waves 2, 3 and 5 partly so `PROMPT_VERSION` "churns once
   per wave, not per keystroke" — a scheduling constraint that exists
   only because the bump is manual.
@@ -248,8 +248,8 @@ changes land in the main session, component slices are delegated.
    Migration 007, the two signatures, both call sites. These cannot
    land separately — the signature change breaks the API layer.
 5. **Close out (main session).** Mark finding 12 fixed in
-   [CODEBASE-SCAN-2026-07.md](../CODEBASE-SCAN-2026-07.md); note in
-   `fixes-2026-07/README.md` that the bump-coordination constraint no
+   [codebase-scan-2026-07.md](../archive/codebase-scan-2026-07.md); note in
+   `archive/fixes-2026-07/README.md` that the bump-coordination constraint no
    longer applies.
 6. **boundary-reviewer** before committing, as usual for multi-agent
    work.

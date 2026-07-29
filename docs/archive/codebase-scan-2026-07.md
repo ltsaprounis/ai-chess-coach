@@ -5,13 +5,17 @@ migrations, `scripts/backfill.py`, and every non-test file in `web/src/`,
 plus mechanical checks (import-linter, grep for env reads and
 cross-component imports) and a run of the quality gates.
 
+Archived 2026-07-29: closed out, kept for its measurements and the
+reasoning behind each fix. The two findings it did not close are
+tracked elsewhere — see the "Remaining" section at the end.
+
 Status (2026-07-27): every finding except 12 and 14 is fixed on main,
 one commit per fix (each fixed section below names its commit).
 Finding 1's fix is the perspective-id scheme — the rejected deeper
 remodel is recorded in
-[future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
+[normalized-game-model.md](../future-improvements/normalized-game-model.md).
 Finding 12 has a planned design
-([future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md)),
+([prompt-version-fingerprint.md](../future-improvements/prompt-version-fingerprint.md)),
 deferred until the explain prompt next changes; finding 14 stays open
 as a packaging note gated by the GPL distribution decision. Landing
 the fixes also surfaced and fixed two issues the scan missed: the
@@ -246,7 +250,7 @@ document the asymmetry as intended.
 
 Planned fix: the key gains a version, and both versions become
 content fingerprints instead of hand-bumped strings —
-[future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md).
+[prompt-version-fingerprint.md](../future-improvements/prompt-version-fingerprint.md).
 
 ### 13. `analyze` by game id skips ownership and dedupe
 
@@ -311,7 +315,7 @@ Points worth keeping:
   the rows a future normalization (or cross-perspective eval reuse)
   would need, and the id itself parses back into (uuid, username).
   See
-  [future-improvements/normalized-game-model.md](future-improvements/normalized-game-model.md).
+  [normalized-game-model.md](../future-improvements/normalized-game-model.md).
 - **Aggregates at write time, not read time.** Finding 11's shape —
   derive at save, backfill by migration, serve from summed columns —
   is the template if any other read-path parsing shows up hot as the
@@ -330,7 +334,7 @@ Remaining:
 
 - **Finding 12 — planned, not scheduled.** Prompt versions become
   content fingerprints and the explanation cache gains one
-  ([future-improvements/prompt-version-fingerprint.md](future-improvements/prompt-version-fingerprint.md)).
+  ([prompt-version-fingerprint.md](../future-improvements/prompt-version-fingerprint.md)).
   Deliberately deferred until the explain prompt next changes
   materially, so the key change and its cache invalidation land
   together instead of re-billing every cached explanation for a

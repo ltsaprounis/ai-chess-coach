@@ -12,7 +12,7 @@ The rework split the repertoire by color and added the `system` /
 the table still interleaves lines the player chose with lines their
 opponents chose against them, and the boundary review called the
 missing split the headline remaining gap
-(COACH-REPORT-IMPROVEMENTS.md §1: "systems you chose" vs "replies
+(coach-report-improvements.md §1: "systems you chose" vs "replies
 you face"). If coaching advice still misattributes an opening, this
 is the missing structure.
 

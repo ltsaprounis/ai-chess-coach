@@ -31,7 +31,7 @@ confined to:
   adjust fixtures.
 - Docs: check `docs/01-config.md` and `docs/06-coach.md` for any
   mention of the field (none expected beyond example YAML);
-  `docs/COACH-REPORT-IMPROVEMENTS.md` §8 mentions the default —
+  `docs/archive/coach-report-improvements.md` §8 mentions the default —
   leave that doc alone, it is a historical record.
 
 Acceptance: `make check` green; `grep -r max_tokens backend web`

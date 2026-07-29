@@ -1,5 +1,5 @@
 // Pure coverage-gap logic for the Coach page (docs/08-frontend.md,
-// docs/fixes-2026-07/07-analysis-coverage.md slice 4) — no fetching,
+// docs/archive/fixes-2026-07/07-analysis-coverage.md slice 4) — no fetching,
 // no React, unit-tested in coachCoverage.test.ts. Mirrors explain.ts's
 // split between pure reducer/selectors and the hook that wires them
 // into fetch/SSE.

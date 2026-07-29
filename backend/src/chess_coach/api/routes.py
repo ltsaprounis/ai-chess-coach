@@ -184,7 +184,7 @@ def player_games(
     # ge=0 at the edge so a negative value 422s instead of failing
     # GameFilters' own validation inside the handler (a 500); SQLite
     # reads a negative LIMIT as "unlimited", which would return the
-    # whole table (docs/CODEBASE-SCAN-2026-07.md, finding 10).
+    # whole table (docs/archive/codebase-scan-2026-07.md, finding 10).
     limit: Annotated[int, Query(ge=0)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[GameSummary]:
@@ -309,7 +309,7 @@ async def analyze_player(
         # run is started and no 409-blocking state is left behind. This
         # makes `limit: 0` a free probe and `queued=0, remaining=0` the
         # backfill's termination signal, per
-        # docs/fixes-2026-07/07-analysis-coverage.md. The active-run
+        # docs/archive/fixes-2026-07/07-analysis-coverage.md. The active-run
         # 409 guard above already ran, so a probe against a genuinely
         # running player still 409s as usual.
         return AnalyzeResult(queued=0, remaining=remaining)

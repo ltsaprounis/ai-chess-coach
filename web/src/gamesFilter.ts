@@ -1,7 +1,7 @@
 // The Games page's opening drill-through filter, pulled out as a pure
 // function so the precedence between the repertoire link formats is
 // unit-testable without the router. See
-// docs/fixes-2026-07/03-faced-openings.md ("Fold-in: the drill-through
+// docs/archive/fixes-2026-07/03-faced-openings.md ("Fold-in: the drill-through
 // undercount") for why the `opening`-list match exists at all: a
 // family's `games` sums every (color, eco, name) row rolled into it,
 // transpositions included, so matching drill-through games by
@@ -65,7 +65,7 @@ type FilterableGame = {
 
 /**
  * The Games-page drill-through precedence
- * (docs/fixes-2026-07/03-faced-openings.md): a member list, when
+ * (docs/archive/fixes-2026-07/03-faced-openings.md): a member list, when
  * present, matches iff the game is the right color and its classified
  * opening is one of the frozen (eco, name) pairs — this is the
  * current format for both the chosen and faced partitions. Otherwise

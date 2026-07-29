@@ -47,7 +47,7 @@ PositionAnalystFn = Callable[[str], Awaitable[list[EvalLine]]]
 _EXPLAIN_MAX_TURNS = 8
 
 # Same budget, for the agentic complete() loop when an analyst is supplied
-# (docs/fixes-2026-07/04-report-engine-tool.md): a report run gets a couple
+# (docs/archive/fixes-2026-07/04-report-engine-tool.md): a report run gets a couple
 # of engine calls to verify concrete lines before asserting them, plus the
 # final write-up. A separate constant from _EXPLAIN_MAX_TURNS because the
 # two flows are tuned independently even though they share a value today.

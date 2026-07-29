@@ -16,6 +16,15 @@ Stockfish, classifies openings, and generates LLM coaching advice.
   number, add a doc with the same interface/dependencies structure,
   and register it in the README table and import-linter contracts.
   Follow the docs; update them when contracts change.
+- [docs/NEW-FEATURE-PROPOSAL.md](../docs/NEW-FEATURE-PROPOSAL.md) —
+  the live backlog, plus
+  [docs/future-improvements/](../docs/future-improvements/) for
+  designs written up but not yet built.
+- [docs/archive/](../docs/archive/README.md) — closed-out reviews,
+  scans and fix iterations. History, not plans: never resurrect work
+  from here, and never cite it as current behaviour. A report is only
+  archived once anything it left open has moved to
+  `future-improvements/` or into the owning component doc.
 
 ## Stack (see GUIDELINES.md for detail)
 

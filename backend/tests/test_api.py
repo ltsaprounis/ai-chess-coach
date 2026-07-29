@@ -970,7 +970,7 @@ def test_report_states_coverage_over_a_window_with_unanalyzed_games(
     """games_in_scope counts every stored game in the window, analyzed or
     not, and requested_since/requested_until echo the query -- the "N of
     M" coverage the prompt and (later) the UI rely on to never silently
-    understate the analyzed span (docs/fixes-2026-07/07)."""
+    understate the analyzed span (docs/archive/fixes-2026-07/07)."""
     seed(
         db_path,
         [
@@ -1486,7 +1486,7 @@ def test_eval_reports_mid_stream_engine_failure_as_terminal_event(
     """An engine dying mid-search must end the stream with a terminal
     `engine_error` event — not a bare connection drop, which an
     EventSource client answers by reconnecting and re-running the same
-    failing search (docs/CODEBASE-SCAN-2026-07.md, finding 5)."""
+    failing search (docs/archive/codebase-scan-2026-07.md, finding 5)."""
     stub_pool(stub_registry).stream_eval_error = EngineError("engine died")
 
     response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
@@ -1698,7 +1698,7 @@ def test_analyze_game_ids_skips_other_players_games_and_duplicates(
     """The game_ids path must only analyze the named player's games —
     a run registered under one username must not run another player's
     games — and a repeated id must not be analyzed twice (scan finding
-    13, docs/CODEBASE-SCAN-2026-07.md)."""
+    13, docs/archive/codebase-scan-2026-07.md)."""
     seed(
         db_path,
         [

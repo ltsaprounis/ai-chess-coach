@@ -141,7 +141,8 @@ class CoachProviderError(Exception): ...
 below are the component's contract, not implementation detail: the
 Dashboard reads the same `PlayerReport` and the same `OpeningStats`,
 so a rule stated loosely here becomes two implementations that
-disagree. See [COACH-REPORT-IMPROVEMENTS.md](COACH-REPORT-IMPROVEMENTS.md)
+disagree. See
+[coach-report-improvements.md](archive/coach-report-improvements.md)
 for why each exists.
 
 ### Aggregation is move-weighted, never a mean of means
