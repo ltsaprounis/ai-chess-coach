@@ -18,7 +18,10 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    (`api.allGames`, the paged fetch shared with the Dashboard cache):
    result / time-class / analyzed-state filters and an opponent search
    applied client-side, click-to-sort column headers, and prev/next
-   paging. A "Sync new games" button pulls fresh games for the player
+   paging. A row's date opens its Game page in a new tab — like every
+   game link off a list page — so filters, sort, page, and any row
+   selection survive the detour. A "Sync new games" button pulls
+   fresh games for the player
    (`POST /sync`, incremental) and refreshes the derived caches. Beside
    it, a low-emphasis "Full re-sync" action (`POST /sync?full=true`)
    re-fetches the whole archive to backfill columns — currently
@@ -88,7 +91,9 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    by `(color, system)`, the faced partition by `(color, name root)`;
    two colors of one family never merge.
 
-   A family row drills through to the Games page carrying its member
+   A family row drills through to the Games page (a new tab, like
+   the highlight rows — the link is URL-param-complete, so the tab
+   stands alone) carrying its member
    openings — one `opening=ECO|name` URL param per rolled-up row —
    plus `color` (faced rows add a display-only `faced=true`, which
    the filter chip renders as "faced as white"), and the Games
@@ -112,8 +117,11 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    player-POV eval after the move for brilliancies (folded from the
    white-POV fields by `color`, mates rendered as `#N`), centipawn
    loss for blunders. Every row links to `/games/{id}?ply={ply}` —
-   the Game page's ply deep link — so the student lands on the exact
-   position. Both tables page at 20 rows through a classic numbered
+   the Game page's ply deep link — in a new tab (`target="_blank"`,
+   like the Coach page's advice anchors), so the student lands on
+   the exact position and the dashboard keeps its scroll and pager
+   state. The Recurring-mistakes example links open the same way.
+   Both tables page at 20 rows through a classic numbered
    pager (`components/Pagination.tsx`; ‹ 1 … 4 5 6 … N ›) — rows are
    newest-first, so higher pages reach older moves. The pager hides
    itself when one page fits (the usual case for brilliancies), and

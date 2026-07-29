@@ -434,7 +434,11 @@ export default function Games() {
                       />
                     </td>
                     <td>
-                      <Link to={`/games/${game.id}`}>
+                      <Link
+                        to={`/games/${game.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {new Date(game.end_time * 1000).toLocaleDateString()}
                       </Link>
                     </td>

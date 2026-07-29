@@ -75,7 +75,9 @@ function Tile({ value, label }: { value: string | number; label: string }) {
 /** Shared table markup for both highlight sections — they differ only
  *  in which "number that matters" column they show (player-POV eval
  *  after for brilliancies, cp lost for blunders). Every row deep-links
- *  to the Game page at its ply, docs/08-frontend.md's Game section. */
+ *  to the Game page at its ply (docs/08-frontend.md's Game section) in
+ *  a new tab, so working through a list of moves never loses the
+ *  dashboard's scroll and pager state. */
 function HighlightsTable({
   moves,
   numberHeader,
@@ -102,7 +104,11 @@ function HighlightsTable({
           {moves.map((move) => (
             <tr key={`${move.game_id}-${move.ply}`}>
               <td>
-                <Link to={`/games/${move.game_id}?ply=${move.ply}`}>
+                <Link
+                  to={`/games/${move.game_id}?ply=${move.ply}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {new Date(move.end_time * 1000).toLocaleDateString()}
                 </Link>
               </td>
@@ -698,7 +704,11 @@ export default function Dashboard() {
                       <td>
                         {pattern.example_game_id !== null &&
                         pattern.example_game_id !== undefined ? (
-                          <Link to={`/games/${pattern.example_game_id}`}>
+                          <Link
+                            to={`/games/${pattern.example_game_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
                             {errorExampleLabel(pattern)}
                           </Link>
                         ) : (
