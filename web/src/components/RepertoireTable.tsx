@@ -158,7 +158,13 @@ export default function RepertoireTable({
                   }
                 >
                   <td>
-                    <Link to={familyLink(family)}>{family.family}</Link>
+                    <Link
+                      to={familyLink(family)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {family.family}
+                    </Link>
                   </td>
                   <td>
                     {faced ? (
