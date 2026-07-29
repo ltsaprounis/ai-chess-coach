@@ -277,30 +277,33 @@ class ErrorPattern(BaseModel):
     count: int
     share_of_blunders: float  # count ÷ total blunders, 0-1
     # One instance the student can go and look at. Carries the same
-    # identity a CriticalPosition does — the prompt cites it by date
-    # and move number through a [gN] link handle, and game_id/ply are
-    # what the handle's /games/{id}?ply= link is minted from
-    # (docs/06-coach.md, "Game links").
+    # identity a CriticalPosition does — the prompt cites it by
+    # opponent, date, and move number through a [gN] link handle, and
+    # game_id/ply are what the handle's /games/{id}?ply= link is
+    # minted from (docs/06-coach.md, "Game links").
     example_game_id: str | None = None
     example_ply: int | None = None
     example_end_time: int | None = None
     example_move_number: int | None = None
+    example_opponent: str | None = None
 
 
 class CriticalPosition(BaseModel):
     """A turning point the student can actually find and act on.
 
-    Identity (date, time class, color, opening, move number) so the
-    prompt can say "your 26...Nb6 in the June 14 blitz Pirc" instead of
-    "position 1", and the eval either side of the move so a blunder
-    that lost a won game is distinguishable from one played in an
-    already-lost position.
+    Identity (opponent, date, time class, color, opening, move number)
+    so the prompt can say "in your game against marko77 on June 14,
+    26...Nb6" instead of "position 1" — opponent and date because that
+    is how players remember games — and the eval either side of the
+    move so a blunder that lost a won game is distinguishable from one
+    played in an already-lost position.
     """
 
     game_id: str
     end_time: int
     time_class: TimeClass
     color: Color  # the side the player had
+    opponent: str
     opening_name: str | None
     ply: int  # 1-based, matches MoveEval.ply
     move_number: int  # the "26" in "26...Nb6"

@@ -25,7 +25,7 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-game-links"
+PROMPT_VERSION = "2026-07-opponent-citations"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -55,12 +55,17 @@ _INSTRUCTIONS = (
     'repertoire lists it under their color in "Systems you chose". Never '
     'advise dropping a line from the "What you face" table -- recommend '
     "a response to it instead.\n"
-    "- **Citation.** Refer to positions by date and move number, "
-    "written as a markdown reference link through the entry's `cite` "
-    'handle -- e.g. "[your 26...Nb6 in the June 14 blitz game][g3]" -- '
-    "never a raw URL, never an invented handle, never a list position "
-    "or table row. Every mention of a handled position should cite "
-    "this way.\n"
+    "- **Citation.** Game first, move second: name the game by "
+    "opponent and date at its first citation, then give the move in "
+    'notation as the link, e.g. "In your game against marko77 on '
+    'June 14, [26...Nb6][g3] ...", written through the '
+    "entry's `cite` handle. Never a raw URL, never an invented "
+    "handle, never a list position or table row. Later references "
+    'to an already-cited game may shorten (e.g. "that marko77 '
+    'game"). The opening name appears only as coaching content, '
+    "never as the identifier; state the time class only when the "
+    "report mixes time controls (the student section's scope line "
+    "says which) and omit it otherwise.\n"
     "- **One biggest lever.** Open with the single change most likely to "
     "raise this student's results, not a flat list of co-equal "
     "weaknesses. Order everything else by impact behind it.\n"
@@ -552,13 +557,16 @@ def _error_patterns_section(
 
 
 def _error_example(e: ErrorPattern, handles: dict[tuple[str, int], str]) -> str:
-    """Date and move number, with side, plus a `(cite [gN])` handle so the
-    model can cite this instance the same way it cites a turning point
-    (docs/06-coach.md, "Game links") -- a bare game id/ply is exactly the
-    unfindable handle the citation rule bans, and a plain date and move
-    number alone gives the model nothing it is allowed to link through.
-    The "n/a" path (an example field missing) carries no handle -- there
-    is nothing to cite."""
+    """Date and opponent, plus move number with side, plus a `(cite [gN])`
+    handle so the model can cite this instance the same way it cites a
+    turning point (docs/06-coach.md, "Game links") -- a bare game id/ply
+    is exactly the unfindable handle the citation rule bans, and a plain
+    date and move number alone gives the model nothing it is allowed to
+    link through. `example_opponent` is optional for symmetry with the
+    other `example_*` fields; when a directly-constructed report leaves
+    it None, the cell renders without the "vs ..." clause rather than
+    "vs None". The "n/a" path (a required example field missing) carries
+    no handle -- there is nothing to cite."""
     if (
         e.example_game_id is None
         or e.example_end_time is None
@@ -567,11 +575,12 @@ def _error_example(e: ErrorPattern, handles: dict[tuple[str, int], str]) -> str:
     ):
         return "n/a"
     date = _format_date(e.example_end_time)
+    opponent = f" vs {e.example_opponent}" if e.example_opponent else ""
     # Name the side in words rather than with SAN's trailing "."/"...",
     # which needs a move after it to read as notation instead of as a
     # typo. Turning points can use the glyphs; this cell has no move.
     side = "White" if e.example_ply % 2 == 1 else "Black"
-    base = f"{date}, {side}'s move {e.example_move_number}"
+    base = f"{date}{opponent}, {side}'s move {e.example_move_number}"
     handle = handles.get((e.example_game_id, e.example_ply))
     return f"{base} (cite [{handle}])" if handle else base
 
@@ -596,8 +605,8 @@ def _turning_point_entry(n: int, p: CriticalPosition, handle: str) -> str:
     opening = f", {p.opening_name}" if p.opening_name else ""
     move_label = f"{p.move_number}." if p.color == "white" else f"{p.move_number}..."
     lines = [
-        f"### {n}. {date}, {p.time_class}, as {color_word}{opening} "
-        f"-- move {p.move_number} -- cite [{handle}]"
+        f"### {n}. {date}, {p.time_class}, as {color_word} vs {p.opponent}"
+        f"{opening} -- move {p.move_number} -- cite [{handle}]"
     ]
     if p.leading_up:
         lines.append(f"Leading up: {' '.join(p.leading_up)}")

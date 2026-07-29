@@ -216,6 +216,7 @@ def test_critical_positions_replay_to_fen() -> None:
     assert critical.cp_loss == 300
     assert critical.game_id == "g-crit"
     assert critical.color == "white"
+    assert critical.opponent == "hikaru"  # make_game's default opponent
     assert critical.time_class == "blitz"
     assert critical.end_time == 1_781_000_000
     assert critical.opening_name == "Ruy Lopez"
@@ -451,6 +452,7 @@ def test_error_pattern_hangs_piece() -> None:
     assert "hangs_piece" in patterns
     assert patterns["hangs_piece"].count == 1
     assert patterns["hangs_piece"].label == "Hung a piece"
+    assert patterns["hangs_piece"].example_opponent == "hikaru"  # make_game default
 
 
 def test_error_pattern_hangs_piece_to_check() -> None:
@@ -664,13 +666,15 @@ def test_turning_point_entries_carry_their_fen() -> None:
 # --- game links (docs/06-coach.md, "Game links") ---------------------------
 
 
-def test_instructions_contain_new_citation_rule() -> None:
+def test_instructions_contain_opponent_first_citation_rule() -> None:
+    """docs/06-coach.md's rewritten Citation bullet: game first (opponent
+    and date), move second (the reference link through the handle)."""
     prompt = render_prompt(build_report("testuser", scenario_games()))
-    assert (
-        "written as a markdown reference link through the entry's `cite` "
-        "handle" in prompt
-    )
+    assert "Game first, move second" in prompt
+    assert 'e.g. "In your game against marko77 on June 14, [26...Nb6][g3]' in prompt
     assert "never an invented handle" in prompt
+    assert 'may shorten (e.g. "that marko77 game")' in prompt
+    assert "opening name appears only as coaching content" in prompt
 
 
 def test_turning_point_and_error_example_handles_assigned_in_order() -> None:
@@ -717,6 +721,7 @@ def test_error_example_reuses_turning_point_handle_for_shared_position() -> None
         example_ply=turning_point.ply,
         example_end_time=turning_point.end_time,
         example_move_number=turning_point.move_number,
+        example_opponent=turning_point.opponent,
     )
     report = report.model_copy(update={"error_patterns": [shared_example]})
     prompt = render_prompt(report)
@@ -746,6 +751,72 @@ def test_error_example_without_position_renders_no_handle() -> None:
     )[0]
     assert "| n/a |" in error_section
     assert "cite [" not in error_section
+
+
+def test_turning_point_heading_includes_opponent_for_every_entry() -> None:
+    """docs/06-coach.md: every turning point's identity now includes the
+    opponent, so the model has it in hand to name the game by opponent
+    and date (the new Citation rule) instead of just a date."""
+    report = build_report("testuser", scenario_games())
+    prompt = render_prompt(report)
+
+    assert report.critical_positions
+    for position in report.critical_positions:
+        color_word = "White" if position.color == "white" else "Black"
+        assert f"as {color_word} vs {position.opponent}" in prompt
+
+
+def test_turning_point_heading_places_opponent_between_color_and_opening() -> None:
+    """Rendered heading layout (locked by the snapshot, not prescribed
+    by the doc): "... as White vs marko77, <opening> -- move N -- cite
+    [gN]" -- opponent sits right after the color word and before the
+    opening name."""
+    report = build_report("testuser", scenario_games())
+    first = report.critical_positions[0].model_copy(update={"opponent": "marko77"})
+    report = report.model_copy(update={"critical_positions": [first]})
+    prompt = render_prompt(report)
+
+    color_word = "White" if first.color == "white" else "Black"
+    opening = f", {first.opening_name}" if first.opening_name else ""
+    assert (
+        f"as {color_word} vs marko77{opening} -- move {first.move_number} "
+        "-- cite [g1]" in prompt
+    )
+
+
+def test_error_example_cell_includes_opponent() -> None:
+    """Rendered Example-cell layout (locked by the snapshot, not
+    prescribed by the doc): "<date> vs <opponent>, <side>'s move N
+    (cite [gN])" -- opponent sits right after the date, before the
+    move-number clause."""
+    report = build_report("testuser", scenario_games())
+    pattern = report.error_patterns[0].model_copy(
+        update={"example_opponent": "dimitris88"}
+    )
+    report = report.model_copy(update={"error_patterns": [pattern]})
+    prompt = render_prompt(report)
+
+    error_section = prompt.split("## Recurring error patterns")[1].split(
+        "## Turning points"
+    )[0]
+    assert " vs dimitris88, " in error_section
+    assert "'s move" in error_section  # the move-number clause still follows
+
+
+def test_error_example_omits_vs_clause_when_opponent_missing() -> None:
+    """Stale data (an example predating `example_opponent`) must render
+    without a "vs ..." clause rather than "vs None" -- the pre-opponent
+    citation format, not a crash or a literal "None"."""
+    report = build_report("testuser", scenario_games())
+    pattern = report.error_patterns[0].model_copy(update={"example_opponent": None})
+    report = report.model_copy(update={"error_patterns": [pattern]})
+    prompt = render_prompt(report)
+
+    error_section = prompt.split("## Recurring error patterns")[1].split(
+        "## Turning points"
+    )[0]
+    assert "vs None" not in error_section
+    assert " vs " not in error_section
 
 
 def _two_link_report() -> PlayerReport:

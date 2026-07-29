@@ -290,12 +290,14 @@ recent games. Sorting by raw `cp_loss` instead hands all five slots to
 walk-into-mate moves permanently, most of them played in already-lost
 positions, crowding out every instructive error.
 
-Each entry carries identity (date, time class, color, opening, move
-number with side) so the prompt can cite "your 26...Nb6 in the June 14
-blitz Pirc" — findable by the student, deep-linkable by the UI — and
-never a list index. It also carries the plies leading in and the eval
-either side of the move, so a blunder that threw away a won game is
-distinguishable from a coup de grâce.
+Each entry carries identity (opponent, date, time class, color,
+opening, move number with side) so the prompt can cite "in your game
+against marko77 on June 14, 26...Nb6" — opponent and date because
+that is how players remember games; findable by the student,
+deep-linkable by the UI — and never a list index. It also carries
+the plies leading in and the eval either side of the move, so a
+blunder that threw away a won game is distinguishable from a coup
+de grâce.
 
 The engine's principal variation would be the natural companion to
 `best`, but only a live engine call produces a trustworthy one, so
@@ -395,10 +397,15 @@ weaknesses, and carries the rules the data alone cannot enforce:
   repertoire lists it under their color in "Systems you chose". Never
   advise dropping a line from the "What you face" table — recommend a
   response to it.
-- **Citation.** Refer to positions by date and move number, written
-  as a markdown reference link through the entry's link handle —
-  "[your 26...Nb6 in the June 14 blitz game][g3]" — never a raw URL,
-  never an invented handle, never a list position.
+- **Citation.** Game first, move second: name the game by opponent
+  and date at its first citation, then give the move in notation as
+  the link — "In your game against marko77 on June 14,
+  [26...Nb6][g3] …" — with the reference link written through the
+  entry's link handle. Never a raw URL, never an invented handle,
+  never a list position. Later references to an already-cited game
+  may shorten ("that marko77 game"). The opening name appears only
+  as coaching content, never as the identifier; time class only when
+  the report mixes time controls.
 - **Register.** The explain prompt's style contract applies here too:
   a club player, pawns never centipawns, the idea before the number.
 - **Honesty.** Say when the data does not support a conclusion instead
@@ -426,9 +433,10 @@ post-processing step split the job:
   distinct `(game_id, ply)` targets, turning points first, then error
   examples. A move cited by both sections shares one handle.
 - The citation rule (above) has the model write each citation as a
-  markdown *reference* link through the handle: the visible text
-  stays the human identity ("your 26...Nb6 in the June 14 blitz
-  game"), the handle is all the model must copy.
+  markdown *reference* link through the handle: the game stays named
+  in prose by opponent and date, the linked text is the move itself
+  ("In your game against marko77 on June 14, [26...Nb6][g3] …"), and
+  the handle is all the model must copy.
 - `append_game_links` then makes the handles resolve: it normalizes
   inline `[text](gN)` slips to reference style, degrades citations
   with unknown handles to their plain text, and appends one

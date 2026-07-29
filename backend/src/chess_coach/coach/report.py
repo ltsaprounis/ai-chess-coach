@@ -500,13 +500,14 @@ def _error_patterns(games: list[AnalyzedGame]) -> list[ErrorPattern]:
     which the stored evals already carry (docs/06-coach.md).
     """
     counts: dict[str, int] = {tag: 0 for tag in _ERROR_TAGS}
-    # (game_id, ply, end_time, move_number) -- carries the same identity a
-    # CriticalPosition does, so the prompt can cite "date, move N" rather
-    # than the unfindable bare game id the citation rule exists to ban.
-    # The leading (game_id, ply) pair doubles as the key prompt.py's
+    # (game_id, ply, end_time, move_number, opponent) -- carries the same
+    # identity a CriticalPosition does, so the prompt can cite "in your
+    # game against marko77 on <date>, move N" rather than the unfindable
+    # bare game id the citation rule exists to ban. The leading
+    # (game_id, ply) pair doubles as the key prompt.py's
     # `_game_link_handles` groups on to mint this example's `[gN]` link
     # handle (docs/06-coach.md, "Game links").
-    examples: dict[str, tuple[str, int, int, int]] = {}
+    examples: dict[str, tuple[str, int, int, int, str]] = {}
     total_blunders = 0
 
     for game in games:
@@ -536,7 +537,14 @@ def _error_patterns(games: list[AnalyzedGame]) -> list[ErrorPattern]:
             for tag in tags:
                 counts[tag] += 1
                 examples.setdefault(
-                    tag, (game.id, move_eval.ply, game.end_time, idx // 2 + 1)
+                    tag,
+                    (
+                        game.id,
+                        move_eval.ply,
+                        game.end_time,
+                        idx // 2 + 1,
+                        game.opponent,
+                    ),
                 )
 
     if total_blunders == 0:
@@ -552,6 +560,7 @@ def _error_patterns(games: list[AnalyzedGame]) -> list[ErrorPattern]:
             example_ply=examples[tag][1],
             example_end_time=examples[tag][2],
             example_move_number=examples[tag][3],
+            example_opponent=examples[tag][4],
         )
         for tag in _ERROR_TAGS
         if counts[tag] > 0
@@ -774,6 +783,7 @@ def _build_critical_position(c: _Candidate) -> CriticalPosition:
         end_time=game.end_time,
         time_class=game.time_class,
         color=game.color,
+        opponent=game.opponent,
         opening_name=game.opening.name if game.opening else None,
         ply=idx + 1,
         move_number=idx // 2 + 1,

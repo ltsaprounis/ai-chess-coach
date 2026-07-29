@@ -367,11 +367,12 @@ export interface components {
          * CriticalPosition
          * @description A turning point the student can actually find and act on.
          *
-         *     Identity (date, time class, color, opening, move number) so the
-         *     prompt can say "your 26...Nb6 in the June 14 blitz Pirc" instead of
-         *     "position 1", and the eval either side of the move so a blunder
-         *     that lost a won game is distinguishable from one played in an
-         *     already-lost position.
+         *     Identity (opponent, date, time class, color, opening, move number)
+         *     so the prompt can say "in your game against marko77 on June 14,
+         *     26...Nb6" instead of "position 1" — opponent and date because that
+         *     is how players remember games — and the eval either side of the
+         *     move so a blunder that lost a won game is distinguishable from one
+         *     played in an already-lost position.
          */
         CriticalPosition: {
             /** Game Id */
@@ -388,6 +389,8 @@ export interface components {
              * @enum {string}
              */
             color: "white" | "black";
+            /** Opponent */
+            opponent: string;
             /** Opening Name */
             opening_name: string | null;
             /** Ply */
@@ -439,6 +442,8 @@ export interface components {
             example_end_time?: number | null;
             /** Example Move Number */
             example_move_number?: number | null;
+            /** Example Opponent */
+            example_opponent?: string | null;
         };
         /** GameAnalysis */
         GameAnalysis: {
