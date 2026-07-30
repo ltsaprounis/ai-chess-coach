@@ -175,9 +175,14 @@ class PlayerReport(BaseModel):
 Composites elided above for brevity (`CriticalPosition`,
 `TimeClassStats`, `MonthStats`, `OpponentStats`, `TerminationStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
-`RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`) also
+`RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`,
+`PlayerProfile`, `ProfileOpening`) also
 live in `domain.py` — the component docs state their shapes where
-they are used. Types may grow, but changes to them are contract changes —
+they are used. `PlayerProfile` is the coach's two-layer distillation
+of the report (docs/06-coach.md, "Player profile"): component 6
+defines and renders it, 3 stores it beside its LLM narrative, and 7
+serves it and embeds its context block into the other coach prompts.
+Types may grow, but changes to them are contract changes —
 update the affected component docs in the same commit.
 
 `PlayerReport` and `OpeningStats` are read by both the coaching prompt

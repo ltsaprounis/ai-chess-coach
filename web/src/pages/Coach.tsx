@@ -12,6 +12,7 @@ import {
 import ChatPanel from "../components/ChatPanel.tsx";
 import Layout from "../components/Layout.tsx";
 import { gameLinkMarkdownComponents } from "../components/markdownLinks.tsx";
+import ProfileCard from "../components/ProfileCard.tsx";
 import StatsFilters from "../components/StatsFilters.tsx";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
 import { useChat } from "../useChat.ts";
@@ -73,6 +74,27 @@ export default function Coach() {
         agents.data.default,
       )
     : null;
+
+  // The player-profile card: always the player's full stored history,
+  // never scoped by the window/time-control filters below
+  // (docs/07-api.md, "Player profile") — a separate fetch from
+  // `report`/`coach`, so it loads independently of them.
+  const profile = useQuery({
+    queryKey: ["profile", username],
+    queryFn: () => api.profile(username),
+  });
+
+  // Regenerating replaces the stored narrative under whichever agent
+  // is selected, same as `coach` below; on success the fresh response
+  // (same shape as the GET) replaces the cached one directly rather
+  // than triggering a refetch.
+  const generateProfile = useMutation({
+    mutationFn: () =>
+      api.generateProfile(username, { agentId: activeAgentId ?? undefined }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["profile", username], data);
+    },
+  });
 
   // The report over the same window/time-control: read for its
   // `games_analyzed`/`games_in_scope` server-truth coverage counts
@@ -196,6 +218,21 @@ export default function Coach() {
         Builds a report from the analyzed games in the window below and asks
         your coach agent for prioritized training advice.
       </p>
+
+      {profile.isPending && <p>Loading profile…</p>}
+      {profile.isError && <p role="alert">{profile.error.message}</p>}
+      {profile.isSuccess && (
+        <ProfileCard
+          profile={profile.data.profile}
+          narrative={profile.data.narrative ?? null}
+          agentLabel={agentLabel}
+          generating={generateProfile.isPending}
+          generateError={
+            generateProfile.isError ? generateProfile.error.message : null
+          }
+          onGenerate={() => generateProfile.mutate()}
+        />
+      )}
 
       {games.isSuccess && (games.data?.length ?? 0) > 0 && (
         <>

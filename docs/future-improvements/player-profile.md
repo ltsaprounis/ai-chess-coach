@@ -1,14 +1,25 @@
 # Player profile — the durable artifact other features embed
 
-Status: planned (2026-07), not yet built. Raised as finding 11 of the
-coach report review
+Status: built 2026-07-30. The contracts migrated into the component
+docs (03, 06, 07, 08 + domain), which are authoritative; this doc
+remains the design record. Three details settled at build time
+differently from the spec below: `build_profile` takes the
+already-built `PlayerReport` rather than raw games (the aggregation
+runs once, in `build_report`; the profile projects it);
+the migration landed as **010** (coach chat took 009 after this spec
+was written); and the embed wiring covers the game-scope chat seed as
+well as the explain prompt — chat shipped between this spec and the
+build, adding a second, arguably more valuable target. Report-scope
+chat embeds nothing: its seed is the full report, the profile's own
+source.
+
+Originally raised as finding 11 of the coach report review
 ([coach-report-improvements.md](../archive/coach-report-improvements.md))
 and carried as item 06 of the July fixes iteration
 ([fixes-2026-07/README.md](../archive/fixes-2026-07/README.md)), which
 closed without starting it. Its two prerequisites settled on
-2026-07-25, so it is unblocked for whichever iteration picks it up.
-The spec below is self-contained; the archived docs add only the
-original analysis and the numbers behind it.
+2026-07-25. The archived docs add only the original analysis and the
+numbers behind it.
 
 ## What it is and why
 

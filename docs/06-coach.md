@@ -68,6 +68,31 @@ def build_highlights(games: list[AnalyzedGame], *,
 # instead of serving it against a template that no longer exists.
 PROMPT_VERSION: str
 
+# --- Player profile (see "Player profile" below; the design record
+# --- is docs/future-improvements/player-profile.md) ---
+
+# Pure distillation of an already-built report into the compact facts
+# layer — the aggregation runs once, in build_report; this projects
+# it. `narrative` stays None here; the API layer attaches the stored
+# narrative when one exists.
+def build_profile(report: PlayerReport) -> PlayerProfile
+
+# The narrative-generation prompt (snapshot-tested): the facts, plus
+# instructions asking for 3-5 sentences of tendencies and a short
+# weakness list with every claim tied to a figure the facts state.
+def render_profile_prompt(profile: PlayerProfile) -> str
+
+# The ~250-token block other prompts embed at the top: the facts one
+# line each, then the narrative as the coach's read when present.
+# Total over narrative=None (renders the facts alone).
+def render_profile_context(profile: PlayerProfile) -> str
+
+# The narrative's own version constant, independent of PROMPT_VERSION
+# (the report template and the profile prompt evolve separately).
+# Row metadata, never a cache key: a bump flags staleness in the UI;
+# it must never silently re-bill (docs/03-storage.md).
+PROFILE_PROMPT_VERSION: str
+
 # --- Move explanation (runs only on explicit user request — LLM
 # --- calls cost money; the API layer caches results in storage) ---
 
@@ -91,9 +116,11 @@ def build_move_context(game: Game, analysis: GameAnalysis,
 # plans, what the refutation wins) before any number; and no
 # redundant annotation ("?" glyphs AND the word blunder). Eval
 # numbers handed to the model in this template are pre-rendered in
-# pawns for the same reason.
-def render_explain_prompt(ctx: MoveContext,
-                          lines: list[EvalLine]) -> str
+# pawns for the same reason. Given a `profile`, the student-profile
+# context block opens the prompt (see "Player profile"); with None
+# the prompt renders exactly as before.
+def render_explain_prompt(ctx: MoveContext, lines: list[EvalLine], *,
+                          profile: PlayerProfile | None = None) -> str
 
 # The engine seam. The API layer injects a callable wrapping the
 # engine pool (components never import each other); depth and
@@ -135,10 +162,15 @@ class ChatToolkit(Protocol):
 # `ply` is set but out of range or the game is unanalyzed (mirroring
 # build_move_context); `lines` is the MultiPV snapshot of the
 # anchored position, seeded by the API layer exactly as for explain.
+# `profile` embeds the student-profile block exactly as in
+# render_explain_prompt; the report seed never takes one — the report
+# is the profile's own source (see "Player profile").
 def render_game_chat_context(detail: GameDetail, *,
                              ply: int | None = None,
                              lines: list[EvalLine] | None = None,
-                             engine_available: bool) -> str
+                             engine_available: bool,
+                             profile: PlayerProfile | None = None,
+                             ) -> str
 def render_report_chat_context(report: PlayerReport, *,
                                engine_available: bool) -> str
 
@@ -513,6 +545,70 @@ reference form alike), and a correct handle can only resolve to a
 URL minted from the report itself — model-authored `[gN]:`
 definition lines are stripped before the minted block is appended,
 so a handle cannot be redefined from inside the advice.
+
+## Player profile
+
+The durable who-is-this-student artifact
+(docs/future-improvements/player-profile.md is the design record;
+this section is the contract). Every feature that talks to the
+student used to re-derive who the student is from scratch; the
+profile computes it once, in two layers, and
+`render_profile_context` is the payoff — one compact block every
+other prompt embeds at the top, one place to improve it.
+
+**Facts.** `build_profile(report)` distills an already-built
+`PlayerReport` into `domain.PlayerProfile`: rating and record per
+time class, the most recent months of trend, overall and per-phase
+quality, the repertoire as `ProfileOpening` rows, and the tagged
+error patterns. Pure and free, recomputed on demand; the aggregation
+itself runs once, in `build_report` — the profile projects it and
+adds no second implementation of any semantic. Distillation rules:
+
+- Repertoire rows reuse the family rollup defined under "Repertoire"
+  above — partition by `faced`, chosen rolled up by (color, system),
+  faced by (color, name root), move-weighted throughout, the 5+ game
+  sample floor applied per partition — then keep the top few
+  families per color: chosen rows by games played (what the player
+  actually plays), faced rows by impact (what actually hurts them,
+  the same games × win-rate-deficit sort the report tables use).
+- Every list is capped so the rendered block stays around 250
+  tokens; the exact caps are implementation detail, pinned by the
+  snapshot tests rather than stated here.
+
+**Narrative.** Three to five sentences of tendencies plus a short
+weakness list, every claim tied to a figure the facts state.
+`render_profile_prompt(profile)` renders the facts with those
+instructions; generation goes through `CoachProvider.complete` with
+`analyst=None` — the narrative summarizes aggregates and asserts no
+concrete variations, so there is nothing for an engine to verify and
+one turn is the whole cost. The explain register applies (club
+player, pawns never centipawns). No link handles are offered and the
+instructions forbid game citations: the narrative is durable text
+embedded into *other* prompts, where a game reference could neither
+be resolved into a link nor verified by tools.
+
+Expensive, therefore stored: the API layer persists the narrative —
+beside the facts snapshot it described, the agent that wrote it, and
+`PROFILE_PROMPT_VERSION` — in storage's `player_profiles` table
+(docs/03-storage.md), one row per username, regenerated only on
+explicit user action. A regeneration under any agent replaces the
+row: the profile is singular, not per-agent. `PROFILE_PROMPT_VERSION`
+is row metadata, not a cache key — a bump makes the UI flag the
+narrative as stale, and must never trigger a silent re-bill.
+
+**Embedding.** `render_explain_prompt` and `render_game_chat_context`
+take `profile: PlayerProfile | None = None`; given one they open
+with `render_profile_context(profile)`, and with None they render
+exactly as before. The API layer passes the **stored** profile
+(facts snapshot with narrative attached — one row read), never a
+fresh aggregation: the stored pair is coherent where fresh facts
+under an older narrative could contradict each other, and rebuilding
+facts would put a full-archive aggregation on every explain call and
+chat message. The report prompt and the report-scope chat seed never
+embed the block — the report is the profile's own source. Chat seeds
+are rebuilt per message, so a new profile reaches every thread's
+next message; cached explanations generated before a profile existed
+keep serving until `refresh` regenerates them.
 
 ## Chat
 

@@ -190,10 +190,12 @@ an explain tool loop. Unblocks users without a Claude Code login.
 Then 4 (time management) as the next substantial analysis feature.
 5, 6, 8, 9 as demand pulls.
 
-Three designs sit outside this ordering, already written up in
-[future-improvements/](future-improvements/) and waiting on a
-trigger rather than on priority: the **player profile** (the context
-block every other prompt would embed), the **openings explorer**, and
-the **prompt-version fingerprint**, which wants the next material
-change to the explain prompt so the key change and its cache
-invalidation land together.
+Three designs written up in
+[future-improvements/](future-improvements/) sat outside this
+ordering, waiting on a trigger rather than on priority. Two have
+since shipped: the **openings explorer** (2026-07-29) and the
+**player profile** (2026-07-30 — the context block the explain
+prompt and game-scope chat now embed). The **prompt-version
+fingerprint** still waits on its trigger: the next material change
+to the explain prompt, so the key change and its cache invalidation
+land together.

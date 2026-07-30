@@ -30,10 +30,16 @@ from chess_coach.storage.games import (
     set_opening,
     upsert_games,
 )
+from chess_coach.storage.profiles import (
+    CachedProfile,
+    get_player_profile,
+    save_player_profile,
+)
 from chess_coach.storage.repertoire import list_repertoire_games
 from chess_coach.storage.reports import CachedReport, ReportKey, get_report, save_report
 
 __all__ = [
+    "CachedProfile",
     "CachedReport",
     "ChatScope",
     "ChatThread",
@@ -52,6 +58,7 @@ __all__ = [
     "get_chat_thread",
     "get_explanation",
     "get_game",
+    "get_player_profile",
     "get_report",
     "latest_game_time",
     "list_analyzed_games",
@@ -64,6 +71,7 @@ __all__ = [
     "opening_stats",
     "save_analysis",
     "save_explanation",
+    "save_player_profile",
     "save_report",
     "set_opening",
     "upsert_games",

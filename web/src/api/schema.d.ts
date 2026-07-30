@@ -315,6 +315,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Profile
+         * @description The student profile (docs/06-coach.md, "Player profile"): facts are
+         *     always freshly aggregated over the player's full stored history --
+         *     never an LLM call -- and the stored narrative, when one exists, is
+         *     attached to the facts' `narrative` field alongside its own metadata.
+         *     An unknown player has no stored games, so this returns empty facts and
+         *     no narrative, 200 like `/report`.
+         */
+        get: operations["player_profile_api_players__username__profile_get"];
+        put?: never;
+        /**
+         * Regenerate Player Profile
+         * @description Regenerate the narrative (user-triggered -- LLM calls cost money;
+         *     GET never generates): fresh facts -> `render_profile_prompt` -> the
+         *     chosen agent's `complete` with no engine analyst (docs/06-coach.md,
+         *     "Player profile": the narrative summarizes aggregates and asserts no
+         *     concrete line, so there is nothing for an engine to verify) ->
+         *     `save_player_profile`. Responds with the same shape as `GET`. 409 when
+         *     there are no analyzed games to describe.
+         */
+        post: operations["regenerate_player_profile_api_players__username__profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{username}/chat/threads": {
         parameters: {
             query?: never;
@@ -1038,6 +1073,51 @@ export interface components {
             brilliancies: components["schemas"]["HighlightMove"][];
         };
         /**
+         * PlayerProfile
+         * @description The durable who-is-this-student artifact (docs/06-coach.md).
+         *
+         *     Two layers. Deterministic facts, distilled from a `PlayerReport` by
+         *     `build_profile` — free, recomputed on demand. And an LLM
+         *     `narrative`, generated only on explicit user action and cached by
+         *     storage (docs/03-storage.md, `player_profiles`), where the facts
+         *     persist beside it as the snapshot the narrative described. Kept
+         *     compact on purpose: `render_profile_context` turns it into the
+         *     ~250-token block other coach prompts embed at the top, so every
+         *     list here is capped by the builder.
+         */
+        PlayerProfile: {
+            /** Username */
+            username: string;
+            /** Games Covered */
+            games_covered: number;
+            /** Window Start */
+            window_start: number | null;
+            /** Window End */
+            window_end: number | null;
+            /** Player Moves */
+            player_moves: number;
+            /** Overall Acpl */
+            overall_acpl: number;
+            /** Judgment Counts */
+            judgment_counts: {
+                [key: string]: number;
+            };
+            /** Phases */
+            phases: {
+                [key: string]: components["schemas"]["PhaseStats"];
+            };
+            /** Time Classes */
+            time_classes: components["schemas"]["TimeClassStats"][];
+            /** Months */
+            months: components["schemas"]["MonthStats"][];
+            /** Openings */
+            openings: components["schemas"]["ProfileOpening"][];
+            /** Error Patterns */
+            error_patterns: components["schemas"]["ErrorPattern"][];
+            /** Narrative */
+            narrative?: string | null;
+        };
+        /**
          * PlayerReport
          * @description Everything the coaching prompt and the Dashboard read.
          *
@@ -1100,6 +1180,63 @@ export interface components {
             games: number;
             /** Last Played */
             last_played: number;
+        };
+        /** ProfileGenerateRequest */
+        ProfileGenerateRequest: {
+            /** Agent Id */
+            agent_id?: string | null;
+        };
+        /**
+         * ProfileNarrative
+         * @description Metadata for the profile's stored narrative: who generated it,
+         *     under which prompt version, when, and how many games the *snapshot it
+         *     described* covered. That last figure is deliberately the stored
+         *     snapshot's `games_covered`, not the response's (always fresh)
+         *     `profile.games_covered` -- together they let the UI say "narrative
+         *     generated over N games; you have M now".
+         */
+        ProfileNarrative: {
+            /** Agent Id */
+            agent_id: string;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Generated At */
+            generated_at: number;
+            /** Games Covered */
+            games_covered: number;
+        };
+        /**
+         * ProfileOpening
+         * @description One repertoire family in the player profile.
+         *
+         *     A row of the profile's compact repertoire: a family the player
+         *     chooses (`faced=False`, `moves` is their own system) or a line they
+         *     keep facing (`faced=True`, `moves` is the full line with both sides
+         *     answering). Rolled up from `OpeningStats` under the family rules
+         *     stated once in docs/06-coach.md — the profile restates the
+         *     repertoire, it never re-derives its semantics.
+         */
+        ProfileOpening: {
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /** Name */
+            name: string;
+            /** Moves */
+            moves: string;
+            /** Games */
+            games: number;
+            /** Score */
+            score: number;
+            /** Faced */
+            faced: boolean;
+        };
+        /** ProfileResponse */
+        ProfileResponse: {
+            profile: components["schemas"]["PlayerProfile"];
+            narrative?: components["schemas"]["ProfileNarrative"] | null;
         };
         /**
          * Record
@@ -1671,6 +1808,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoachResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_profile_api_players__username__profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_player_profile_api_players__username__profile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProfileGenerateRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
             /** @description Validation Error */

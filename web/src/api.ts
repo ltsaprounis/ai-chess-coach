@@ -36,6 +36,12 @@ export type CoachRequest = components["schemas"]["CoachRequest"];
 export type CoachAgentsResponse =
   paths["/api/coach/agents"]["get"]["responses"]["200"]["content"]["application/json"];
 export type CoachAgent = CoachAgentsResponse["agents"][number];
+export type ProfileResponse =
+  paths["/api/players/{username}/profile"]["get"]["responses"]["200"]["content"]["application/json"];
+export type PlayerProfile = ProfileResponse["profile"];
+export type ProfileNarrative = NonNullable<ProfileResponse["narrative"]>;
+export type ProfileGenerateRequest =
+  components["schemas"]["ProfileGenerateRequest"];
 export type ChatThread =
   paths["/api/players/{username}/chat/threads"]["post"]["responses"]["200"]["content"]["application/json"];
 export type ChatThreadSummary =
@@ -264,6 +270,31 @@ export const api = {
     ),
   coachAgents: async (): Promise<CoachAgentsResponse> =>
     json(await fetch("/api/coach/agents")),
+  /** The student profile: facts always fresh, narrative + its
+   *  metadata attached when one is stored — never an LLM call
+   *  (docs/07-api.md, "Player profile"). */
+  profile: async (username: string): Promise<ProfileResponse> =>
+    json(await fetch(`/api/players/${encodeURIComponent(username)}/profile`)),
+  /**
+   * Regenerate the stored narrative — user-triggered only (LLM calls
+   * cost money; `profile` above never generates). `agentId` mirrors
+   * `coach`'s own convention: omitted sends `agent_id: null`, which
+   * the server resolves to its configured default. 409 when the
+   * player has no analyzed games yet to describe.
+   */
+  generateProfile: async (
+    username: string,
+    options: { agentId?: string } = {},
+  ): Promise<ProfileResponse> =>
+    json(
+      await fetch(`/api/players/${encodeURIComponent(username)}/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: options.agentId ?? null,
+        } satisfies ProfileGenerateRequest),
+      }),
+    ),
   players: async (): Promise<PlayerSummary[]> =>
     json(await fetch("/api/players")),
   /** The player's chat threads, most recently updated first — used to

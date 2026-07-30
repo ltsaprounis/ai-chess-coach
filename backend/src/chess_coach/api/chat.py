@@ -38,6 +38,7 @@ from chess_coach.storage import (
     count_games,
     get_explanation,
     get_game,
+    get_player_profile,
     get_report,
     list_analyzed_games,
     list_games,
@@ -151,6 +152,9 @@ async def game_scope_context(
     anchor, the same seeded eval lines `explain` uses (docs/07-api.md,
     "Chat"). A missing pool degrades to `lines=None`, mirroring `/coach`;
     an `EngineError` from a live pool maps to 502, mirroring `/explain`.
+    The thread player's stored profile, when one exists, opens the seed
+    exactly as it opens the explain prompt (docs/06-coach.md, "Player
+    profile", "Embedding") -- stored row only, never a fresh aggregation.
     """
     assert thread.game_id is not None  # scope=game is validated at creation
     game = await run_in_threadpool(get_game, db, thread.game_id)
@@ -170,8 +174,13 @@ async def game_scope_context(
                 status_code=502, detail=f"engine failure: {exc}"
             ) from exc
 
+    cached_profile = await run_in_threadpool(get_player_profile, db, thread.username)
     return render_game_chat_context(
-        game, ply=thread.ply, lines=lines, engine_available=analyst is not None
+        game,
+        ply=thread.ply,
+        lines=lines,
+        engine_available=analyst is not None,
+        profile=cached_profile.profile if cached_profile is not None else None,
     )
 
 

@@ -24,6 +24,7 @@ from chess_coach.api.chat import (
 )
 from chess_coach.api.runs import MAX_FINISHED_RUNS, AnalysisRun, evict_finished
 from chess_coach.coach import (
+    PROFILE_PROMPT_VERSION,
     PROMPT_VERSION,
     ChatToolkit,
     CoachProvider,
@@ -33,8 +34,10 @@ from chess_coach.coach import (
     append_game_links,
     build_highlights,
     build_move_context,
+    build_profile,
     build_report,
     render_explain_prompt,
+    render_profile_prompt,
     render_prompt,
 )
 from chess_coach.config import AppConfig
@@ -47,6 +50,7 @@ from chess_coach.domain import (
     GameSummary,
     LlmProvider,
     OpeningStats,
+    PlayerProfile,
     PlayerReport,
     PlayerSummary,
     Result,
@@ -79,6 +83,7 @@ from chess_coach.storage import (
     get_chat_thread,
     get_explanation,
     get_game,
+    get_player_profile,
     get_report,
     latest_game_time,
     list_analyzed_games,
@@ -90,6 +95,7 @@ from chess_coach.storage import (
     opening_stats,
     save_analysis,
     save_explanation,
+    save_player_profile,
     save_report,
     set_opening,
     upsert_games,
@@ -628,7 +634,17 @@ async def explain_move(
         )
     except EngineError as exc:
         raise HTTPException(status_code=502, detail=f"engine failure: {exc}") from exc
-    prompt = render_explain_prompt(ctx, lines)
+    # Stored row only, never a fresh aggregation (docs/06-coach.md, "Player
+    # profile", "Embedding"): the stored facts+narrative pair is coherent
+    # where fresh facts under an older narrative could contradict each
+    # other, and rebuilding facts would put a full-archive aggregation on
+    # every explain call. No row -> None -> the prompt renders unchanged.
+    cached_profile = await run_in_threadpool(get_player_profile, db, game.username)
+    prompt = render_explain_prompt(
+        ctx,
+        lines,
+        profile=cached_profile.profile if cached_profile is not None else None,
+    )
     analyst = _build_analyst(pool, cfg)
 
     async def stream() -> AsyncIterator[dict[str, str]]:
@@ -878,6 +894,135 @@ async def coach_player(
         cached=False,
         generated_at=generated_at,
         games_analyzed=report.games_analyzed,
+    )
+
+
+# --- Player profile (docs/07-api.md "Player profile"; docs/06-coach.md
+# --- "Player profile" is the contract) ----------------------------------
+
+
+class ProfileNarrative(BaseModel):
+    """Metadata for the profile's stored narrative: who generated it,
+    under which prompt version, when, and how many games the *snapshot it
+    described* covered. That last figure is deliberately the stored
+    snapshot's `games_covered`, not the response's (always fresh)
+    `profile.games_covered` -- together they let the UI say "narrative
+    generated over N games; you have M now"."""
+
+    agent_id: str
+    prompt_version: str
+    generated_at: int  # epoch seconds the narrative was generated
+    games_covered: int  # the stored snapshot's games_covered, not fresh
+
+
+class ProfileResponse(BaseModel):
+    profile: PlayerProfile  # facts always fresh; narrative attached when stored
+    narrative: ProfileNarrative | None = None  # None when nothing is stored yet
+
+
+def _load_profile_facts(db: Db, username: str) -> PlayerProfile:
+    """Fresh facts over the player's full stored history, no window or
+    time-class filters (docs/07-api.md, "Player profile"):
+    `list_analyzed_games` -> `build_report` -> `build_profile`.
+    `narrative` is always None here -- callers attach the stored one, if
+    any. An unknown player has no stored games, so this is simply the
+    profile of an empty report, mirroring `/report`.
+    """
+    games = list_analyzed_games(db, username)
+    report = build_report(username, games)
+    return build_profile(report)
+
+
+@router.get("/players/{username}/profile")
+def player_profile(username: str, db: DbDep) -> ProfileResponse:
+    """The student profile (docs/06-coach.md, "Player profile"): facts are
+    always freshly aggregated over the player's full stored history --
+    never an LLM call -- and the stored narrative, when one exists, is
+    attached to the facts' `narrative` field alongside its own metadata.
+    An unknown player has no stored games, so this returns empty facts and
+    no narrative, 200 like `/report`.
+    """
+    user = username.lower()
+    facts = _load_profile_facts(db, user)
+    cached = get_player_profile(db, user)
+    if cached is None:
+        return ProfileResponse(profile=facts)
+    return ProfileResponse(
+        profile=facts.model_copy(update={"narrative": cached.profile.narrative}),
+        narrative=ProfileNarrative(
+            agent_id=cached.agent_id,
+            prompt_version=cached.prompt_version,
+            generated_at=cached.created_at,
+            games_covered=cached.profile.games_covered,
+        ),
+    )
+
+
+class ProfileGenerateRequest(BaseModel):
+    agent_id: str | None = None  # None -> config default agent
+
+
+@router.post("/players/{username}/profile")
+async def regenerate_player_profile(
+    username: str,
+    db: DbDep,
+    cfg: CfgDep,
+    providers: ProvidersDep,
+    body: ProfileGenerateRequest | None = None,
+) -> ProfileResponse:
+    """Regenerate the narrative (user-triggered -- LLM calls cost money;
+    GET never generates): fresh facts -> `render_profile_prompt` -> the
+    chosen agent's `complete` with no engine analyst (docs/06-coach.md,
+    "Player profile": the narrative summarizes aggregates and asserts no
+    concrete line, so there is nothing for an engine to verify) ->
+    `save_player_profile`. Responds with the same shape as `GET`. 409 when
+    there are no analyzed games to describe.
+    """
+    agent_id = cfg.coach.default_agent
+    if body is not None and body.agent_id is not None:
+        agent_id = body.agent_id
+    provider = providers.get(agent_id)
+    if provider is None:
+        raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
+
+    user = username.lower()
+    # Threadpool: list_analyzed_games hits storage and build_report replays
+    # every game with python-chess, mirroring /coach's own offload of the
+    # same pipeline.
+    facts = await run_in_threadpool(_load_profile_facts, db, user)
+    if facts.games_covered == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="no analyzed games yet -- sync and analyze first",
+        )
+    prompt = render_profile_prompt(facts)
+
+    try:
+        # Single turn by contract (docs/06-coach.md, "Player profile"): the
+        # narrative summarizes aggregates and asserts no concrete
+        # variation, so there is nothing for the engine tool to verify --
+        # never pass the analyst here, unlike /coach and /explain.
+        advice = await provider.complete(prompt, analyst=None)
+    except CoachProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    generated_at = await run_in_threadpool(
+        save_player_profile,
+        db,
+        user,
+        agent_id=agent_id,
+        prompt_version=PROFILE_PROMPT_VERSION,
+        facts=facts,
+        narrative=advice,
+    )
+    return ProfileResponse(
+        profile=facts.model_copy(update={"narrative": advice}),
+        narrative=ProfileNarrative(
+            agent_id=agent_id,
+            prompt_version=PROFILE_PROMPT_VERSION,
+            generated_at=generated_at,
+            games_covered=facts.games_covered,
+        ),
     )
 
 
