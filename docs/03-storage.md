@@ -69,12 +69,40 @@ reports (                            -- cached whole-report coaching
   PRIMARY KEY (username, agent_id, since, until, time_class,
                prompt_version)
 );
+chat_threads (                       -- coach chat conversations
+  -- (docs/future-improvements/coach-chat.md). The stored transcript
+  -- is the conversation's single source of truth; provider-side
+  -- sessions are a cache of it, keyed by the opaque provider_state
+  id TEXT PRIMARY KEY,               -- uuid, minted by the API layer
+  username TEXT NOT NULL,
+  agent_id TEXT NOT NULL,            -- pinned for the thread's life
+  scope TEXT NOT NULL,               -- 'report' | 'game'
+  game_id TEXT,                      -- scope='game' only; no FK on
+  ply INTEGER,                       --   purpose (games never delete)
+  since INTEGER NOT NULL,            -- 0 = open, as in reports
+  until INTEGER NOT NULL,
+  time_class TEXT NOT NULL,          -- '' = all controls
+  provider_state TEXT,               -- opaque resume token, nullable
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+chat_messages (
+  thread_id TEXT NOT NULL REFERENCES chat_threads(id),
+  seq INTEGER NOT NULL,              -- per-thread, 1-based
+  role TEXT NOT NULL,                -- 'user' | 'assistant'
+  content TEXT NOT NULL,             -- markdown
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (thread_id, seq)
+);
 ```
 
 The window columns are NOT NULL with sentinels on purpose: SQLite
 treats NULLs as distinct in a primary key, so nullable window columns
 would make every all-time report a cache miss that silently inserts a
-new row and re-bills the model.
+new row and re-bills the model. The chat tables reuse the same
+sentinel convention so the thread's scope compares exactly like a
+report key. `chat_threads(username, updated_at)` is indexed for the
+thread list.
 
 Indexes on `games(username, end_time)`. Migrations are numbered SQL
 files applied at open; the current version lives in `user_version`.
@@ -196,6 +224,58 @@ def save_report(db: Db, key: ReportKey, prompt: str, advice: str,
 #   Returns the created_at (unix seconds) it persisted. Storage reads
 #   that clock exactly once per call; callers use the return value
 #   instead of taking a second, possibly-disagreeing reading.
+
+# Chat threads (docs/future-improvements/coach-chat.md). Transcripts
+# are `domain.ChatMessage` rows; thread row types are storage's own
+# surface, like `CachedReport`.
+ChatScope = Literal["report", "game"]
+
+class ChatThread(BaseModel):
+    id: str; username: str; agent_id: str
+    scope: ChatScope
+    game_id: str | None = None; ply: int | None = None
+    since: int = 0; until: int = 0     # 0 = open, as in ReportKey
+    time_class: str = ""               # '' = all controls
+    provider_state: str | None = None
+    created_at: int; updated_at: int
+
+class ChatThreadSummary(BaseModel):    # one thread-list row
+    id: str; scope: ChatScope
+    game_id: str | None; ply: int | None
+    since: int; until: int; time_class: str
+    agent_id: str
+    title: str          # first user message, sliced to ~80 chars
+    messages: int       # total rows, the cap check's input
+    updated_at: int
+
+def create_chat_thread(db: Db, *, thread_id: str, username: str,
+                       agent_id: str, scope: ChatScope,
+                       game_id: str | None = None,
+                       ply: int | None = None,
+                       since: int = 0, until: int = 0,
+                       time_class: str = "") -> ChatThread
+#   Reads the clock once; created_at == updated_at on the returned
+#   row, same one-reading rule as save_report.
+def get_chat_thread(db: Db, thread_id: str) -> ChatThread | None
+def list_chat_threads(db: Db,
+                      username: str) -> list[ChatThreadSummary]
+#   Most recently updated first.
+def delete_chat_thread(db: Db, thread_id: str) -> bool
+#   Deletes the thread and its messages in one transaction (explicit
+#   delete, never FK cascade); False when the thread doesn't exist.
+def list_chat_messages(db: Db,
+                       thread_id: str) -> list[ChatMessage]  # seq asc
+def append_chat_exchange(db: Db, thread_id: str, user: ChatMessage,
+                         assistant: ChatMessage,
+                         provider_state: str | None) -> None
+#   One transaction: both rows at the next two seqs, provider_state
+#   overwritten (None clears it), updated_at set to the assistant
+#   message's created_at. A turn is atomic — a user message with no
+#   reply is never persisted (docs/07-api.md: aborts persist nothing).
+def clear_chat_provider_state(db: Db, thread_id: str) -> None
+#   The abort/error path: the discarded turn may have reached the
+#   provider's warm session, so the next turn must replay from the
+#   stored transcript rather than resume a diverged session.
 ```
 
 Pydantic handles the JSON columns (`model_dump_json` /
@@ -212,8 +292,16 @@ derive the player's system client-side. Deliberately **not** a
 the whole archive uncapped
 (docs/archive/fixes-2026-07/01-games-list-uncap.md). `GameDetail`
 (Game + optional analysis + opening) stays the full record;
-`GameFilters` (opening/result/time_class/analyzed/paging) is
-storage's own public parameter type.
+`GameFilters` is storage's own public parameter type:
+opening_eco (exact), opening_name_like (case-insensitive substring
+on the classified name), opponent (case-insensitive exact),
+result, time_class, analyzed, since/until (epoch-second window,
+since inclusive, until exclusive — the same semantics every other
+windowed query here uses), and limit/offset paging. The name,
+opponent and window filters exist for the coach chat toolkit's
+`find_games` tool (docs/future-improvements/coach-chat.md), which
+queries by what a student says — an opponent's name, an opening's
+name — rather than by ECO code.
 
 ## Dependencies
 

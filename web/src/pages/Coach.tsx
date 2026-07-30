@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import Markdown, { type Components } from "react-markdown";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Markdown from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import { api, type PlayerReport } from "../api.ts";
 import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
@@ -9,24 +9,21 @@ import {
   isRunConflict,
   shouldChainAfterRun,
 } from "../coachCoverage.ts";
+import ChatPanel from "../components/ChatPanel.tsx";
 import Layout from "../components/Layout.tsx";
+import { gameLinkMarkdownComponents } from "../components/markdownLinks.tsx";
 import StatsFilters from "../components/StatsFilters.tsx";
 import { useAnalysisProgress } from "../useAnalysisProgress.ts";
+import { useChat } from "../useChat.ts";
 import { useStatsFilters } from "../useStatsFilters.ts";
 
-type CoachOptions = { refresh?: boolean };
+// Re-exported so `Coach.test.tsx`'s existing import keeps working —
+// the new-tab link override moved to a shared module once ChatPanel
+// needed the same behavior for chat replies (both render markdown
+// whose citations are app-relative game deep links).
+export { gameLinkMarkdownComponents as adviceMarkdownComponents } from "../components/markdownLinks.tsx";
 
-// The advice's citations are markdown reference links whose
-// definitions the backend mints as app-relative game deep links
-// (docs/06-coach.md "Game links": `[text][g1]` +
-// `[g1]: /games/{id}?ply={n}`). `coach.data` is `useMutation` state,
-// so a same-tab navigation into a game would blank the advice panel
-// until the next "Get advice" (docs/08-frontend.md, Coach page) —
-// open advice links in a new tab instead. Exported so the override
-// is unit-testable without rendering the whole page.
-export const adviceMarkdownComponents: Components = {
-  a: ({ node, ...props }) => <a target="_blank" rel="noreferrer" {...props} />,
-};
+type CoachOptions = { refresh?: boolean };
 
 export default function Coach() {
   const { username = "" } = useParams();
@@ -182,6 +179,16 @@ export default function Coach() {
     currentAnalyzed !== undefined &&
     coach.data.games_analyzed < currentAnalyzed;
 
+  // Report-scoped chat, carrying the same window/time-control filters
+  // as the report and advice above it (docs/08-frontend.md). Memoized
+  // so `useChat` only re-resolves the thread when the scope actually
+  // changes, not on every render.
+  const chatScope = useMemo(
+    () => ({ scope: "report" as const, since, timeClass: classParam }),
+    [since, classParam],
+  );
+  const chat = useChat(username, chatScope, activeAgentId ?? undefined);
+
   return (
     <Layout username={username}>
       <h1>Coach {username}</h1>
@@ -289,7 +296,7 @@ export default function Coach() {
             </p>
           )}
           <article className="advice">
-            <Markdown components={adviceMarkdownComponents}>
+            <Markdown components={gameLinkMarkdownComponents}>
               {coach.data.advice}
             </Markdown>
           </article>
@@ -303,6 +310,17 @@ export default function Coach() {
             <pre className="prompt">{coach.data.prompt}</pre>
           </details>
         </>
+      )}
+
+      {activeAgentId !== null && (
+        <section className="panel chat-panel-section">
+          <ChatPanel
+            state={chat.state}
+            loading={chat.loading}
+            onSend={chat.send}
+            onNewChat={chat.newChat}
+          />
+        </section>
       )}
     </Layout>
   );

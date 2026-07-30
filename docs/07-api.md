@@ -51,6 +51,11 @@ run. Active runs are never swept.
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider (agentic with the engine tool when the pool is up) → `append_game_links` (the advice's `[gN]` citations become `/games/{id}?ply=` links; see 06-coach.md "Game links"), cached post-processed. Optional body `{agent_id, since, until, time_class, refresh}` — the same window and time-control filters `/report` takes, so the coach reasons over the period the student is looking at (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id, cached, generated_at, games_analyzed}` |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
 | GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent), `refresh` (optional, default false — skip the cache read and regenerate; the result overwrites the cached row). Cached hit: one `done` event with the full text. Miss or refresh: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
+| POST   | `/api/players/{u}/chat/threads`        | Create a chat thread: body `{scope, agent_id?, game_id?, ply?, since?, until?, time_class?}`. `scope="game"` requires `game_id` (400 without; 404 unknown game; a `ply` anchor additionally requires analysis — 409 unanalyzed, 400 out-of-range, mirroring explain). `scope="report"` rejects `game_id`/`ply` (400). Unknown `agent_id` 400; omitted = default agent. Returns the thread |
+| GET    | `/api/players/{u}/chat/threads`        | List the player's threads, most recently updated first (id, scope, anchor fields, agent, title = first user line, message count, updated_at) |
+| GET    | `/api/chat/threads/{id}`               | Thread + full transcript (`ChatMessage` rows, oldest first); 404 unknown |
+| POST   | `/api/chat/threads/{id}/messages`      | Body `{text}` (400 blank). SSE reply: `text`/`tool` events while the agent works, then `done` with the full reply — persisted, with the new `provider_state`, before `done` is emitted. `error` event on `CoachProviderError`, nothing persisted, `provider_state` cleared. 404 unknown thread; 409 while a reply is already streaming for this thread, or when the thread is at the message cap ("start a new chat") |
+| DELETE | `/api/chat/threads/{id}`               | Delete thread + transcript; 404 unknown, 204 on success |
 
 Request/response models are pydantic, so FastAPI's OpenAPI schema is
 complete — the frontend generates its TS types from it
@@ -122,6 +127,32 @@ unexpected to 500.
   verify concrete lines with `analyze_position`; with no pool it
   passes `None` and the provider degrades to a single turn — the
   report still generates without an engine.
+- Chat (docs/future-improvements/coach-chat.md is the design
+  record). The stored transcript is the source of truth; the API
+  layer never interprets `provider_state`, only persists and returns
+  it. Per message: load thread + transcript, build the per-thread
+  `ChatToolkit` — `find_games`/`get_game`/`opening_stats` wrap the
+  sync storage repos in starlette's `run_in_threadpool` (the same
+  offload every sync route here rides), pre-scoped to the
+  thread's username (`get_game` returns None for another player's
+  game id — the model can never read across players);
+  `opening_stats` applies the thread's window; `analyst` is the same
+  `pool.eval_lines` wrapper explain uses, or None when the pool is
+  down — then stream `provider.chat(...)` as SSE. Seeds: game scope
+  renders `render_game_chat_context` (with `eval_lines` seeding at
+  the anchored ply, as explain does); report scope builds the report
+  over the thread window and renders `render_report_chat_context`.
+  A cached explanation (game scope, anchored ply) or cached advice
+  (report scope) for the thread's agent is prepended to history as
+  the first assistant turn. The user message and reply are persisted
+  atomically via `append_chat_exchange` before `done` is emitted;
+  client disconnect or a mid-stream `CoachProviderError` persists
+  nothing and clears `provider_state` (the discarded turn may have
+  reached the provider's warm session — the next turn must replay
+  from the stored transcript, docs/06-coach.md "Chat"). One reply
+  in flight per thread (in-process per-thread locks, 409 otherwise);
+  threads cap at `CHAT_MESSAGE_CAP` (40) messages — 409 directs
+  the student to a new thread. Thread ids are uuid4, minted here.
 - Live eval (`/api/eval`): engine's `stream_eval` does the work; the
   route maps its `ValueError` (bad FEN) to 400 and a missing pool to
   503, and closes the iterator when the client disconnects so the

@@ -63,7 +63,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    as progress lines while it streams (cleared once the explanation
    completes); cached explanations render instantly, with a
    "Regenerate" action (`refresh=true`, same user-triggered rule)
-   for stale ones.
+   for stale ones. Below the explanation, an "Ask a follow-up"
+   affordance opens the shared `ChatPanel` (see Stack and
+   structure) on a game-scoped thread anchored to the selected ply:
+   the newest existing thread matching (game, ply, agent) reopens
+   from its stored transcript at no LLM cost; otherwise the thread
+   is created on first send. Replies render as markdown; their
+   game links open in new tabs like every other advice anchor.
 4. **Dashboard** — the player's stats hub: summary tiles (record,
    win rate by color, current rating per time class, ACPL, blunder
    rate), rating-over-time and monthly-activity charts from
@@ -210,7 +216,13 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    immediately, labelled with when it was generated and over how many
    games, with a "Regenerate" action (`refresh: true`) — the same
    user-triggered rule as the in-game Explain button, since both spend
-   LLM calls.
+   LLM calls. Below the advice, the shared `ChatPanel` mounts on a
+   report-scoped thread carrying the page's current window and
+   time-control filters: the newest matching thread reopens from its
+   stored transcript, a "New chat" action starts over, and at the
+   server's message cap (409) the panel directs the student to a new
+   thread. Tool events render as the same transient progress lines
+   the Explain panel shows.
 7. **Settings** (`/settings`) — manages the two things a player
    configures: the saved players (list from `GET /api/players` + an
    add-a-player form) and the coach LLM (`AgentSelect`, persisted in
@@ -229,6 +241,19 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
   Dashboard / Openings / Coach, pointing at the current player,
   remembered in localStorage via `currentPlayer.ts`), and a Settings
   link — so navigation lives in one place instead of per-page links.
+- The coach chat is one shared `ChatPanel` component
+  (`components/ChatPanel.tsx`) with two mounts (Game page,
+  game-scoped; Coach page, report-scoped) driven by a `useChat`
+  hook. Chat streams `POST /chat/threads/{id}/messages` with the
+  same fetch-based SSE consumption the explain hook uses — the SSE
+  block parser is extracted from `useExplain.ts` into a shared
+  module rather than duplicated — because native `EventSource`
+  cannot POST a body or surface pre-stream JSON errors. Chat SSE
+  payload types are hand-declared mirroring coach `ChatEvent`, per
+  the standing SSE-types rule. The agent comes from the Settings
+  `AgentSelect`; threads are pinned to their agent at creation, so
+  changing the selection starts a new thread rather than resuming
+  an old one under a different provider.
 - Colors are CSS custom properties defined once in `index.css`
   (light + dark via `prefers-color-scheme`); the SVG charts read the
   same tokens through `components/chartTheme.ts`.

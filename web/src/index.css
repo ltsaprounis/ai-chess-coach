@@ -894,6 +894,65 @@ th[aria-sort="descending"] .th-sort {
   white-space: pre-wrap;
 }
 
+/* Shared ChatPanel: Game page "Ask a follow-up" and the Coach page's
+   report chat (docs/08-frontend.md). */
+
+.chat-panel {
+  margin-top: 0.75rem;
+}
+
+.chat-transcript {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.chat-message {
+  max-width: 42rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.chat-message p {
+  margin: 0.25rem 0 0;
+}
+
+.chat-message-user {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+
+.chat-message-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-height: 2.5rem;
+  max-height: 8rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
 /* Openings explorer: color toggle, worst-lines strip, breadcrumb, book
    badges, and the greyed "still to learn" rows. */
 

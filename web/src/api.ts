@@ -36,6 +36,16 @@ export type CoachRequest = components["schemas"]["CoachRequest"];
 export type CoachAgentsResponse =
   paths["/api/coach/agents"]["get"]["responses"]["200"]["content"]["application/json"];
 export type CoachAgent = CoachAgentsResponse["agents"][number];
+export type ChatThread =
+  paths["/api/players/{username}/chat/threads"]["post"]["responses"]["200"]["content"]["application/json"];
+export type ChatThreadSummary =
+  paths["/api/players/{username}/chat/threads"]["get"]["responses"]["200"]["content"]["application/json"][number];
+export type ChatThreadDetail =
+  paths["/api/chat/threads/{thread_id}"]["get"]["responses"]["200"]["content"]["application/json"];
+export type ChatMessage = ChatThreadDetail["messages"][number];
+export type ChatScope = ChatThread["scope"];
+export type ChatThreadCreateRequest =
+  components["schemas"]["ChatThreadCreateRequest"];
 
 export type GameFilters = {
   result?: string;
@@ -256,6 +266,29 @@ export const api = {
     json(await fetch("/api/coach/agents")),
   players: async (): Promise<PlayerSummary[]> =>
     json(await fetch("/api/players")),
+  /** The player's chat threads, most recently updated first — used to
+   *  resolve which thread a `ChatPanel` mount should reopen. */
+  chatThreads: async (username: string): Promise<ChatThreadSummary[]> =>
+    json(
+      await fetch(`/api/players/${encodeURIComponent(username)}/chat/threads`),
+    ),
+  /** Creates a thread anchored to a game/ply or to a report window
+   *  (`ChatThreadCreateRequest`); called on the first send when no
+   *  existing thread matches the mount's scope. */
+  createChatThread: async (
+    username: string,
+    body: ChatThreadCreateRequest,
+  ): Promise<ChatThread> =>
+    json(
+      await fetch(`/api/players/${encodeURIComponent(username)}/chat/threads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    ),
+  /** Thread + full transcript, oldest first — hydrates `ChatPanel` on reopen. */
+  chatThread: async (threadId: string): Promise<ChatThreadDetail> =>
+    json(await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`)),
   /**
    * `since`/`until`/`time_class` scope the bulk (non-`gameIds`) path —
    * both the enqueue and `remaining` — so "analyze this window" is
@@ -312,4 +345,11 @@ export function explainUrl(
     agent_id: agentId,
     refresh: refresh || undefined,
   })}`;
+}
+
+/** SSE chat-reply stream for `POST /chat/threads/{id}/messages` — the
+ *  body (`{text}`) is sent by the caller, same POST-with-SSE-response
+ *  shape as explain's fetch-based streaming. */
+export function chatMessageUrl(threadId: string): string {
+  return `/api/chat/threads/${encodeURIComponent(threadId)}/messages`;
 }

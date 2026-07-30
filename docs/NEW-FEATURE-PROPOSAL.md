@@ -142,14 +142,19 @@ stack: seeded context, engine tool, SSE streaming, cache keyed
 - This is the highest-value LLM feature: it turns "analyze" output
   into a story a club player actually reads.
 
-### 8. Ask a follow-up question
+### 8. Ask a follow-up question — **shipped**
 
-The coach panel is one-shot; the obvious user move after reading an
-explanation is to ask "but what if I take the knight?". Needs
-provider-session continuation (claude-agent-sdk supports resumable
-sessions), a widened provider seam, and a decision on how long a
-thread stays warm. Bigger than it looks — schedule after 7 proves
-the demand.
+Built 2026-07-30 as the coach chat:
+[coach-chat.md](future-improvements/coach-chat.md) is the design
+record, and the contracts live in the component docs. One chat
+backbone, two scopes (game-anchored on the Game page, report-scoped
+on the Coach page); `CoachProvider.chat` is stateless with an
+opaque resume token, the agent queries the student's games and
+Stockfish through a read-only injected toolkit, and transcripts
+persist so reopening a thread bills nothing. Kept here as the
+record of the original sizing call ("bigger than it looks" — it
+was) and of what settled it: the stored transcript as the single
+source of truth, warm provider sessions demoted to a cache.
 
 ### 9. Finish the planned providers
 

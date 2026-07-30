@@ -11,12 +11,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from chess_coach.coach.context import MoveContext
+from chess_coach.coach.context import MoveContext, build_move_context
 from chess_coach.domain import (
     MATE_SCORE,
+    ChatMessage,
     CriticalPosition,
     ErrorPattern,
     EvalLine,
+    GameDetail,
     OpeningStats,
     PlayerReport,
     Record,
@@ -37,6 +39,21 @@ SYSTEM_PROMPT = (
     "coaching conversation, not a software task: respond with the "
     "coaching brief only, no preamble about the nature of the request, "
     "and follow the instruction block at the end exactly."
+)
+
+# Given to the LLM as its system prompt for a chat turn (docs/06-coach.md,
+# "Chat") -- SYSTEM_PROMPT above is tailored to writing one-shot briefs
+# ("respond with the coaching brief only") and would read oddly telling a
+# model to keep doing that mid-conversation, so chat gets its own persona
+# line. The scope seed (render_game_chat_context / render_report_chat_context)
+# is concatenated after this by the provider and carries the actual
+# instructions (_CHAT_INSTRUCTIONS below).
+CHAT_SYSTEM_PROMPT = (
+    "You are a strong, practical chess coach in a live conversation with "
+    "a student about their own engine-analyzed games. This is a coaching "
+    "conversation, not a software task: respond conversationally, with "
+    "no preamble about the nature of the request, and follow the "
+    "instructions in the context below."
 )
 
 # Losses this large can only come from mate scores (evals clamp mate to
@@ -589,24 +606,33 @@ def _error_example(e: ErrorPattern, handles: dict[tuple[str, int], str]) -> str:
 
 
 def _turning_points_section(
-    report: PlayerReport, handles: dict[tuple[str, int], str]
+    report: PlayerReport, handles: dict[tuple[str, int], str] | None = None
 ) -> str:
+    """`handles` is optional: `render_prompt`'s coaching brief cites every
+    turning point through a `[gN]` handle `append_game_links` later
+    resolves, but the chat seed (`render_report_chat_context`) has no such
+    post-processing pass (docs/06-coach.md, "Chat" -- "Link discipline" in
+    the design record) and renders the same entries with no citation
+    handle at all -- `None` (the default) omits the "cite [gN]" suffix.
+    """
     if not report.critical_positions:
         return ""
     lines = ["## Turning points"]
     for n, p in enumerate(report.critical_positions, start=1):
-        lines.append(_turning_point_entry(n, p, handles[(p.game_id, p.ply)]))
+        handle = handles.get((p.game_id, p.ply)) if handles is not None else None
+        lines.append(_turning_point_entry(n, p, handle))
     return "\n".join(lines)
 
 
-def _turning_point_entry(n: int, p: CriticalPosition, handle: str) -> str:
+def _turning_point_entry(n: int, p: CriticalPosition, handle: str | None) -> str:
     date = _format_date(p.end_time)
     color_word = "White" if p.color == "white" else "Black"
     opening = f", {p.opening_name}" if p.opening_name else ""
     move_label = f"{p.move_number}." if p.color == "white" else f"{p.move_number}..."
+    cite = f" -- cite [{handle}]" if handle else ""
     lines = [
         f"### {n}. {date}, {p.time_class}, as {color_word} vs {p.opponent}"
-        f"{opening} -- move {p.move_number} -- cite [{handle}]"
+        f"{opening} -- move {p.move_number}{cite}"
     ]
     if p.leading_up:
         lines.append(f"Leading up: {' '.join(p.leading_up)}")
@@ -834,3 +860,123 @@ def format_cp_loss(cp_loss: int) -> str:
     club player.
     """
     return f"about {cp_loss / 100:.1f} pawns"
+
+
+# --- chat (docs/06-coach.md, "Chat") --------------------------------------
+#
+# Two scope seeds -- render_game_chat_context, render_report_chat_context --
+# plus render_chat_prompt, the replay formatter every provider falls back
+# to when it cannot resume a warm session. Both seeds close with the same
+# engine-availability statement and the same chat instructions: the
+# explain register rules (club player, idea before number, no redundant
+# annotation) plus two chat-specific rules (claims from tools only, and
+# app-relative game links minted only from tool-returned ids -- there is
+# no append_game_links pass here, so no [gN] handle citation is offered).
+
+_CHAT_INSTRUCTIONS = (
+    "## How to respond\n"
+    "- **Audience and register.** Write for a club player, not a fellow "
+    "engine: pawns, never centipawns, and lead with the idea -- the "
+    "threat, the plan, what a line wins -- before any number. Skip "
+    'engine-style annotation -- no "?"/"??" next to a move you\'re also '
+    "calling a mistake or blunder; say it once, in plain language.\n"
+    "- **Claims from tools only.** Any claim about the student's games -- "
+    "a result, a move, an opponent, a pattern -- must come from a tool "
+    "result returned earlier in this conversation, never from memory of "
+    "the context above or of an earlier turn. Look something up before "
+    "asserting it, or say you don't know.\n"
+    "- **Game links.** When you reference one of the student's games, "
+    "link it with an app-relative markdown reference in the form "
+    "`[text](/games/{id}?ply={n})`, using only a game id a tool result "
+    "returned in this conversation -- never an id you have not seen from "
+    "a tool result, and never a raw URL."
+)
+
+
+def _chat_engine_availability_line(engine_available: bool) -> str:
+    if engine_available:
+        return (
+            "Engine analysis is available in this conversation: use the "
+            "`analyze_position` tool to verify a concrete line before "
+            "asserting it."
+        )
+    return (
+        "Engine analysis is not available in this conversation: there is "
+        "no `analyze_position` tool right now, so say a line is "
+        "unverified rather than asserting it as fact."
+    )
+
+
+def _game_chat_identity_section(detail: GameDetail) -> str:
+    date = _format_date(detail.end_time)
+    color_word = "White" if detail.color == "white" else "Black"
+    opening = f", {detail.opening.name}" if detail.opening else ""
+    return (
+        "## Game\n"
+        f"{detail.username} played {color_word.lower()} against "
+        f"{detail.opponent} on {date} ({detail.time_class}); result: "
+        f"{detail.result}{opening}."
+    )
+
+
+def render_game_chat_context(
+    detail: GameDetail,
+    *,
+    ply: int | None = None,
+    lines: list[EvalLine] | None = None,
+    engine_available: bool,
+) -> str:
+    """The game-scope chat seed: the game's identity, plus -- when a ply
+    anchor is set -- the same `MoveContext` fields and seeded eval lines
+    `render_explain_prompt` uses. Raises `ValueError` when `ply` is out of
+    range (`build_move_context` mirrors `render_explain_prompt`'s own
+    check) or when the game has no analysis to anchor at all -- there is
+    no `MoveContext` to build without one.
+    """
+    sections = [_game_chat_identity_section(detail)]
+    if ply is not None:
+        if detail.analysis is None:
+            raise ValueError(
+                f"game {detail.id} has no analysis; cannot anchor chat at ply {ply}"
+            )
+        ctx = build_move_context(detail, detail.analysis, detail.opening, ply)
+        sections.append(_explain_positions(ctx))
+        sections.append(_explain_move(ctx))
+        sections.append(_explain_lines(lines or []))
+    sections.append(_chat_engine_availability_line(engine_available))
+    sections.append(_CHAT_INSTRUCTIONS)
+    return "\n\n".join(section for section in sections if section)
+
+
+def render_report_chat_context(report: PlayerReport, *, engine_available: bool) -> str:
+    """The report-scope chat seed: the same data sections `render_prompt`
+    shows, minus the coaching-brief instruction block -- the shared chat
+    instructions replace it, since this is a conversation, not a request
+    for a one-shot brief.
+    """
+    sections = [
+        _student_section(report),
+        _phase_section(report),
+        _trend_section(report),
+        _terminations_section(report),
+        _repertoire_section(report),
+        _error_patterns_section(report, {}),
+        _turning_points_section(report),
+        _chat_engine_availability_line(engine_available),
+        _CHAT_INSTRUCTIONS,
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def render_chat_prompt(history: list[ChatMessage], message: str) -> str:
+    """The shared replay formatter every provider falls back to when it
+    cannot resume a warm session (docs/06-coach.md, "Chat" -- "Replay"):
+    prior turns as Student:/Coach: blocks, oldest first, then the new
+    message -- so every provider replays an identical transcript.
+    """
+    blocks = [
+        f"{'Student' if turn.role == 'user' else 'Coach'}: {turn.content}"
+        for turn in history
+    ]
+    blocks.append(f"Student: {message}")
+    return "\n\n".join(blocks)

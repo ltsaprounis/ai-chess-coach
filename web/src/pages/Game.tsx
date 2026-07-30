@@ -5,10 +5,12 @@ import { Chessboard } from "react-chessboard";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, type MoveEval } from "../api.ts";
 import { getStoredAgentId, resolveAgentId } from "../coachAgent.ts";
+import ChatPanel from "../components/ChatPanel.tsx";
 import EvalGraph from "../components/EvalGraph.tsx";
 import ExplainPanel from "../components/ExplainPanel.tsx";
 import Layout from "../components/Layout.tsx";
 import LiveEvalPanel from "../components/LiveEvalPanel.tsx";
+import { useChat } from "../useChat.ts";
 import { useExplain } from "../useExplain.ts";
 import { useLiveEval } from "../useLiveEval.ts";
 
@@ -94,6 +96,19 @@ export default function Game() {
       )
     : undefined;
   const { state: explainState, explain } = useExplain();
+
+  // Game-scoped follow-up chat, anchored to the selected ply
+  // (docs/08-frontend.md "Ask a follow-up"). Memoized so `useChat`
+  // only re-resolves the thread when the game/ply actually changes.
+  // `game.data` isn't loaded yet on first render, so `gameId`/
+  // `username` fall back to "" — `useChat` treats an empty username
+  // as nothing to resolve.
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatScope = useMemo(
+    () => ({ scope: "game" as const, gameId: game.data?.id ?? "", ply }),
+    [game.data?.id, ply],
+  );
+  const chat = useChat(game.data?.username ?? "", chatScope, agentId);
 
   // Queue analysis for this one game. A mutation (like the Games and
   // Coach pages), not a fire-and-forget fetch: `analyzing` — which
@@ -337,6 +352,22 @@ export default function Game() {
                       }
                     }}
                   />
+                  {chatOpen ? (
+                    <ChatPanel
+                      state={chat.state}
+                      loading={chat.loading}
+                      onSend={chat.send}
+                      onNewChat={chat.newChat}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-low-emphasis"
+                      onClick={() => setChatOpen(true)}
+                    >
+                      Ask a follow-up
+                    </button>
+                  )}
                 </>
               ) : (
                 <p className="panel-empty">
