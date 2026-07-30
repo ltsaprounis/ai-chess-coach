@@ -45,7 +45,11 @@ PROMPT_VERSION = "2026-07-opponent-citations"
 # (docs/06-coach.md, "Player profile"). Row metadata, never a cache key:
 # a bump only flags the stored narrative as stale in the UI and must
 # never trigger a silent re-bill.
-PROFILE_PROMPT_VERSION = "profile-v1"
+# v2: the narrative became third-person (v1 addressed the student as
+# "you", which reads as addressing the *coach* once the text is embedded
+# in another prompt), gained its time-control scope, and gained the
+# volume/quality coverage split plus recent-form windows.
+PROFILE_PROMPT_VERSION = "profile-v2"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -662,6 +666,33 @@ def _pawns_or_na(value: float | None) -> str:
 # checked by a tool (docs/06-coach.md, "Narrative").
 
 
+def _profile_scope(profile: PlayerProfile) -> str:
+    """ "their rapid games" / "their games (all time controls)" -- the
+    scope phrase every profile renderer opens with (docs/06-coach.md,
+    "Player profile"). A profile covers one time control; saying which
+    is what stops a rapid narrative from being read as the whole player.
+    """
+    if profile.time_class is None:
+        return "their games (all time controls)"
+    return f"their {profile.time_class} games"
+
+
+def _profile_coverage(profile: PlayerProfile) -> str:
+    """The two denominators, stated (docs/06-coach.md, "Volume and
+    quality"): how many games the volume figures describe and how many
+    of them the engine has actually analyzed. Without this the model
+    reads every figure against one number and treats a quarter-analyzed
+    archive's ACPL as the player's settled quality.
+    """
+    if profile.games_in_scope <= profile.games_covered:
+        return f"all {_plural(profile.games_covered, 'game')} analyzed"
+    return (
+        f"{profile.games_covered} of {profile.games_in_scope} analyzed -- "
+        "ratings, records and repertoire counts cover every game; "
+        "ACPL, blunder rates and error patterns cover the analyzed ones"
+    )
+
+
 def _profile_intro(profile: PlayerProfile) -> str:
     window = ""
     if profile.window_start is not None and profile.window_end is not None:
@@ -674,8 +705,37 @@ def _profile_intro(profile: PlayerProfile) -> str:
         "*(ACPL = average centipawn loss per move, shown in pawns; lower "
         "is better. Every figure below is move-weighted over the games "
         "covered.)*\n"
-        f"Covered: {_plural(profile.games_covered, 'game')}{window}."
+        f"Covering {_profile_scope(profile)}: "
+        f"{_plural(profile.games_in_scope, 'game')}{window} "
+        f"({_profile_coverage(profile)})."
     )
+
+
+def _profile_periods_section(profile: PlayerProfile) -> str:
+    """Recent form as trailing windows (docs/06-coach.md, "Recent
+    form"), so the narrative can weight how the student plays now over
+    how they played a year ago. Empty when the builder produced no
+    windows -- a span too short to slice.
+    """
+    if not profile.periods:
+        return ""
+    lines = [
+        "## Recent form",
+        "*(Windows are nested and end at the most recent game, so each "
+        "wider row contains the narrower ones.)*",
+        "| Window | Games | Score | Rating | ACPL | Blunder % | Analyzed |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for p in profile.periods:
+        rating = p.rating_end if p.rating_end is not None else "n/a"
+        blunder = (
+            f"{p.blunder_rate * 100:.1f}%" if p.blunder_rate is not None else "n/a"
+        )
+        lines.append(
+            f"| {p.label} | {p.games} | {_score_line(p.record)} | {rating} "
+            f"| {_pawns_or_na(p.acpl)} | {blunder} | {p.analyzed_games} |"
+        )
+    return "\n".join(lines)
 
 
 def _profile_ratings_section(profile: PlayerProfile) -> str:
@@ -751,14 +811,19 @@ def _profile_repertoire_section(profile: PlayerProfile) -> str:
 
 
 def _profile_repertoire_color_section(label: str, rows: list[ProfileOpening]) -> str:
+    """Third person throughout, like every other line of this prompt --
+    the narrative it produces is stored and pasted into other prompts,
+    where "you" addresses the coach reading it, not the student
+    (docs/06-coach.md, "Narrative").
+    """
     chosen = [o for o in rows if not o.faced]
     faced = [o for o in rows if o.faced]
     lines = [f"### As {label}"]
     if chosen:
-        lines.append("Systems you chose:")
+        lines.append("Systems the student chose:")
         lines.extend(f"- {_profile_opening_entry(o)}" for o in chosen)
     if faced:
-        lines.append(f"What you face as {label}:")
+        lines.append(f"What they face as {label}:")
         lines.extend(f"- {_profile_opening_entry(o)}" for o in faced)
     return "\n".join(lines)
 
@@ -786,13 +851,34 @@ _PROFILE_INSTRUCTIONS = (
     "- **Length and shape.** Three to five sentences describing this "
     "student's tendencies, then a short list of weaknesses -- a handful "
     "of bullets, not an essay.\n"
+    "- **Audience.** You are briefing a chess coach about a student "
+    "they are about to work with -- you are not talking to the student. "
+    "Write about them in the third person, by name or as "
+    '"this student"; never address the reader as "you". This text is '
+    "stored and pasted into other prompts, where the reader is another "
+    'coach: a narrative that opens "You are a rapid player" tells that '
+    "coach they are the rapid player.\n"
+    "- **Scope.** The facts above cover one time control, named in the "
+    "header. Say which one when you characterize the student, and never "
+    "generalize the figures to their whole game -- a rapid profile is "
+    "not a description of their bullet play.\n"
+    "- **Two denominators.** Ratings, records and repertoire counts "
+    "cover every game in scope; ACPL, blunder rates and error patterns "
+    "cover only the analyzed subset, whose size the header states. "
+    "Never present the analyzed sample as the student's whole history, "
+    "and if coverage is thin, say the quality read is provisional.\n"
+    "- **Recent form first.** Where the recent-form windows disagree "
+    "with the all-time figures, lead with the most recent window that "
+    "has a real sample and say which way it is moving -- how the "
+    "student plays now matters more than their average over years. "
+    "Ignore a window whose analyzed count is too small to carry a "
+    "conclusion.\n"
+    "- **Register.** Write for a club player's coach, not a fellow "
+    "engine: pawns, never centipawns, and the idea before the number.\n"
     "- **Evidence.** Every claim must tie to a figure stated above -- a "
     "rating, an ACPL, a blunder rate, a repertoire score, an "
     "error-pattern count. Never assert a tendency the facts do not "
     "support.\n"
-    "- **Audience and register.** Write for a club player, not a fellow "
-    "engine: pawns, never centipawns, and address the student directly "
-    'as "you".\n'
     "- **No invented lines.** Do not assert a concrete variation, "
     "opening trap, or line of play beyond what the facts state -- these "
     "are aggregates, not annotated games, and there is no engine here "
@@ -816,6 +902,7 @@ def render_profile_prompt(profile: PlayerProfile) -> str:
     sections = [
         _profile_intro(profile),
         _profile_ratings_section(profile),
+        _profile_periods_section(profile),
         _profile_quality_section(profile),
         _trend_section(profile.months),
         _profile_repertoire_section(profile),
@@ -897,6 +984,46 @@ def _profile_errors_line(profile: PlayerProfile) -> str | None:
     return f"- Errors: {parts}"
 
 
+def _profile_coverage_line(profile: PlayerProfile) -> str | None:
+    """The embedded block's own coverage statement -- omitted when the
+    whole scope is analyzed, since "N of N" is noise in a block whose
+    entire budget is ~250 tokens.
+    """
+    if profile.games_in_scope <= profile.games_covered:
+        return None
+    return (
+        f"- Coverage: {profile.games_covered} of {profile.games_in_scope} games "
+        "analyzed (quality figures below cover the analyzed ones; "
+        "ratings, records and repertoire cover all)"
+    )
+
+
+def _profile_recent_line(profile: PlayerProfile) -> str | None:
+    """The narrowest recent window with an analyzed sample, next to the
+    all-time figure it should be read against (docs/06-coach.md, "Recent
+    form"). One line, not the whole table: the block embeds into other
+    prompts under a tight token budget, and the question those prompts
+    need answered is "is this student better or worse than their average
+    right now", which two numbers settle.
+    """
+    recent = next(
+        (p for p in profile.periods if p.days is not None and p.analyzed_games > 0),
+        None,
+    )
+    if recent is None or recent.acpl is None:
+        return None
+    blunder = (
+        f", {recent.blunder_rate * 100:.1f}% blunders"
+        if recent.blunder_rate is not None
+        else ""
+    )
+    return (
+        f"- Recent form ({recent.label}): {_pawns_or_na(recent.acpl)} ACPL"
+        f"{blunder} over {_plural(recent.analyzed_games, 'analyzed game')} "
+        f"-- against {_pawns_or_na(profile.overall_acpl)} ACPL over the whole span"
+    )
+
+
 def render_profile_context(profile: PlayerProfile) -> str:
     """The ~250-token block `render_explain_prompt` and
     `render_game_chat_context` embed at the top when given a profile
@@ -905,10 +1032,12 @@ def render_profile_context(profile: PlayerProfile) -> str:
     "Coach's read" line. Total over `narrative=None`: renders the facts
     alone.
     """
-    lines = ["## Student profile"]
+    lines = [f"## Student profile -- {_profile_scope(profile)}"]
     for line in (
+        _profile_coverage_line(profile),
         _profile_ratings_line(profile),
         _profile_quality_line(profile),
+        _profile_recent_line(profile),
         _profile_trend_line(profile),
         _profile_chosen_line(profile),
         _profile_faced_line(profile),

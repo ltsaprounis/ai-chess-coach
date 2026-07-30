@@ -180,31 +180,61 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    swap, or a line pruned by `min_games`). All the path/ranking/
    formatting logic is pure and unit-tested in `repertoireTree.ts`
    (kept apart from the Dashboard's flat-table `openings.ts`).
-6. **Coach** — above the window-scoped advice flow, a
-   **player-profile card** (`components/ProfileCard.tsx`) reads
-   `GET /players/{u}/profile` (docs/06-coach.md "Player profile"):
-   the player's full stored history, never scoped by the
-   time-window/time-control filters below. It shows the free facts
-   `build_profile` distills — rating and games per time class,
-   overall ACPL in pawns plus blunder share, the top chosen systems
-   and faced problem lines per color, and recurring error patterns
-   with counts and a deep-linked example (`/games/{id}?ply=`) — and,
-   once one exists, the stored narrative as markdown under a "The
-   coach's read on {username}" header labelled with its agent
-   (resolved against the same `/coach/agents` roster the page
-   fetches for its picker, falling back to the raw id) and
-   generation date. A Generate/Regenerate button posts
-   `/players/{u}/profile` with the page's selected agent — the same
+6. **Coach** — the time-window/time-control filters sit at the top,
+   directly under the heading, and scope everything below them
+   including the profile. Beneath them, a **player-profile card**
+   (`components/ProfileCard.tsx`) reads
+   `GET /players/{u}/profile` (docs/06-coach.md "Player profile")
+   with the page's `since`/`time_class`.
+
+   The card lives inside a **collapsed `<details>` disclosure**: the
+   profile is reference material about who the student is, not the
+   thing they came to the page to do — the advice flow is — and at
+   full height it cost the page its whole first screen. The summary
+   line carries the headline (scope, games, whether a narrative
+   exists) so the disclosure is worth opening or skipping without
+   guessing.
+
+   It shows the free facts `build_profile` distills — rating and
+   games per time class, overall ACPL in pawns plus blunder share,
+   the **recent-form windows** (last 30/90 days against the whole
+   span, rendered only when there is more than one row to compare),
+   the top chosen systems and faced problem lines per color, and
+   recurring error patterns with counts and a deep-linked example
+   (`/games/{id}?ply=`). A coverage line states both denominators —
+   "ratings, records and repertoire cover all N games; quality
+   figures cover the M analyzed" — since the two genuinely differ on
+   a partly-analyzed archive.
+
+   Once one exists, the stored narrative renders as markdown under a
+   "The coach's read on {username} in {scope}" header labelled with
+   its agent (resolved against the same `/coach/agents` roster the
+   page fetches for its picker, falling back to the raw id) and
+   generation date. It is written to the coach in the third person,
+   and the card says so, along with the fact that it covers the time
+   control across all time — because the window filter re-scopes the
+   figures above it but deliberately not the narrative.
+
+   A Generate/Regenerate button posts `/players/{u}/profile` with the
+   page's selected agent **and its time control** — the same
    user-triggered-only rule as advice and the in-game Explain button
    — with a pending state and, on success, an in-place update
-   (`queryClient.setQueryData`, no refetch). A staleness hint,
-   worded like the advice one below, appears when the stored
-   narrative's own `games_covered` no longer matches the response's
-   always-fresh `profile.games_covered`. Two empty states: no
-   narrative yet shows the facts with the Generate call-to-action;
-   zero analyzed games shows a short note instead, with no Generate
-   action since the POST would 409. Pure formatting/partitioning
-   helpers (`isProfileStale`, `formatPawns`, `blunderShare`,
+   (`queryClient.setQueryData`, no refetch). One narrative per time
+   control means switching the filter can reveal an ungenerated
+   scope, which shows the Generate call-to-action rather than another
+   control's read.
+
+   The staleness hint compares the stored narrative's `games_covered`
+   against the response's `narrative_games_now` — the live count for
+   the *narrative's* scope, not the card's, which under a window
+   filter are different spans and would otherwise read stale always.
+   Two empty states: no narrative yet shows the facts with the
+   Generate call-to-action; zero analyzed games in scope shows a
+   short note instead, pointing at both the games page and the
+   filters, with no Generate action since the POST would 409.
+
+   Pure formatting/partitioning helpers (`isProfileStale`,
+   `scopeLabel`, `hasPartialCoverage`, `formatPawns`, `blunderShare`,
    `openingsFor`, `errorExampleLabel`/`errorExampleHref`) live in
    `playerProfile.ts`, unit-tested apart from the component,
    mirroring `highlights.ts` beside the Dashboard.

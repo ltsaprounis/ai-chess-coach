@@ -75,13 +75,16 @@ export default function Coach() {
       )
     : null;
 
-  // The player-profile card: always the player's full stored history,
-  // never scoped by the window/time-control filters below
-  // (docs/07-api.md, "Player profile") — a separate fetch from
-  // `report`/`coach`, so it loads independently of them.
+  // The player-profile card, scoped by the same filters as everything
+  // else on the page (docs/07-api.md, "Player profile") — a separate
+  // fetch from `report`/`coach`, so it loads independently of them.
+  // The narrative inside it is stored per time control only, so the
+  // query key carries `since` for the facts' sake while the server
+  // keeps serving the same narrative across windows.
+  const profileQueryKey = ["profile", username, windowDays, timeClass] as const;
   const profile = useQuery({
-    queryKey: ["profile", username],
-    queryFn: () => api.profile(username),
+    queryKey: profileQueryKey,
+    queryFn: () => api.profile(username, { since, time_class: classParam }),
   });
 
   // Regenerating replaces the stored narrative under whichever agent
@@ -90,9 +93,12 @@ export default function Coach() {
   // than triggering a refetch.
   const generateProfile = useMutation({
     mutationFn: () =>
-      api.generateProfile(username, { agentId: activeAgentId ?? undefined }),
+      api.generateProfile(username, {
+        agentId: activeAgentId ?? undefined,
+        timeClass: classParam,
+      }),
     onSuccess: (data) => {
-      queryClient.setQueryData(["profile", username], data);
+      queryClient.setQueryData(profileQueryKey, data);
     },
   });
 
@@ -219,21 +225,6 @@ export default function Coach() {
         your coach agent for prioritized training advice.
       </p>
 
-      {profile.isPending && <p>Loading profile…</p>}
-      {profile.isError && <p role="alert">{profile.error.message}</p>}
-      {profile.isSuccess && (
-        <ProfileCard
-          profile={profile.data.profile}
-          narrative={profile.data.narrative ?? null}
-          agentLabel={agentLabel}
-          generating={generateProfile.isPending}
-          generateError={
-            generateProfile.isError ? generateProfile.error.message : null
-          }
-          onGenerate={() => generateProfile.mutate()}
-        />
-      )}
-
       {games.isSuccess && (games.data?.length ?? 0) > 0 && (
         <>
           <StatsFilters
@@ -252,6 +243,42 @@ export default function Coach() {
           )}
         </>
       )}
+
+      {/* Collapsed by default: the profile is reference material about
+          who the student is, not the thing they came to this page to
+          do — the advice flow below is. `<details>` keeps that one
+          click away without costing the page its whole first screen,
+          and matches the disclosure the prompt view already uses. */}
+      <details className="profile-details">
+        <summary>
+          Player profile
+          {profile.isSuccess && profile.data.profile.games_covered > 0 && (
+            <span className="agent-note">
+              {" — "}
+              {classParam ?? "all classes"} ·{" "}
+              {profile.data.profile.games_in_scope} game
+              {profile.data.profile.games_in_scope === 1 ? "" : "s"}
+              {profile.data.profile.narrative === null &&
+                ", no coach's read yet"}
+            </span>
+          )}
+        </summary>
+        {profile.isPending && <p>Loading profile…</p>}
+        {profile.isError && <p role="alert">{profile.error.message}</p>}
+        {profile.isSuccess && (
+          <ProfileCard
+            profile={profile.data.profile}
+            narrative={profile.data.narrative ?? null}
+            narrativeGamesNow={profile.data.narrative_games_now ?? null}
+            agentLabel={agentLabel}
+            generating={generateProfile.isPending}
+            generateError={
+              generateProfile.isError ? generateProfile.error.message : null
+            }
+            onGenerate={() => generateProfile.mutate()}
+          />
+        )}
+      </details>
 
       {gap !== null && (
         <p role="alert">

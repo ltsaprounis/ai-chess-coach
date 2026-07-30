@@ -1,17 +1,53 @@
 # Player profile — the durable artifact other features embed
 
-Status: built 2026-07-30. The contracts migrated into the component
-docs (03, 06, 07, 08 + domain), which are authoritative; this doc
-remains the design record. Three details settled at build time
-differently from the spec below: `build_profile` takes the
-already-built `PlayerReport` rather than raw games (the aggregation
-runs once, in `build_report`; the profile projects it);
-the migration landed as **010** (coach chat took 009 after this spec
-was written); and the embed wiring covers the game-scope chat seed as
-well as the explain prompt — chat shipped between this spec and the
-build, adding a second, arguably more valuable target. Report-scope
-chat embeds nothing: its seed is the full report, the profile's own
-source.
+Status: built 2026-07-30, reworked the same day. The contracts
+migrated into the component docs (03, 06, 07, 08 + domain), which are
+authoritative; this doc remains the design record. Three details
+settled at build time differently from the spec below:
+`build_profile` takes the already-built `PlayerReport` rather than raw
+games (the aggregation runs once, in `build_report`; the profile
+projects it); the migration landed as **010** (coach chat took 009
+after this spec was written); and the embed wiring covers the
+game-scope chat seed as well as the explain prompt — chat shipped
+between this spec and the build, adding a second, arguably more
+valuable target. Report-scope chat embeds nothing: its seed is the
+full report, the profile's own source.
+
+## The rework (same day, migration 011)
+
+First contact with a real archive — 8,156 stored games, 1,209
+analyzed — broke four assumptions in this spec at once. All four are
+now contracts in docs 06/07/08; recorded here because the *reasons*
+are design history, not interface.
+
+1. **One profile per player was wrong.** It is one per **time
+   control**. The same player ran 1.66 pawns ACPL at 8.9% blunders in
+   rapid against 2.01 and 12.2% in bullet; a single averaged profile
+   described neither, and the explain path was handing a bullet game
+   that average. `player_profiles` re-keys to (username, time_class),
+   and the embed paths pick the row matching the game's own control.
+2. **Every number was computed over analyzed games only** — including
+   ratings, records and repertoire scores, which no engine
+   contributes to. With 15% coverage the profile reported a "current
+   rating" from whichever game the engine last reached. `build_report`
+   now takes both lists and keeps volume and quality apart; the fix
+   lands in the shared aggregation, so `/report` and `/coach` were
+   carrying the identical bug and are fixed with it. Deliberately no
+   `PROMPT_VERSION` bump: cached advice keeps serving, nothing
+   re-bills.
+3. **Flat lifetime aggregates buried recent form.** `PeriodStats`
+   adds nested trailing windows so a narrative can lead with how the
+   student plays now.
+4. **The narrative addressed the student as "you"** — which, once
+   pasted into another prompt under "Coach's read", told the reading
+   coach *they* were the one hanging pieces. v2 is third-person, to a
+   coach, and the rendered facts follow ("Systems the student chose").
+
+The one thing that did **not** change: the narrative stays keyed by
+time control alone, never the window. `since` is quantized per day, so
+a window key would strand every stored narrative overnight — the
+opposite of "durable artifact". Facts honour the window; the narrative
+does not, and the UI says so.
 
 Originally raised as finding 11 of the coach report review
 ([coach-report-improvements.md](../archive/coach-report-improvements.md))

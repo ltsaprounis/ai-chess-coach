@@ -261,7 +261,7 @@ describe("api.generateProfile", () => {
       "/api/players/alice/profile",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ agent_id: "coach-a" }),
+        body: JSON.stringify({ agent_id: "coach-a", time_class: null }),
       }),
     );
   });
@@ -280,7 +280,7 @@ describe("api.generateProfile", () => {
       "/api/players/alice/profile",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ agent_id: null }),
+        body: JSON.stringify({ agent_id: null, time_class: null }),
       }),
     );
   });

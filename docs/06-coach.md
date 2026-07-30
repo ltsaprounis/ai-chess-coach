@@ -8,6 +8,12 @@ interface. This is the only component that talks to an LLM API.
 
 ```python
 # Pure aggregation — input assembled by the API layer from storage.
+# `games` are the analyzed games and carry the quality layer;
+# `all_games` is every stored game in the same scope and carries the
+# volume layer (see "Volume and quality" below). `all_games=None`
+# aggregates volume over the analyzed games alone — the behaviour
+# before the split, kept so callers that genuinely have only analyzed
+# games read unchanged; callers with the full list must pass it.
 # `time_class` is the filter the caller applied, recorded so the
 # prompt can state the scope of its own numbers; the *covered* window
 # bounds are derived from the games themselves. `requested_since`/
@@ -18,11 +24,15 @@ interface. This is the only component that talks to an LLM API.
 # as the requested one. All default to None: with no scope info the
 # report (and prompt) render exactly as before.
 def build_report(username: str, games: list[AnalyzedGame], *,
+                 all_games: list[GameSummary] | None = None,
                  time_class: TimeClass | None = None,
                  requested_since: int | None = None,
                  requested_until: int | None = None,
                  games_in_scope: int | None = None) -> PlayerReport
 # AnalyzedGame: domain composite = Game + GameAnalysis + Opening|None
+# GameSummary: the light row storage returns for lists — carries
+#   result, ratings, opening and the 6-ply opening prefix, which is
+#   everything the volume layer reads and no PGN.
 
 # Deterministic markdown template, also shown/copyable in the UI.
 def render_prompt(report: PlayerReport) -> str
@@ -73,17 +83,22 @@ PROMPT_VERSION: str
 
 # Pure distillation of an already-built report into the compact facts
 # layer — the aggregation runs once, in build_report; this projects
-# it. `narrative` stays None here; the API layer attaches the stored
-# narrative when one exists.
+# it, carrying through the report's `time_class` (the profile's own
+# scope and storage key) and both denominators. `narrative` stays
+# None here; the API layer attaches the stored narrative when one
+# exists.
 def build_profile(report: PlayerReport) -> PlayerProfile
 
 # The narrative-generation prompt (snapshot-tested): the facts, plus
 # instructions asking for 3-5 sentences of tendencies and a short
-# weakness list with every claim tied to a figure the facts state.
+# weakness list with every claim tied to a figure the facts state —
+# written in the third person, to a coach, naming the time control
+# and both denominators (see "Narrative").
 def render_profile_prompt(profile: PlayerProfile) -> str
 
-# The ~250-token block other prompts embed at the top: the facts one
-# line each, then the narrative as the coach's read when present.
+# The ~250-token block other prompts embed at the top: a header
+# naming the profile's time control, coverage when partial, the facts
+# one line each, then the narrative as the coach's read when present.
 # Total over narrative=None (renders the facts alone).
 def render_profile_context(profile: PlayerProfile) -> str
 
@@ -352,18 +367,78 @@ target for "learn a response", never "stop playing this".
 
 ### Coverage is stated, not implied
 
-The report aggregates analyzed games only, and the first live run
-showed why that must be said out loud: a "last 6 months" request over
-1,010 games silently became a report on the 450 recent ones that had
-analysis, presented under a window line that made the shrunken span
-look like the request. When the caller supplies them, the prompt's
-student section states the requested window alongside the covered
-span, and renders coverage as "N of M games in scope"; when analysis
-covers less than the scope it adds an explicit caveat that the
-remaining games are unanalyzed and the figures describe only the
-analyzed span — which is what lets the instruction block's honesty
-rule actually bite. With no scope information (`None` throughout) the
-section renders as it always did.
+The report's quality layer covers analyzed games only, and the first
+live run showed why that must be said out loud: a "last 6 months"
+request over 1,010 games silently became a report on the 450 recent
+ones that had analysis, presented under a window line that made the
+shrunken span look like the request. When the caller supplies them,
+the prompt's student section states the requested window alongside the
+covered span, and renders coverage as "N of M games in scope"; when
+analysis covers less than the scope it adds an explicit caveat that
+the remaining games are unanalyzed and the quality figures describe
+only the analyzed span — which is what lets the instruction block's
+honesty rule actually bite. With no scope information (`None`
+throughout) the section renders as it always did.
+
+### Volume and quality
+
+Stating coverage fixed the *narration*; it left the numbers wrong.
+Every aggregate was computed over the analyzed subset, including the
+ones no engine contributes to — so an archive with 1,209 of 8,156
+games analyzed reported a "current rating" from whichever game the
+engine happened to reach last, and a win rate over a biased sample.
+
+`build_report` therefore takes two lists and keeps two denominators:
+
+- **Volume**, over `all_games` — every stored game in scope: `record`,
+  `time_classes` and their ratings, `months` game counts and closing
+  ratings, `terminations`, `opponents`, and the repertoire's
+  `games`/`wins`/`losses`/`draws`. None of these need analysis, so
+  none may be restricted to it.
+- **Quality**, over `games` — the analyzed subset: `overall_acpl`,
+  `judgment_counts`, `phases`, `error_patterns`,
+  `critical_positions`, the ACPL columns, and `months`
+  ACPL/blunder rate. Nothing else can produce these.
+
+`OpeningStats.analyzed_games` has always been declared as "how many of
+`games` have engine analysis"; only now can the two differ. A window
+with games but no analysis reads `acpl`/`blunder_rate` as `None` —
+absent, which is what it is, never `0.0`, which is indistinguishable
+from flawless play.
+
+Both lists describe the same scope by construction: the API layer
+builds them from `list_analyzed_games` and `list_game_summaries` with
+identical filters, whose window semantics storage pins to each other.
+
+### Recent form
+
+The months table answers "what happened in March"; `periods` answers
+"how is this student playing *now*", which is the question a profile
+exists to answer. `PeriodStats` rows are **trailing windows anchored
+to the most recent game in scope** — last 30 days, last 90 days, and
+the whole span — each carrying its own volume and quality
+denominators.
+
+Three choices worth stating:
+
+- **Nested, not disjoint.** A single month with four analyzed games
+  produces an ACPL that swings on one bad game, and a narrative
+  reading that wobble as a trend is worse than one reading nothing.
+  Nesting means a thin recent window always sits inside a wider one
+  that is still more recent than the whole span.
+- **Anchored to the data, not the clock.** A student who stopped
+  playing three months ago would otherwise get three empty windows
+  and a profile that says nothing.
+- **Windows that would restate the span are dropped.** With two
+  months of history, "last 90 days" and "whole span" are the same
+  row, and showing both invites a narrative to read a difference that
+  cannot exist.
+
+The profile prompt renders them as a table and its instructions lead
+with the most recent window carrying a real sample; the compact embed
+block renders one line — the narrowest window with analysis, against
+the whole-span figure — because the question other prompts need
+settled is just "better or worse than usual right now".
 
 ### Judgment counts carry their denominator
 
@@ -556,13 +631,28 @@ profile computes it once, in two layers, and
 `render_profile_context` is the payoff — one compact block every
 other prompt embeds at the top, one place to improve it.
 
+**Scope.** A profile covers **one time control** (`time_class`;
+`None` = all controls mixed). A 2100 bullet player and their 1500
+rapid self are different students, and one profile averaging both
+describes neither — measurably: on a real archive, rapid runs 1.66
+pawns ACPL at 8.9% blunders against bullet's 2.01 and 12.2%. The
+scope is carried on the profile, stated by both renderers, and is
+storage's key for the narrative. It is deliberately the *only* scope
+the narrative carries — see "Narrative" below for why the window is
+not.
+
 **Facts.** `build_profile(report)` distills an already-built
 `PlayerReport` into `domain.PlayerProfile`: rating and record per
-time class, the most recent months of trend, overall and per-phase
-quality, the repertoire as `ProfileOpening` rows, and the tagged
-error patterns. Pure and free, recomputed on demand; the aggregation
-itself runs once, in `build_report` — the profile projects it and
-adds no second implementation of any semantic. Distillation rules:
+time class, the most recent months of trend, the recent-form
+`periods`, overall and per-phase quality, the repertoire as
+`ProfileOpening` rows, and the tagged error patterns. Pure and free,
+recomputed on demand; the aggregation itself runs once, in
+`build_report` — the profile projects it and adds no second
+implementation of any semantic, which is why the volume/quality split
+lives there and reaches the profile for free. Both denominators come
+with it: `games_covered` is the analyzed sample behind the quality
+figures, `games_in_scope` every stored game behind the volume ones.
+Distillation rules:
 
 - Repertoire rows reuse the family rollup defined under "Repertoire"
   above — partition by `faced`, chosen rolled up by (color, system),
@@ -581,30 +671,69 @@ weakness list, every claim tied to a figure the facts state.
 instructions; generation goes through `CoachProvider.complete` with
 `analyst=None` — the narrative summarizes aggregates and asserts no
 concrete variations, so there is nothing for an engine to verify and
-one turn is the whole cost. The explain register applies (club
-player, pawns never centipawns). No link handles are offered and the
+one turn is the whole cost. No link handles are offered and the
 instructions forbid game citations: the narrative is durable text
 embedded into *other* prompts, where a game reference could neither
 be resolved into a link nor verified by tools.
 
+It is written **in the third person, to a coach** — never to the
+student. This is the same fact as the citation rule, applied to
+person: the text is stored and pasted into other prompts, where the
+reader is another coach, so a v1 narrative opening "You are a rapid
+player who hangs pieces" told that coach *they* were the rapid
+player. The instructions forbid the second person, and the rendered
+facts follow suit ("Systems the student chose", not "Systems you
+chose") since a model copies the register it is given. The register
+otherwise matches explain: club player, pawns never centipawns.
+
+The instructions also carry the scope and both denominators into the
+text: name the time control, never generalize it to the student's
+whole game, never present the analyzed sample as their whole history,
+and lead with the most recent form window that has a real sample.
+
 Expensive, therefore stored: the API layer persists the narrative —
 beside the facts snapshot it described, the agent that wrote it, and
 `PROFILE_PROMPT_VERSION` — in storage's `player_profiles` table
-(docs/03-storage.md), one row per username, regenerated only on
-explicit user action. A regeneration under any agent replaces the
-row: the profile is singular, not per-agent. `PROFILE_PROMPT_VERSION`
-is row metadata, not a cache key — a bump makes the UI flag the
-narrative as stale, and must never trigger a silent re-bill.
+(docs/03-storage.md), one row per (username, time control),
+regenerated only on explicit user action. A regeneration under any
+agent replaces the row: the profile is keyed by scope, not by agent.
+`PROFILE_PROMPT_VERSION` is row metadata, not a cache key — a bump
+makes the UI flag the narrative as stale, and must never trigger a
+silent re-bill.
+
+**Why time control keys it and the window does not.** The facts
+honour a window filter like every other view; the narrative does not,
+and is always generated over the control's full history. `since` is
+quantized to the current day, so keying the narrative on it would
+mint a fresh key every midnight — stranding every stored narrative
+and leaving the embed paths reading nothing, which is precisely the
+durability this artifact exists for. Time control is stable, and is
+the dimension along which a student actually differs from themselves.
+The cost is that under a window the facts and the narrative describe
+different spans; the API states the narrative's own live count so the
+UI can label both honestly rather than flagging every windowed view
+as stale.
 
 **Embedding.** `render_explain_prompt` and `render_game_chat_context`
 take `profile: PlayerProfile | None = None`; given one they open
 with `render_profile_context(profile)`, and with None they render
-exactly as before. The API layer passes the **stored** profile
-(facts snapshot with narrative attached — one row read), never a
-fresh aggregation: the stored pair is coherent where fresh facts
-under an older narrative could contradict each other, and rebuilding
-facts would put a full-archive aggregation on every explain call and
-chat message. The report prompt and the report-scope chat seed never
+exactly as before. The block names its own scope in the header —
+without that, an embedded rapid profile reads as a description of the
+whole player.
+
+The API layer passes the **stored** profile (facts snapshot with
+narrative attached — one row read), never a fresh aggregation: the
+stored pair is coherent where fresh facts under an older narrative
+could contradict each other, and rebuilding facts would put a
+full-archive aggregation on every explain call and chat message.
+Which row: the one for **the game's own time control**, falling back
+to the all-controls row — a bullet game should be explained to a
+coach who knows this student's bullet tendencies, and the fallback is
+what a student who only ever generated the mixed profile has. Both
+embed paths resolve it through one helper (`api/chat.py`'s
+`profile_for_game`) so they cannot disagree.
+
+The report prompt and the report-scope chat seed never
 embed the block — the report is the profile's own source. Chat seeds
 are rebuilt per message, so a new profile reaches every thread's
 next message; cached explanations generated before a profile existed

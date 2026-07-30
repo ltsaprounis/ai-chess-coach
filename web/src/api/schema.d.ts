@@ -250,10 +250,16 @@ export interface paths {
         };
         /**
          * Player Report
-         * @description Aggregated stats over the player's analyzed games.
+         * @description Aggregated stats over the player's games.
          *
          *     `since`/`until` (epoch seconds) restrict to a time window;
          *     `time_class` restricts to one time control.
+         *
+         *     Both lists go in (docs/06-coach.md, "Volume and quality"): the
+         *     analyzed games carry ACPL, judgments and error patterns, the full
+         *     scope carries ratings, records and repertoire counts. `all_games`
+         *     also *is* the scope count, so it replaces the separate
+         *     `count_games` query rather than adding to it.
          */
         get: operations["player_report_api_players__username__report_get"];
         put?: never;
@@ -325,11 +331,20 @@ export interface paths {
         /**
          * Player Profile
          * @description The student profile (docs/06-coach.md, "Player profile"): facts are
-         *     always freshly aggregated over the player's full stored history --
-         *     never an LLM call -- and the stored narrative, when one exists, is
-         *     attached to the facts' `narrative` field alongside its own metadata.
-         *     An unknown player has no stored games, so this returns empty facts and
-         *     no narrative, 200 like `/report`.
+         *     always freshly aggregated -- never an LLM call -- and the stored
+         *     narrative, when one exists, is attached to the facts' `narrative`
+         *     field alongside its own metadata.
+         *
+         *     Facts honour all three filters. The narrative is looked up by
+         *     `time_class` alone, because that is the only dimension it is stored
+         *     under: `since` moves with the calendar, so keying the narrative on it
+         *     would strand every stored row overnight. A windowed request therefore
+         *     returns windowed facts beside a narrative describing that control's
+         *     whole history -- `narrative_games_now` states the latter's own live
+         *     count so the UI can label both honestly.
+         *
+         *     An unknown player has no stored games, so this returns empty facts
+         *     and no narrative, 200 like `/report`.
          */
         get: operations["player_profile_api_players__username__profile_get"];
         put?: never;
@@ -342,6 +357,11 @@ export interface paths {
          *     concrete line, so there is nothing for an engine to verify) ->
          *     `save_player_profile`. Responds with the same shape as `GET`. 409 when
          *     there are no analyzed games to describe.
+         *
+         *     Generated over the time control's **full** history, never a window:
+         *     the narrative is the durable artifact other prompts embed, and one
+         *     written over "the last 30 days" would be silently wrong the moment
+         *     those 30 days moved. Time control is the one scope it carries.
          */
         post: operations["regenerate_player_profile_api_players__username__profile_post"];
         delete?: never;
@@ -1047,6 +1067,45 @@ export interface components {
             vs_weaker: components["schemas"]["Record"];
         };
         /**
+         * PeriodStats
+         * @description Performance over one trailing window, so recent form outweighs
+         *     ancient history.
+         *
+         *     The months table answers "what happened in March"; this answers
+         *     "how is the student playing *now*", which is the question a profile
+         *     exists to answer. Windows are cumulative and nested (last 30 days
+         *     ⊂ last 90 ⊂ the whole covered span) rather than disjoint buckets:
+         *     a month with four analyzed games produces an ACPL that swings on a
+         *     single bad game, and a narrative reading that wobble as a trend is
+         *     worse than one reading nothing. Nesting means a thin recent window
+         *     is backed by a wider one that is still more recent than the span.
+         *
+         *     Carries both denominators for the same reason the report does:
+         *     `games`/`record` are volume over every stored game in the window,
+         *     `analyzed_games`/`player_moves` are the quality figures' own
+         *     sample. A window can have games and no analysis at all, which is
+         *     exactly when `acpl` must read as absent rather than as 0.0.
+         */
+        PeriodStats: {
+            /** Label */
+            label: string;
+            /** Days */
+            days: number | null;
+            /** Games */
+            games: number;
+            record: components["schemas"]["Record"];
+            /** Analyzed Games */
+            analyzed_games: number;
+            /** Player Moves */
+            player_moves: number;
+            /** Acpl */
+            acpl: number | null;
+            /** Blunder Rate */
+            blunder_rate: number | null;
+            /** Rating End */
+            rating_end: number | null;
+        };
+        /**
          * PhaseStats
          * @description Player-move aggregates for one phase, with its denominator.
          *
@@ -1084,12 +1143,24 @@ export interface components {
          *     compact on purpose: `render_profile_context` turns it into the
          *     ~250-token block other coach prompts embed at the top, so every
          *     list here is capped by the builder.
+         *
+         *     Inherits `PlayerReport`'s volume/quality split and both of its
+         *     denominators — see that docstring. `games_covered` is the analyzed
+         *     sample behind the quality figures; `games_in_scope` is every stored
+         *     game behind the ratings, records and repertoire counts.
          */
         PlayerProfile: {
             /** Username */
             username: string;
+            /** Time Class */
+            time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
             /** Games Covered */
             games_covered: number;
+            /**
+             * Games In Scope
+             * @default 0
+             */
+            games_in_scope: number;
             /** Window Start */
             window_start: number | null;
             /** Window End */
@@ -1110,6 +1181,11 @@ export interface components {
             time_classes: components["schemas"]["TimeClassStats"][];
             /** Months */
             months: components["schemas"]["MonthStats"][];
+            /**
+             * Periods
+             * @default []
+             */
+            periods: components["schemas"]["PeriodStats"][];
             /** Openings */
             openings: components["schemas"]["ProfileOpening"][];
             /** Error Patterns */
@@ -1121,9 +1197,23 @@ export interface components {
          * PlayerReport
          * @description Everything the coaching prompt and the Dashboard read.
          *
-         *     Aggregated over analyzed games only; `window_start`/`window_end`
-         *     report the extent of the data actually covered, so neither the
-         *     model nor the student has to guess what period the numbers describe.
+         *     Two layers with two different denominators (docs/06-coach.md,
+         *     "Volume and quality"). **Volume** — `record`, `time_classes` and
+         *     their ratings, `months` game counts, `terminations`, `opponents`,
+         *     and the repertoire's `games`/win-loss columns — describes every
+         *     stored game in scope. **Quality** — `overall_acpl`,
+         *     `judgment_counts`, `phases`, `error_patterns`, `critical_positions`,
+         *     the ACPL columns, and `months` ACPL/blunder rate — describes the
+         *     analyzed subset, because nothing else can produce it.
+         *
+         *     Mixing the two is what made a partly-analyzed archive report a
+         *     rating from whichever game happened to be analyzed last, months
+         *     after the fact. `games_analyzed` and `games_in_scope` are the two
+         *     denominators, stated rather than implied.
+         *
+         *     `window_start`/`window_end` report the extent of the data actually
+         *     covered, so neither the model nor the student has to guess what
+         *     period the numbers describe.
          */
         PlayerReport: {
             /** Username */
@@ -1159,6 +1249,11 @@ export interface components {
             time_classes: components["schemas"]["TimeClassStats"][];
             /** Months */
             months: components["schemas"]["MonthStats"][];
+            /**
+             * Periods
+             * @default []
+             */
+            periods: components["schemas"]["PeriodStats"][];
             /** Terminations */
             terminations: components["schemas"]["TerminationStats"][];
             opponents: components["schemas"]["OpponentStats"] | null;
@@ -1185,6 +1280,8 @@ export interface components {
         ProfileGenerateRequest: {
             /** Agent Id */
             agent_id?: string | null;
+            /** Time Class */
+            time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
         };
         /**
          * ProfileNarrative
@@ -1237,6 +1334,8 @@ export interface components {
         ProfileResponse: {
             profile: components["schemas"]["PlayerProfile"];
             narrative?: components["schemas"]["ProfileNarrative"] | null;
+            /** Narrative Games Now */
+            narrative_games_now?: number | null;
         };
         /**
          * Record
@@ -1823,7 +1922,11 @@ export interface operations {
     };
     player_profile_api_players__username__profile_get: {
         parameters: {
-            query?: never;
+            query?: {
+                since?: number | null;
+                until?: number | null;
+                time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
+            };
             header?: never;
             path: {
                 username: string;

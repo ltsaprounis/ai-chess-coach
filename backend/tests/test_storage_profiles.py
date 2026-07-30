@@ -1,8 +1,8 @@
 """Player profile storage tests (docs/03-storage.md, docs/06-coach.md,
-"Player profile") — migration 010 and the `player_profiles` cache
+"Player profile") — migration 011 and the `player_profiles` cache
 (`get_player_profile`/`save_player_profile`), which mirrors
-`storage/reports.py`'s cache semantics except that the profile is
-singular per player rather than keyed per agent.
+`storage/reports.py`'s cache semantics except that the profile is keyed
+by (player, time control) rather than per agent.
 """
 
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from chess_coach.domain import PlayerProfile
+from chess_coach.domain import PlayerProfile, TimeClass
 from chess_coach.storage import (
     CachedProfile,
     Db,
@@ -98,10 +98,10 @@ def _profile(**overrides: object) -> PlayerProfile:
     return PlayerProfile.model_validate({**base, **overrides})
 
 
-# --- migration 010 ---------------------------------------------------
+# --- migration 011 ---------------------------------------------------
 
 
-def test_migration_010_creates_player_profiles_table_and_bumps_user_version(
+def test_migration_011_creates_player_profiles_table_and_bumps_user_version(
     db: Db,
 ) -> None:
     tables = {
@@ -114,7 +114,21 @@ def test_migration_010_creates_player_profiles_table_and_bumps_user_version(
 
     row = db.execute("PRAGMA user_version").fetchone()
     assert row is not None
-    assert row[0] == 10
+    assert row[0] == 11
+
+
+def test_migration_011_keys_player_profiles_by_username_and_time_class(
+    db: Db,
+) -> None:
+    """The re-key is the migration's whole point: `username` alone was the
+    primary key through 010, so without the composite key a second time
+    control's narrative would overwrite the first's."""
+    key_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(player_profiles)").fetchall()
+        if row["pk"]
+    }
+    assert key_columns == {"username", "time_class"}
 
 
 # --- save / get round trip --------------------------------------------
@@ -203,6 +217,77 @@ def test_save_player_profile_upsert_replaces_the_row(
         "SELECT COUNT(*) AS n FROM player_profiles WHERE username = 'testuser'"
     ).fetchall()
     assert row["n"] == 1  # replaced, never duplicated
+
+
+def test_profiles_are_kept_apart_per_time_class(db: Db) -> None:
+    """One row per (player, time control): a rapid regeneration must not
+    overwrite the same player's bullet narrative, and each scope reads
+    back its own (docs/06-coach.md, "Player profile")."""
+    scopes: tuple[tuple[TimeClass | None, str], ...] = (
+        ("rapid", "patient in rapid"),
+        ("bullet", "reckless in bullet"),
+        (None, "mixed across controls"),
+    )
+    for time_class, narrative in scopes:
+        save_player_profile(
+            db,
+            "testuser",
+            time_class=time_class,
+            agent_id="coach-a",
+            prompt_version="profile-v2",
+            facts=_profile(time_class=time_class),
+            narrative=narrative,
+        )
+
+    rapid = get_player_profile(db, "testuser", time_class="rapid")
+    bullet = get_player_profile(db, "testuser", time_class="bullet")
+    mixed = get_player_profile(db, "testuser")
+    assert rapid is not None and rapid.profile.narrative == "patient in rapid"
+    assert bullet is not None and bullet.profile.narrative == "reckless in bullet"
+    assert mixed is not None and mixed.profile.narrative == "mixed across controls"
+
+    (row,) = db.execute(
+        "SELECT COUNT(*) AS n FROM player_profiles WHERE username = 'testuser'"
+    ).fetchall()
+    assert row["n"] == 3
+
+
+def test_all_classes_profile_is_stored_under_the_empty_sentinel(db: Db) -> None:
+    """`time_class=None` persists as '' — the same sentinel `ReportKey`
+    uses — so the mixed profile is a real row rather than a NULL that
+    would never match an equality lookup."""
+    save_player_profile(
+        db,
+        "testuser",
+        time_class=None,
+        agent_id="coach-a",
+        prompt_version="profile-v2",
+        facts=_profile(),
+        narrative="mixed",
+    )
+
+    (row,) = db.execute(
+        "SELECT time_class FROM player_profiles WHERE username = 'testuser'"
+    ).fetchall()
+    assert row["time_class"] == ""
+
+
+def test_a_missing_time_class_does_not_fall_back_to_another(db: Db) -> None:
+    """A stored rapid profile is not served for a bullet request: the
+    embed paths choose their own fallback deliberately, so storage must
+    report the miss rather than quietly substituting a scope."""
+    save_player_profile(
+        db,
+        "testuser",
+        time_class="rapid",
+        agent_id="coach-a",
+        prompt_version="profile-v2",
+        facts=_profile(time_class="rapid"),
+        narrative="patient in rapid",
+    )
+
+    assert get_player_profile(db, "testuser", time_class="bullet") is None
+    assert get_player_profile(db, "testuser") is None  # nor the mixed slot
 
 
 def test_save_player_profile_upsert_is_scoped_to_its_username(db: Db) -> None:

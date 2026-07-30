@@ -262,6 +262,37 @@ class MonthStats(BaseModel):
     blunder_rate: float | None  # blunders ÷ player moves
 
 
+class PeriodStats(BaseModel):
+    """Performance over one trailing window, so recent form outweighs
+    ancient history.
+
+    The months table answers "what happened in March"; this answers
+    "how is the student playing *now*", which is the question a profile
+    exists to answer. Windows are cumulative and nested (last 30 days
+    ⊂ last 90 ⊂ the whole covered span) rather than disjoint buckets:
+    a month with four analyzed games produces an ACPL that swings on a
+    single bad game, and a narrative reading that wobble as a trend is
+    worse than one reading nothing. Nesting means a thin recent window
+    is backed by a wider one that is still more recent than the span.
+
+    Carries both denominators for the same reason the report does:
+    `games`/`record` are volume over every stored game in the window,
+    `analyzed_games`/`player_moves` are the quality figures' own
+    sample. A window can have games and no analysis at all, which is
+    exactly when `acpl` must read as absent rather than as 0.0.
+    """
+
+    label: str  # "last 30 days", "last 90 days", "whole span"
+    days: int | None  # trailing length; None = the whole covered span
+    games: int  # every stored game in the window
+    record: Record
+    analyzed_games: int  # how many carry analysis — the quality sample
+    player_moves: int  # denominator for acpl and blunder_rate
+    acpl: float | None  # None when the window has no analyzed moves
+    blunder_rate: float | None  # blunders ÷ player_moves
+    rating_end: int | None  # last rating seen in the window
+
+
 class OpponentStats(BaseModel):
     """How the player scores against stronger and weaker opposition."""
 
@@ -337,9 +368,23 @@ class CriticalPosition(BaseModel):
 class PlayerReport(BaseModel):
     """Everything the coaching prompt and the Dashboard read.
 
-    Aggregated over analyzed games only; `window_start`/`window_end`
-    report the extent of the data actually covered, so neither the
-    model nor the student has to guess what period the numbers describe.
+    Two layers with two different denominators (docs/06-coach.md,
+    "Volume and quality"). **Volume** — `record`, `time_classes` and
+    their ratings, `months` game counts, `terminations`, `opponents`,
+    and the repertoire's `games`/win-loss columns — describes every
+    stored game in scope. **Quality** — `overall_acpl`,
+    `judgment_counts`, `phases`, `error_patterns`, `critical_positions`,
+    the ACPL columns, and `months` ACPL/blunder rate — describes the
+    analyzed subset, because nothing else can produce it.
+
+    Mixing the two is what made a partly-analyzed archive report a
+    rating from whichever game happened to be analyzed last, months
+    after the fact. `games_analyzed` and `games_in_scope` are the two
+    denominators, stated rather than implied.
+
+    `window_start`/`window_end` report the extent of the data actually
+    covered, so neither the model nor the student has to guess what
+    period the numbers describe.
     """
 
     username: str
@@ -364,6 +409,7 @@ class PlayerReport(BaseModel):
     judgment_counts: dict[Judgment, int]
     time_classes: list[TimeClassStats]
     months: list[MonthStats]  # oldest first
+    periods: list[PeriodStats] = []  # trailing windows, narrowest first
     terminations: list[TerminationStats]
     opponents: OpponentStats | None  # None with no games
     openings: list[OpeningStats]
@@ -385,7 +431,7 @@ class ProfileOpening(BaseModel):
     color: Color
     name: str  # family label — the most-played member's name root
     moves: str  # chosen: the player's own system; faced: the full line
-    games: int
+    games: int  # every stored game in the family — volume, not analysis
     score: float  # (wins + draws/2) / games, 0-1
     faced: bool
 
@@ -401,10 +447,23 @@ class PlayerProfile(BaseModel):
     compact on purpose: `render_profile_context` turns it into the
     ~250-token block other coach prompts embed at the top, so every
     list here is capped by the builder.
+
+    Inherits `PlayerReport`'s volume/quality split and both of its
+    denominators — see that docstring. `games_covered` is the analyzed
+    sample behind the quality figures; `games_in_scope` is every stored
+    game behind the ratings, records and repertoire counts.
     """
 
     username: str
-    games_covered: int  # analyzed games behind the facts
+    # The scope these facts describe. `time_class` is the control they
+    # cover (None = all controls mixed) and doubles as storage's key for
+    # the narrative: a 2100 bullet player and their 1500 rapid self are
+    # different students, and one profile averaging both describes
+    # neither. An embedded profile states this — without it the block
+    # would present one control's numbers as the whole player.
+    time_class: TimeClass | None = None
+    games_covered: int  # analyzed games — the quality figures' sample
+    games_in_scope: int = 0  # every stored game behind the volume figures
     window_start: int | None  # covered span, as in PlayerReport
     window_end: int | None
     player_moves: int  # denominator for judgment_counts
@@ -413,6 +472,7 @@ class PlayerProfile(BaseModel):
     phases: dict[Phase, PhaseStats]
     time_classes: list[TimeClassStats]
     months: list[MonthStats]  # most recent months only, oldest first
+    periods: list[PeriodStats] = []  # trailing windows, narrowest first
     openings: list[ProfileOpening]  # chosen + faced, capped per color
     error_patterns: list[ErrorPattern]
     narrative: str | None = None  # stored LLM layer; None until generated

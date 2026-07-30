@@ -368,6 +368,7 @@ def seed_profile(
     db_path: Path,
     username: str = "testuser",
     *,
+    time_class: TimeClass | None = None,
     agent_id: str = "claude",
     prompt_version: str = "profile-v0",
     narrative: str = "zzz-stored-narrative-marker-zzz",
@@ -378,10 +379,11 @@ def seed_profile(
     Returns the facts snapshot it stored, narrative attached -- the same
     shape `get_player_profile` returns."""
     db = open_db(db_path)
-    facts = build_profile(build_report(username, games or []))
+    facts = build_profile(build_report(username, games or [], time_class=time_class))
     save_player_profile(
         db,
         username,
+        time_class=time_class,
         agent_id=agent_id,
         prompt_version=prompt_version,
         facts=facts,
@@ -2799,3 +2801,189 @@ def test_chat_toolkit_opening_stats_uses_the_thread_window(
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     assert [o.eco for o in found] == ["D00"]
+
+
+# --- profile scoping (docs/07-api.md, "Player profile") ------------------
+
+
+def test_profile_get_scopes_facts_by_time_class(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-r1", time_class="rapid", end_time=1),
+            make_game(id="g-r2", time_class="rapid", end_time=2),
+            make_game(id="g-b1", time_class="bullet", end_time=3),
+        ],
+        analyzed={"g-r1", "g-r2", "g-b1"},
+    )
+
+    rapid: Any = get(
+        client, "/api/players/testuser/profile", params={"time_class": "rapid"}
+    ).json()
+    mixed: Any = get(client, "/api/players/testuser/profile").json()
+
+    assert rapid["profile"]["games_covered"] == 2
+    assert rapid["profile"]["time_class"] == "rapid"
+    assert mixed["profile"]["games_covered"] == 3
+    assert mixed["profile"]["time_class"] is None
+
+
+def test_profile_get_scopes_facts_by_window(client: TestClient, db_path: Path) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", end_time=1_000),
+            make_game(id="g-new", end_time=100_000),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+
+    body: Any = get(
+        client, "/api/players/testuser/profile", params={"since": "50000"}
+    ).json()
+
+    assert body["profile"]["games_covered"] == 1
+
+
+def test_profile_narrative_is_read_per_time_class(
+    client: TestClient, db_path: Path
+) -> None:
+    """The narrative is stored per time control, so a rapid request must
+    not be served the bullet narrative (or vice versa)."""
+    seed(db_path, [make_game(id="g-1", time_class="rapid")], analyzed={"g-1"})
+    seed_profile(db_path, time_class="rapid", narrative="rapid-narrative")
+    seed_profile(db_path, time_class="bullet", narrative="bullet-narrative")
+
+    rapid: Any = get(
+        client, "/api/players/testuser/profile", params={"time_class": "rapid"}
+    ).json()
+    bullet: Any = get(
+        client, "/api/players/testuser/profile", params={"time_class": "bullet"}
+    ).json()
+    mixed: Any = get(client, "/api/players/testuser/profile").json()
+
+    assert rapid["profile"]["narrative"] == "rapid-narrative"
+    assert bullet["profile"]["narrative"] == "bullet-narrative"
+    assert mixed["narrative"] is None  # nothing stored for the mixed scope
+
+
+def test_profile_narrative_survives_a_window_filter(
+    client: TestClient, db_path: Path
+) -> None:
+    """The window scopes facts but is deliberately not part of the
+    narrative's key: keying on `since` -- which moves every day -- would
+    strand the stored narrative overnight (docs/07-api.md)."""
+    seed(
+        db_path,
+        [
+            make_game(id="g-old", time_class="rapid", end_time=1_000),
+            make_game(id="g-new", time_class="rapid", end_time=100_000),
+        ],
+        analyzed={"g-old", "g-new"},
+    )
+    seed_profile(db_path, time_class="rapid", narrative="rapid-narrative")
+
+    body: Any = get(
+        client,
+        "/api/players/testuser/profile",
+        params={"time_class": "rapid", "since": "50000"},
+    ).json()
+
+    assert body["profile"]["games_covered"] == 1  # facts windowed
+    assert body["profile"]["narrative"] == "rapid-narrative"  # narrative kept
+    # The staleness basis is the narrative's own scope (all rapid games),
+    # not the windowed facts -- otherwise every windowed view reads stale.
+    assert body["narrative_games_now"] == 2
+
+
+def test_profile_post_stores_per_time_class(client: TestClient, db_path: Path) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="g-r1", time_class="rapid", end_time=1),
+            make_game(id="g-b1", time_class="bullet", end_time=2),
+        ],
+        analyzed={"g-r1", "g-b1"},
+    )
+
+    rapid: Any = post(
+        client, "/api/players/testuser/profile", json={"time_class": "rapid"}
+    ).json()
+
+    assert rapid["profile"]["time_class"] == "rapid"
+    assert rapid["profile"]["games_covered"] == 1
+    # Stored under rapid only: the bullet scope is still empty.
+    bullet: Any = get(
+        client, "/api/players/testuser/profile", params={"time_class": "bullet"}
+    ).json()
+    assert bullet["narrative"] is None
+
+
+def test_profile_post_409s_when_the_requested_class_has_no_analyzed_games(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-r1", time_class="rapid")], analyzed={"g-r1"})
+
+    response = post(
+        client, "/api/players/testuser/profile", json={"time_class": "bullet"}
+    )
+
+    assert response.status_code == 409
+    assert "bullet" in response.json()["error"]["message"]
+
+
+def test_profile_get_reports_both_denominators(
+    client: TestClient, db_path: Path
+) -> None:
+    """Coverage stops being implied: two stored games, one analyzed, must
+    read as 1 of 2 rather than presenting the analyzed game as the whole
+    history (docs/06-coach.md, "Volume and quality")."""
+    seed(
+        db_path,
+        [
+            make_game(id="g-1", end_time=1),
+            make_game(id="g-2", end_time=2),
+        ],
+        analyzed={"g-1"},
+    )
+
+    body: Any = get(client, "/api/players/testuser/profile").json()
+
+    assert body["profile"]["games_covered"] == 1
+    assert body["profile"]["games_in_scope"] == 2
+
+
+def test_explain_embeds_the_profile_for_the_games_own_time_class(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """A bullet game is explained to a coach who knows this student's
+    bullet tendencies, not an average across controls they play very
+    differently (docs/06-coach.md, "Embedding")."""
+    seed(db_path, [make_game(id="g-1", time_class="bullet")], analyzed={"g-1"})
+    seed_profile(db_path, time_class="bullet", narrative="zzz-bullet-read-zzz")
+    seed_profile(db_path, time_class="rapid", narrative="zzz-rapid-read-zzz")
+
+    assert get(client, "/api/games/g-1/explain", params={"ply": "1"}).status_code == 200
+
+    prompt = stub_provider(stub_registry, "claude").explain_prompts[0]
+    assert "zzz-bullet-read-zzz" in prompt
+    assert "zzz-rapid-read-zzz" not in prompt
+
+
+def test_explain_falls_back_to_the_all_classes_profile(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """No row for the game's control -- the mixed profile is better than
+    nothing, and is what a student who only generated the unscoped
+    profile has."""
+    seed(db_path, [make_game(id="g-1", time_class="bullet")], analyzed={"g-1"})
+    seed_profile(db_path, narrative="zzz-mixed-read-zzz")  # all-classes row only
+
+    assert get(client, "/api/games/g-1/explain", params={"ply": "1"}).status_code == 200
+
+    assert (
+        "zzz-mixed-read-zzz"
+        in stub_provider(stub_registry, "claude").explain_prompts[0]
+    )

@@ -49,8 +49,8 @@ run. Active runs are never swept.
 | GET    | `/api/players/{u}/highlights`          | `build_highlights` over stored analyses — the Dashboard's blunders + brilliancies lists (`PlayerHighlights`), each entry deep-linkable to `/games/{id}` at its ply; same optional `since`/`until`/`time_class` as `/report`. Kept out of `PlayerReport` so the coach prompt isn't bloated; brilliant cutoffs injected from config's `brilliant` section |
 | GET    | `/api/coach/agents`                    | Selectable coach agents: `{agents: [{id, label, provider, model}], default}` from config |
 | POST   | `/api/players/{u}/coach`               | Build report → `render_prompt` → chosen provider (agentic with the engine tool when the pool is up) → `append_game_links` (the advice's `[gN]` citations become `/games/{id}?ply=` links; see 06-coach.md "Game links"), cached post-processed. Optional body `{agent_id, since, until, time_class, refresh}` — the same window and time-control filters `/report` takes, so the coach reasons over the period the student is looking at (default agent otherwise, 400 on unknown id); returns `{prompt, advice, agent_id, cached, generated_at, games_analyzed}` |
-| GET    | `/api/players/{u}/profile`             | The student profile (docs/06-coach.md, "Player profile"): facts always fresh (`build_report` → `build_profile` over the full stored history), narrative and its metadata (`agent_id`, `prompt_version`, `generated_at`, `games_covered` at generation) from storage — never an LLM call. Unknown player: empty facts and no narrative, 200 like `/report` |
-| POST   | `/api/players/{u}/profile`             | Regenerate the narrative (user-triggered — LLM calls cost money; GET never generates): body `{agent_id?}` (default agent otherwise, 400 on unknown id); fresh facts → `render_profile_prompt` → `complete(analyst=None)` → `save_player_profile`; returns the same shape as GET. 409 with no analyzed games to describe |
+| GET    | `/api/players/{u}/profile`             | The student profile (docs/06-coach.md, "Player profile"): facts always fresh (`list_analyzed_games` + `list_game_summaries` → `build_report` → `build_profile`), narrative and its metadata (`agent_id`, `prompt_version`, `generated_at`, `games_covered` at generation) from storage — never an LLM call. Query `since`/`until`/`time_class` as `/report`, with one asymmetry: **facts honour all three, the narrative is looked up by `time_class` alone** (it is stored under no window — see 06-coach.md, "Why time control keys it and the window does not"). `narrative_games_now` reports the live analyzed count for the *narrative's* scope, so the UI compares like with like instead of flagging every windowed view as stale. Unknown player: empty facts and no narrative, 200 like `/report` |
+| POST   | `/api/players/{u}/profile`             | Regenerate the narrative (user-triggered — LLM calls cost money; GET never generates): body `{agent_id?, time_class?}` (default agent otherwise, 400 on unknown id); fresh facts over that control's **full history** — never a window → `render_profile_prompt` → `complete(analyst=None)` → `save_player_profile` under `(username, time_class)`; returns the same shape as GET. 409 with no analyzed games in that scope to describe, naming the control |
 | GET    | `/api/eval`                            | SSE live eval of one position: query `fen` (required), `depth` (optional, default `engine.depth`, clamped 1-40), `multipv` (optional, default `engine.multipv`, clamped 1-10); `eval` event per `LiveEval` snapshot, then `done` |
 | GET    | `/api/games/{id}/explain`              | SSE coach explanation of one move: query `ply` (required, 1-based), `agent_id` (optional, default agent), `refresh` (optional, default false — skip the cache read and regenerate; the result overwrites the cached row). Cached hit: one `done` event with the full text. Miss or refresh: `text`/`tool` events (mirroring coach `ExplainEvent`) while the agent works, then `done` with the full text (now cached) |
 | POST   | `/api/players/{u}/chat/threads`        | Create a chat thread: body `{scope, agent_id?, game_id?, ply?, since?, until?, time_class?}`. `scope="game"` requires `game_id` (400 without; 404 unknown game; a `ply` anchor additionally requires analysis — 409 unanalyzed, 400 out-of-range, mirroring explain). `scope="report"` rejects `game_id`/`ply` (400). Unknown `agent_id` 400; omitted = default agent. Returns the thread |
@@ -130,15 +130,25 @@ unexpected to 500.
   passes `None` and the provider degrades to a single turn — the
   report still generates without an engine.
 - Player profile (docs/06-coach.md, "Player profile"): GET assembles
-  fresh facts — `list_analyzed_games` → `build_report` →
-  `build_profile`, in the threadpool like `/report` — and attaches
-  the stored narrative row when one exists; POST regenerates through
-  the chosen provider and saves. The **stored** row, never a fresh
-  aggregation, feeds the embed paths: the explain miss path and the
-  game-scope chat seed read `get_player_profile` and pass the
-  profile into their render calls — one row read per call; no row →
-  `None` → the prompts render exactly as before. Report scope never
-  embeds it (the report is the profile's own source).
+  fresh facts — `list_analyzed_games` + `list_game_summaries` →
+  `build_report` → `build_profile`, in the threadpool like `/report`
+  — and attaches the stored narrative row when one exists; POST
+  regenerates through the chosen provider and saves. Both lists go
+  in, so ratings, records and repertoire counts describe every game
+  in scope while ACPL and error patterns describe the analyzed ones
+  (docs/06-coach.md, "Volume and quality"); `all_games` doubles as
+  the scope count, replacing the separate `count_games` query rather
+  than adding to it. The same is now true of `/report`, `/coach` and
+  the report-scope chat seed, which had the identical bug.
+
+  The **stored** row, never a fresh aggregation, feeds the embed
+  paths: the explain miss path and the game-scope chat seed resolve
+  it through `profile_for_game` — the row for the game's own time
+  control, falling back to the all-controls row — and pass the
+  profile into their render calls; one row read per call (two on the
+  fallback), no row → `None` → the prompts render exactly as before.
+  Report scope never embeds it (the report is the profile's own
+  source).
 - Chat (docs/future-improvements/coach-chat.md is the design
   record). The stored transcript is the source of truth; the API
   layer never interprets `provider_state`, only persists and returns

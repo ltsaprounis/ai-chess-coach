@@ -43,7 +43,17 @@ def build_profile(report: PlayerReport) -> PlayerProfile:
     """
     return PlayerProfile(
         username=report.username,
+        time_class=report.time_class,
         games_covered=report.games_analyzed,
+        # The volume layer's own denominator (docs/06-coach.md, "Volume
+        # and quality"). `games_in_scope` is None on a report built
+        # without it, in which case the analyzed count is all the scope
+        # this profile can honestly claim.
+        games_in_scope=(
+            report.games_in_scope
+            if report.games_in_scope is not None
+            else report.games_analyzed
+        ),
         window_start=report.window_start,
         window_end=report.window_end,
         player_moves=report.player_moves,
@@ -52,6 +62,7 @@ def build_profile(report: PlayerReport) -> PlayerProfile:
         phases=report.phases,
         time_classes=report.time_classes,
         months=report.months[-_MONTHS_CAP:],  # already oldest-first; slice keeps it so
+        periods=report.periods,
         openings=_profile_openings(report),
         error_patterns=report.error_patterns,
         narrative=None,

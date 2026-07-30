@@ -9,6 +9,7 @@ from chess_coach.domain import (
     Color,
     Game,
     GameAnalysis,
+    GameSummary,
     Judgment,
     MoveEval,
     Opening,
@@ -16,6 +17,43 @@ from chess_coach.domain import (
     Thresholds,
     TimeClass,
 )
+
+# How many SAN plies a GameSummary carries, mirroring storage's
+# `_FIRST_PLIES` (docs/03-storage.md, "GameSummary").
+_FIRST_PLIES = 6
+
+
+def summarize(
+    game: Game, *, analyzed: bool = True, opening: Opening | None = None
+) -> GameSummary:
+    """The `GameSummary` storage would return for `game` — the volume
+    layer's input shape (docs/06-coach.md, "Volume and quality").
+
+    Lets a test hand `build_report` a scope wider than its analyzed
+    games, which is the whole point of the split: the analyzed list and
+    the full list are the same only in tests that never modelled a
+    partly-analyzed archive.
+
+    `opening` is explicit because a plain `Game` carries none, while a
+    stored one is classified independently of whether it was analyzed —
+    an unanalyzed game still belongs to its opening, and defaulting it
+    to None would quietly drop those games from the repertoire.
+    """
+    return GameSummary(
+        id=game.id,
+        color=game.color,
+        time_class=game.time_class,
+        result=game.result,
+        end_time=game.end_time,
+        opponent=game.opponent,
+        player_rating=game.player_rating,
+        opponent_rating=game.opponent_rating,
+        accuracy=game.accuracy,
+        termination=game.termination,
+        first_plies=game.san_moves[:_FIRST_PLIES],
+        opening=opening if opening is not None else getattr(game, "opening", None),
+        analyzed=analyzed,
+    )
 
 
 def make_game(**overrides: object) -> Game:
