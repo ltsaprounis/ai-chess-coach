@@ -9,10 +9,15 @@ from chess_coach.coach.highlights import (
 from chess_coach.coach.prompt import (
     PROMPT_VERSION,
     append_game_links,
+    render_chat_prompt,
     render_explain_prompt,
+    render_game_chat_context,
     render_prompt,
+    render_report_chat_context,
 )
 from chess_coach.coach.providers import (
+    ChatEvent,
+    ChatToolkit,
     ClaudeAgentSdkProvider,
     CoachProvider,
     CoachProviderError,
@@ -25,6 +30,8 @@ from chess_coach.coach.report import build_report
 
 __all__ = [
     "PROMPT_VERSION",
+    "ChatEvent",
+    "ChatToolkit",
     "ClaudeAgentSdkProvider",
     "CoachProvider",
     "CoachProviderError",
@@ -39,6 +46,9 @@ __all__ = [
     "build_move_context",
     "build_report",
     "create_provider",
+    "render_chat_prompt",
     "render_explain_prompt",
+    "render_game_chat_context",
     "render_prompt",
+    "render_report_chat_context",
 ]

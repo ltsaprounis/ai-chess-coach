@@ -30,14 +30,32 @@ class GameFilters(BaseModel):
     Paging is ge=0 because SQLite reads a negative LIMIT as
     "unlimited" (and a negative OFFSET as 0) — the same guard
     `AnalyzeRequest.limit` documents.
+
+    `opening_name_like`, `opponent`, and `since`/`until` exist for the
+    coach chat toolkit's `find_games` tool (docs/future-improvements/
+    coach-chat.md), which queries by what a student says — an
+    opponent's name, an opening's name — rather than by ECO code.
+    `since`/`until` are an epoch-second window (`since` inclusive,
+    `until` exclusive), the same semantics every other windowed query
+    here uses.
     """
 
     opening_eco: str | None = None
+    opening_name_like: str | None = None  # case-insensitive substring
+    opponent: str | None = None  # case-insensitive exact match
     result: Result | None = None
     time_class: TimeClass | None = None
     analyzed: bool | None = None
+    since: int | None = None
+    until: int | None = None
     limit: int = Field(default=100, ge=0)
     offset: int = Field(default=0, ge=0)
+
+
+def _escape_like(text: str) -> str:
+    """Escape LIKE wildcards so a literal '%' or '_' in a search term
+    (an opening name, say) is never mistaken for a wildcard."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 _INSERT_COLUMNS = (
@@ -108,6 +126,12 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
     if filters.opening_eco is not None:
         clauses.append("g.opening_eco = ?")
         params.append(filters.opening_eco)
+    if filters.opening_name_like is not None:
+        clauses.append("LOWER(g.opening_name) LIKE ? ESCAPE '\\'")
+        params.append(f"%{_escape_like(filters.opening_name_like.lower())}%")
+    if filters.opponent is not None:
+        clauses.append("LOWER(g.opponent) = LOWER(?)")
+        params.append(filters.opponent)
     if filters.result is not None:
         clauses.append("g.result = ?")
         params.append(filters.result)
@@ -118,6 +142,12 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
         clauses.append(
             "a.game_id IS NOT NULL" if filters.analyzed else "a.game_id IS NULL"
         )
+    if filters.since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(filters.since)
+    if filters.until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(filters.until)
 
     rows = db.execute(
         f"""

@@ -104,17 +104,76 @@ class ExplainEvent(BaseModel):     # one streamed explain increment
     type: Literal["text", "tool"]
     text: str                      # text chunk | tool-call summary
 
+# --- Chat (see "Chat" below; every LLM call is a user pressing
+# --- send, so the house cost rule is satisfied by construction) ---
+
+class ChatEvent(BaseModel):        # one streamed chat increment
+    type: Literal["text", "tool", "done"]
+    text: str = ""                 # chunk | tool summary | full reply
+    provider_state: str | None = None   # done events only
+
+# The toolkit seam — PositionAnalystFn generalized. The API layer
+# implements it over storage and the engine pool (components never
+# import each other), pre-scoped to the thread's player: the model
+# passes filters, never a username. All read-only; there is no raw
+# SQL tool. Coach owns the tool names, schemas, descriptions, and
+# result rendering, so the prompt style stays owned in one place.
+class ChatToolkit(Protocol):
+    analyst: PositionAnalystFn | None   # None = engine pool down
+    async def find_games(self, *, opponent: str | None = None,
+                         opening: str | None = None,
+                         result: Result | None = None,
+                         time_class: TimeClass | None = None,
+                         since: int | None = None,
+                         until: int | None = None,
+                         limit: int = 10) -> list[GameSummary]
+    async def get_game(self, game_id: str) -> GameDetail | None
+    async def opening_stats(self) -> list[OpeningStats]
+
+# Scope seeds — deterministic templates, snapshot-tested like every
+# other prompt. `render_game_chat_context` raises ValueError when
+# `ply` is set but out of range or the game is unanalyzed (mirroring
+# build_move_context); `lines` is the MultiPV snapshot of the
+# anchored position, seeded by the API layer exactly as for explain.
+def render_game_chat_context(detail: GameDetail, *,
+                             ply: int | None = None,
+                             lines: list[EvalLine] | None = None,
+                             engine_available: bool) -> str
+def render_report_chat_context(report: PlayerReport, *,
+                               engine_available: bool) -> str
+
+# The shared replay formatter (see "Replay" below): prior turns as
+# Student:/Coach: blocks, oldest first, then the new message. Every
+# provider that cannot resume replays through this one function.
+def render_chat_prompt(history: list[ChatMessage],
+                       message: str) -> str
+
 # The provider seam — everything LLM-specific hides behind this.
 # `complete` takes an optional analyst: with one, the report run is
 # agentic — the analyst exposed as the same `analyze_position(fen)`
 # tool `explain` uses, under a small turn budget — so the model can
 # verify concrete lines before asserting them. With `None` it is
 # today's single turn, the fallback when no engine pool exists.
+# `chat` is stateless with an opaque resume token: each call carries
+# everything needed to answer from scratch (seed, stored transcript,
+# new message), and a provider MAY shortcut the replay by resuming a
+# warm session named by `provider_state` — a token it returned on a
+# previous done event, persisted by the API layer on the thread. A
+# provider that cannot resume (no token, expired session, API-backed
+# provider) MUST fall back to replaying the transcript; resume
+# failure is a cost event, never an error. Yields exactly one final
+# `done` event carrying the full reply and the new token (None when
+# the provider has nothing to resume).
 class CoachProvider(Protocol):
     async def complete(self, prompt: str,
                        analyst: PositionAnalystFn | None = None) -> str
     def explain(self, prompt: str, analyst: PositionAnalystFn,
                 ) -> AsyncGenerator[ExplainEvent]
+    def chat(self, *, system_context: str,
+             history: list[ChatMessage], message: str,
+             toolkit: ChatToolkit,
+             provider_state: str | None = None,
+             ) -> AsyncGenerator[ChatEvent]
 
 # LlmConfig is a domain type, populated by config. The factory
 # raises if the selected provider needs a key that is None. The
@@ -455,6 +514,61 @@ URL minted from the report itself — model-authored `[gN]:`
 definition lines are stripped before the minted block is appended,
 so a handle cannot be redefined from inside the advice.
 
+## Chat
+
+One backbone, two scopes (docs/future-improvements/coach-chat.md is
+the design record; this section is the contract). The API layer owns
+threads and transcripts; this component owns the seeds, the tools,
+and the provider mechanics.
+
+**Seeds.** `system_context` is rendered per scope. Game scope: the
+game's identity (opponent, date, result, time class, opening) and,
+when a ply anchor is set, the same `MoveContext` fields and seeded
+eval lines the explain prompt uses. Report scope: the report's data
+sections — not the coaching-brief instruction block, which is
+replaced by the chat instructions below. Both seeds state whether
+engine analysis is available (`engine_available`), so the model
+never promises a verification it cannot run. Cached explanations and
+cached advice are *history*, not seed: the API layer prepends them
+as the first assistant turn, so the chat genuinely continues from
+what the student just read.
+
+**Tools.** Each `ChatToolkit` capability is exposed to the model as
+one tool: `analyze_position` (only when `analyst` is not None),
+`find_games`, `get_game`, `get_opening_stats`. The roster is
+deliberately small — every tool costs schema tokens on every message
+— and read-only by construction. Coach renders every result to text
+itself: `find_games` as compact rows (date, color, opponent with
+ratings, result, time class, opening, game id), `get_game` as
+identity plus a compact move sheet (SAN with judgments; evals in
+pawns at the moves that matter), `get_opening_stats` as the
+repertoire rows. The explain style contract applies to all of it:
+pawns, never centipawns.
+
+**Instructions.** The chat system prompt carries the explain
+register rules (club player, the idea before the number, no
+redundant annotation) plus two chat-specific rules: claims about the
+student's games must come from tool results in this conversation,
+never from memory of the seed or of earlier turns; and game
+references are written as app-relative markdown links
+(`/games/{id}?ply={n}`) using ids returned by tools — never an
+invented id (see "Link discipline" in the design record for why
+there is no `append_game_links` pass here).
+
+**Replay.** A provider that cannot resume renders the transcript
+into its prompt: the shared module helper `render_chat_prompt(
+history, message)` formats prior turns (Student:/Coach: blocks,
+oldest first) followed by the new message, so every provider replays
+identically. Replay is text-level, not block-level — an earlier
+turn's tool trace is not reconstructed; its stored final text is the
+conversational content.
+
+**Budgets.** `_CHAT_MAX_TURNS` (8) bounds each message's agentic
+loop, enforced per provider exactly as the explain and report
+budgets are: an SDK `max_turns` hard stop on the Claude provider,
+the counted grace-round pattern on Copilot. The stall timeout is
+shared with the other flows.
+
 ## Providers
 
 - **v1 — `ClaudeAgentSdkProvider`** (default): `complete` runs
@@ -468,11 +582,24 @@ so a handle cannot be redefined from inside the advice.
   on an **in-process SDK MCP server** (`create_sdk_mcp_server` +
   `@tool` — no separate process, no other tools allowed), with a
   small `max_turns` bound; it yields a `text` event per assistant
-  text block and a `tool` event per engine call. Authentication and
-  billing ride the local Claude Code login — **no API key
-  anywhere**; requires the `claude` CLI installed and logged in.
-  Errors (CLI missing, run failure, empty output) surface as
-  `CoachProviderError`.
+  text block and a `tool` event per engine call. `chat` runs the
+  same agentic mechanics with the full toolkit registered on the
+  in-process MCP server, under `_CHAT_MAX_TURNS`. Resumption: the
+  SDK reports a session id on each run; the provider returns it as
+  `provider_state` on the `done` event, and passes a stored token
+  back through the SDK's `resume` option, sending only the new
+  message (options — system prompt, MCP server, max_turns — are
+  re-supplied on every call, so tools re-register on resume). A
+  resume failure before any event has reached the caller falls back
+  silently to `render_chat_prompt` replay and hands back whatever
+  session id the fresh run reports; one that strikes after partial
+  output has already streamed surfaces as `CoachProviderError`
+  instead — a silent restart there would duplicate or contradict
+  content the student already saw.
+  Authentication and billing ride the local Claude Code login —
+  **no API key anywhere**; requires the `claude` CLI installed and
+  logged in. Errors (CLI missing, run failure, empty output)
+  surface as `CoachProviderError`.
 - **`CopilotSdkProvider`** (`github-copilot`): the official
   `github-copilot-sdk` package, which bundles and drives the Copilot
   CLI runtime. Authentication and billing ride the local GitHub
@@ -495,13 +622,24 @@ so a handle cannot be redefined from inside the advice.
   wrap-up round (a tool result telling the model to finish with what
   it has), and any engine call after that grace round cuts the run
   off — the generator ends and the session is torn down, rather than
-  letting a looping model run indefinitely. Errors (runtime missing,
+  letting a looping model run indefinitely. `chat` registers the
+  full toolkit as custom tools (the only tools the session admits)
+  and applies the same counted budget against `_CHAT_MAX_TURNS`.
+  Resumption: the provider returns the runtime's session id as
+  `provider_state` and resumes it when a stored token names a
+  session the runtime still has, sending only the new message;
+  otherwise it creates a fresh session and replays via
+  `render_chat_prompt`. Errors (runtime missing,
   not logged in, run failure, empty output) surface as
   `CoachProviderError`.
 - **Planned — `anthropic`** (the API SDK; needs `ANTHROPIC_API_KEY`)
   and **`azure-foundry`** (the Azure AI Foundry demo, via the
   Anthropic SDK's `AnthropicFoundry` client). Each is one new class
-  behind `create_provider` and owns its own tool loop for `explain`.
+  behind `create_provider` and owns its own tool loop for `explain`
+  and `chat`. For `chat` these are the always-replay providers the
+  stateless contract exists for: `provider_state` stays None and
+  every turn replays the transcript — which is their natural mode,
+  and server-side prompt caching keeps the stable prefix cheap.
   Neither is selectable yet: `domain.LlmProvider` lists implemented
   providers only, so config rejects them at load. Shipping one means
   adding its Literal value together with its `create_provider`

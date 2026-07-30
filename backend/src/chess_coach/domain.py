@@ -74,6 +74,22 @@ class CoachAgent(LlmConfig):
     label: str
 
 
+class ChatMessage(BaseModel):
+    """One chat turn — the unit both the transcript store and the
+    provider replay path share.
+
+    Stored per thread by storage (docs/03-storage.md) and passed as
+    `history` through the coach provider seam (docs/06-coach.md,
+    `CoachProvider.chat`), which is what makes it a domain type. The
+    stored transcript is the conversation's single source of truth;
+    provider-side sessions are only ever a cache of it.
+    """
+
+    role: Literal["user", "assistant"]
+    content: str  # markdown
+    created_at: int  # unix seconds
+
+
 class Game(BaseModel):
     # Perspective id, minted by ingestion as "{chess.com uuid}:{username}":
     # every other field here is one player's view of the game, so a game

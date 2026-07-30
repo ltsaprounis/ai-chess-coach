@@ -48,6 +48,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.providers = providers
         runs: dict[str, AnalysisRun] = {}
         app.state.runs = runs
+        # One-reply-per-thread guard for the chat send route (docs/07-api.md,
+        # "Chat"): a thread id present here has a reply streaming right now.
+        app.state.chat_inflight = set[str]()
         # Uvicorn's own URL line scrolls away on reloads; print a
         # fresh clickable link each time the app (re)starts.
         print(f"\nAI Chess Coach → http://localhost:{cfg.server.port}\n", flush=True)

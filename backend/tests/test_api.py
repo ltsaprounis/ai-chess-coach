@@ -3,11 +3,12 @@
 import asyncio
 import threading
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import chess
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,9 @@ import chess_coach.api.routes as routes
 from chess_coach.api import create_app
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
+    PROMPT_VERSION,
+    ChatEvent,
+    ChatToolkit,
     CoachProviderError,
     ExplainEvent,
     PositionAnalystFn,
@@ -30,11 +34,16 @@ from chess_coach.config import (
 )
 from chess_coach.domain import (
     AnalyzedGame,
+    ChatMessage,
     CoachAgent,
     Color,
     EvalLine,
     Game,
     GameAnalysis,
+    GameDetail,
+    GameSummary,
+    Opening,
+    OpeningStats,
     RepertoireGame,
     TimeClass,
 )
@@ -50,10 +59,15 @@ from chess_coach.ingestion import UnknownUserError
 from chess_coach.openings import OpeningBook, RepertoireNode
 from chess_coach.storage import (
     Db,
+    ReportKey,
+    get_chat_thread,
     get_explanation,
+    list_chat_messages,
     open_db,
     save_analysis,
     save_explanation,
+    save_report,
+    set_opening,
     upsert_games,
 )
 from tests.coach_scenario import scenario_games
@@ -74,6 +88,26 @@ class StubProvider:
         self.complete_analysts: list[PositionAnalystFn | None] = []
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
+        # --- chat ---
+        # One entry per `chat` call, so tests can inspect what seed/history/
+        # provider_state the route built without reaching into the SSE body.
+        self.chat_calls: list[dict[str, object]] = []
+        self.chat_reply = "Sure, here is more detail."
+        self.chat_provider_state: str | None = "resumed-session-token"
+        self.chat_error: CoachProviderError | None = None
+        # Blocks the chat generator mid-stream until released -- lets a
+        # test hold a reply open to exercise the one-reply-per-thread 409
+        # guard, mirroring StubPool.analyze_release for the one-run-per-
+        # player guard below.
+        self.chat_release: threading.Event | None = None
+        # Set the moment `chat` starts running, so a test can wait for the
+        # first request to actually be in flight instead of racing it with
+        # a fixed sleep.
+        self.chat_started: threading.Event | None = None
+        # A test-supplied probe run against the toolkit the route built,
+        # so tests can assert on find_games/get_game scoping without a
+        # real LLM in the loop.
+        self.chat_toolkit_probe: Callable[[ChatToolkit], Awaitable[None]] | None = None
 
     async def complete(
         self, prompt: str, analyst: PositionAnalystFn | None = None
@@ -94,6 +128,39 @@ class StubProvider:
         if self.explain_error is not None:
             raise self.explain_error
         yield ExplainEvent(type="text", text="loses a pawn.")
+
+    async def chat(
+        self,
+        *,
+        system_context: str,
+        history: list[ChatMessage],
+        message: str,
+        toolkit: ChatToolkit,
+        provider_state: str | None = None,
+    ) -> AsyncGenerator[ChatEvent]:
+        self.chat_calls.append(
+            {
+                "system_context": system_context,
+                "history": history,
+                "message": message,
+                "provider_state": provider_state,
+            }
+        )
+        if self.chat_started is not None:
+            self.chat_started.set()
+        yield ChatEvent(type="tool", text="find_games: looking")
+        if self.chat_toolkit_probe is not None:
+            await self.chat_toolkit_probe(toolkit)
+        if self.chat_release is not None:
+            # Bridged via to_thread: tests release it from the TestClient
+            # thread, not the app's own event loop.
+            await asyncio.to_thread(self.chat_release.wait)
+        yield ChatEvent(type="text", text=self.chat_reply)
+        if self.chat_error is not None:
+            raise self.chat_error
+        yield ChatEvent(
+            type="done", text=self.chat_reply, provider_state=self.chat_provider_state
+        )
 
 
 class StubPool:
@@ -1915,3 +1982,576 @@ def test_analyze_game_ids_skips_other_players_games_and_duplicates(
         client, "/api/players/rival/games", params={"analyzed": "true"}
     ).json()
     assert rival_analyzed == []
+
+
+# --- Chat (docs/07-api.md "Chat") ---------------------------------------
+
+
+def create_thread(client: TestClient, username: str, **body: object) -> httpx.Response:
+    return post(client, f"/api/players/{username}/chat/threads", json=body)
+
+
+def delete_thread(client: TestClient, thread_id: str) -> httpx.Response:
+    return cast(httpx.Response, client.delete(f"/api/chat/threads/{thread_id}"))  # pyright: ignore[reportUnknownMemberType]
+
+
+# --- thread creation: validation matrix ---
+
+
+def test_chat_thread_create_game_scope_without_game_id_is_400(
+    client: TestClient,
+) -> None:
+    assert create_thread(client, "testuser", scope="game").status_code == 400
+
+
+def test_chat_thread_create_game_scope_unknown_game_is_404(client: TestClient) -> None:
+    response = create_thread(client, "testuser", scope="game", game_id="nope")
+    assert response.status_code == 404
+
+
+def test_chat_thread_create_game_scope_rejects_another_players_game(
+    client: TestClient, db_path: Path
+) -> None:
+    """A game id from another player's perspective 404s exactly like an
+    unknown one — a thread can never be created against a game outside
+    {username}."""
+    seed(
+        db_path,
+        [
+            make_game(id="mine", username="testuser"),
+            make_game(id="theirs", username="rival", opponent="testuser"),
+        ],
+    )
+    response = create_thread(client, "testuser", scope="game", game_id="theirs")
+    assert response.status_code == 404
+
+
+def test_chat_thread_create_game_scope_ply_without_analysis_is_409(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")])  # stored, unanalyzed
+    response = create_thread(client, "testuser", scope="game", game_id="g-1", ply=1)
+    assert response.status_code == 409
+
+
+def test_chat_thread_create_game_scope_ply_out_of_range_is_400(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})  # a 2-ply game
+    response = create_thread(client, "testuser", scope="game", game_id="g-1", ply=99)
+    assert response.status_code == 400
+
+
+def test_chat_thread_create_report_scope_rejects_game_id(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")])
+    response = create_thread(client, "testuser", scope="report", game_id="g-1")
+    assert response.status_code == 400
+
+
+def test_chat_thread_create_report_scope_rejects_ply(client: TestClient) -> None:
+    response = create_thread(client, "testuser", scope="report", ply=1)
+    assert response.status_code == 400
+
+
+def test_chat_thread_create_unknown_agent_is_400(client: TestClient) -> None:
+    response = create_thread(client, "testuser", scope="report", agent_id="nope")
+    assert response.status_code == 400
+
+
+def test_chat_thread_create_omitted_agent_uses_default(client: TestClient) -> None:
+    body: Any = create_thread(client, "testuser", scope="report").json()
+    assert body["agent_id"] == "claude"  # config's default_agent
+
+
+def test_chat_thread_create_game_scope_success_returns_thread(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    body: Any = create_thread(
+        client, "testuser", scope="game", game_id="g-1", ply=1, agent_id="beta"
+    ).json()
+    assert body["scope"] == "game"
+    assert body["game_id"] == "g-1"
+    assert body["ply"] == 1
+    assert body["agent_id"] == "beta"
+    assert body["since"] == 0
+    assert body["until"] == 0
+    assert body["time_class"] == ""
+    assert body["provider_state"] is None
+    assert body["created_at"] == body["updated_at"]
+    assert body["id"]  # uuid4, minted by the route
+
+
+def test_chat_thread_create_report_scope_success_stores_the_window(
+    client: TestClient,
+) -> None:
+    body: Any = create_thread(
+        client, "testuser", scope="report", since=100, until=200, time_class="blitz"
+    ).json()
+    assert body["scope"] == "report"
+    assert body["game_id"] is None
+    assert body["ply"] is None
+    assert body["since"] == 100
+    assert body["until"] == 200
+    assert body["time_class"] == "blitz"
+
+
+# --- list / get / delete ---
+
+
+def test_chat_threads_list_most_recently_updated_first(
+    client: TestClient, db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    # A ticking clock (mirroring test_coach_generated_at_survives_a_clock_tick)
+    # so the ordering assertion below cannot pass by same-second accident.
+    clock = [1_700_000_000.0]
+
+    def ticking_time() -> float:
+        clock[0] += 1.0
+        return clock[0]
+
+    monkeypatch.setattr(time, "time", ticking_time)
+
+    first: Any = create_thread(client, "testuser", scope="report").json()
+    second: Any = create_thread(client, "testuser", scope="game", game_id="g-1").json()
+    # Sending a message on the first thread moves its updated_at past the
+    # second thread's creation time.
+    post(client, f"/api/chat/threads/{first['id']}/messages", json={"text": "hi"})
+
+    listed: Any = get(client, "/api/players/testuser/chat/threads").json()
+    assert [t["id"] for t in listed] == [first["id"], second["id"]]
+    assert listed[0]["title"] == "hi"
+    assert listed[0]["messages"] == 2
+
+
+def test_chat_thread_detail_returns_thread_and_transcript(
+    client: TestClient,
+) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    detail: Any = get(client, f"/api/chat/threads/{thread['id']}").json()
+    assert detail["id"] == thread["id"]
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
+    assert detail["messages"][0]["content"] == "hi"
+    assert detail["messages"][1]["content"] == "Sure, here is more detail."
+
+
+def test_chat_thread_detail_404s_on_unknown_thread(client: TestClient) -> None:
+    assert get(client, "/api/chat/threads/nope").status_code == 404
+
+
+def test_chat_thread_delete_204_then_404(client: TestClient) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+
+    assert delete_thread(client, thread["id"]).status_code == 204
+    assert get(client, f"/api/chat/threads/{thread['id']}").status_code == 404
+    assert delete_thread(client, thread["id"]).status_code == 404
+
+
+def test_chat_thread_delete_404s_on_unknown_thread(client: TestClient) -> None:
+    assert delete_thread(client, "nope").status_code == 404
+
+
+# --- send flow: end to end, error path, concurrency, the message cap ---
+
+
+def test_chat_send_message_streams_events_then_persists_exchange(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    thread: Any = create_thread(client, "testuser", scope="game", game_id="g-1").json()
+
+    response = post(
+        client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "What now?"}
+    )
+    assert response.status_code == 200
+    body = response.text
+    assert body.index("event: tool") < body.index("event: text")
+    assert body.index("event: text") < body.index("event: done")
+    assert '"text":"Sure, here is more detail."' in body
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.chat_calls) == 1
+    assert provider.chat_calls[0]["message"] == "What now?"
+    assert provider.chat_calls[0]["provider_state"] is None  # a fresh thread
+
+    db = open_db(db_path)
+    persisted = list_chat_messages(db, thread["id"])
+    stored_thread = get_chat_thread(db, thread["id"])
+    db.close()
+    assert [(m.role, m.content) for m in persisted] == [
+        ("user", "What now?"),
+        ("assistant", "Sure, here is more detail."),
+    ]
+    assert stored_thread is not None
+    assert stored_thread.provider_state == "resumed-session-token"
+
+
+def test_chat_send_message_second_call_resumes_with_the_stored_provider_state(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    thread: Any = create_thread(client, "testuser", scope="game", game_id="g-1").json()
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "one"})
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "two"})
+
+    provider = stub_provider(stub_registry, "claude")
+    assert provider.chat_calls[0]["provider_state"] is None
+    assert provider.chat_calls[1]["provider_state"] == "resumed-session-token"
+    # The stored transcript, not counting the ephemeral cached-turn prepend
+    # (there is none here), is passed back as history on the second call.
+    history = cast(list[ChatMessage], provider.chat_calls[1]["history"])
+    assert [(m.role, m.content) for m in history] == [
+        ("user", "one"),
+        ("assistant", "Sure, here is more detail."),
+    ]
+
+
+def test_chat_send_message_provider_error_persists_nothing_and_clears_state(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    thread: Any = create_thread(client, "testuser", scope="game", game_id="g-1").json()
+    provider = stub_provider(stub_registry, "claude")
+
+    # First, a normal exchange establishes a provider_state, so the
+    # assertion below proves the error path actually clears it rather
+    # than it having simply never been set.
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+    db = open_db(db_path)
+    before = get_chat_thread(db, thread["id"])
+    db.close()
+    assert before is not None
+    assert before.provider_state == "resumed-session-token"
+
+    provider.chat_error = CoachProviderError("agent crashed")
+    response = post(
+        client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "again"}
+    )
+    assert response.status_code == 200
+    body = response.text
+    assert "event: error" in body
+    assert '"message":"agent crashed"' in body
+    assert "event: done" not in body
+
+    db = open_db(db_path)
+    persisted = list_chat_messages(db, thread["id"])
+    after = get_chat_thread(db, thread["id"])
+    db.close()
+    assert len(persisted) == 2  # only the first exchange; nothing appended
+    assert after is not None
+    assert after.provider_state is None
+
+
+def test_chat_send_message_409s_while_a_reply_is_already_streaming(
+    client: TestClient, stub_registry: dict[str, object]
+) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    provider.chat_release = threading.Event()
+    provider.chat_started = threading.Event()
+
+    results: list[httpx.Response] = []
+
+    def send_first() -> None:
+        results.append(
+            post(
+                client,
+                f"/api/chat/threads/{thread['id']}/messages",
+                json={"text": "first"},
+            )
+        )
+
+    first_request = threading.Thread(target=send_first)
+    first_request.start()
+    try:
+        # Deterministic handoff: wait for the stub to actually be running
+        # (proving the route already marked the thread in-flight) rather
+        # than racing a fixed sleep against the background thread.
+        assert provider.chat_started.wait(timeout=5)
+        second = post(
+            client,
+            f"/api/chat/threads/{thread['id']}/messages",
+            json={"text": "second"},
+        )
+        assert second.status_code == 409
+        assert "already streaming" in second.json()["error"]["message"]
+    finally:
+        provider.chat_release.set()
+        first_request.join(timeout=5)
+
+    assert results[0].status_code == 200
+
+
+def test_chat_send_message_409s_at_the_message_cap(client: TestClient) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    for i in range(20):  # 20 exchanges = 40 stored messages = the cap
+        response = post(
+            client,
+            f"/api/chat/threads/{thread['id']}/messages",
+            json={"text": f"message {i}"},
+        )
+        assert response.status_code == 200
+
+    response = post(
+        client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "one more"}
+    )
+    assert response.status_code == 409
+    assert "message cap" in response.json()["error"]["message"]
+
+
+def test_chat_send_message_404s_on_unknown_thread(client: TestClient) -> None:
+    response = post(client, "/api/chat/threads/nope/messages", json={"text": "hi"})
+    assert response.status_code == 404
+
+
+def test_chat_send_message_400s_on_blank_text(client: TestClient) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    response = post(
+        client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "   "}
+    )
+    assert response.status_code == 400
+
+
+# --- seeds and history ---
+
+
+def test_chat_send_message_game_scope_with_ply_seeds_eval_lines(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    thread: Any = create_thread(
+        client, "testuser", scope="game", game_id="g-1", ply=1
+    ).json()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "why?"})
+
+    assert len(stub_pool(stub_registry).eval_lines_calls) == 1  # seeded once
+
+    provider = stub_provider(stub_registry, "claude")
+    system_context = cast(str, provider.chat_calls[0]["system_context"])
+    assert "## Candidate lines" in system_context
+    assert "Engine analysis is available" in system_context
+
+
+def test_chat_send_message_engine_error_seeding_eval_lines_is_502(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    thread: Any = create_thread(
+        client, "testuser", scope="game", game_id="g-1", ply=1
+    ).json()
+    stub_pool(stub_registry).eval_lines_error = EngineError("engine died")
+
+    response = post(
+        client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "why?"}
+    )
+    assert response.status_code == 502
+    assert stub_provider(stub_registry, "claude").chat_calls == []
+
+
+def test_chat_send_message_without_engine_pool_passes_engine_unavailable(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry: dict[str, object] = {}
+
+    def fake_create_provider(cfg: CoachAgent, api_key: object = None) -> StubProvider:
+        provider = StubProvider(advice=f"advice from {cfg.id}")
+        registry[f"provider:{cfg.id}"] = provider
+        return provider
+
+    monkeypatch.setattr(app_module, "create_provider", fake_create_provider)
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    config = AppConfig(
+        engine=EngineConfig(bin_path=tmp_path / "missing-stockfish"),
+        storage=StorageConfig(db_path=db_path),
+        openings=OpeningsConfig(book_dir=TESTDATA / "minibook"),
+        anthropic_api_key="sk-test",
+    )
+    with TestClient(create_app(config)) as no_pool_client:
+        thread: Any = create_thread(
+            no_pool_client, "testuser", scope="game", game_id="g-1", ply=1
+        ).json()
+        post(
+            no_pool_client,
+            f"/api/chat/threads/{thread['id']}/messages",
+            json={"text": "why?"},
+        )
+    provider = cast(StubProvider, registry["provider:claude"])
+    system_context = cast(str, provider.chat_calls[0]["system_context"])
+    assert "Engine analysis is not available" in system_context
+    assert "## Candidate lines" not in system_context
+
+
+def test_chat_send_message_report_scope_seeds_report_context(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed_analyzed(
+        db_path,
+        [make_analyzed("g-1", ["e4", "e5", "Nf3", "Nc6"], losses=[0, 40])],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "so?"})
+
+    provider = stub_provider(stub_registry, "claude")
+    system_context = cast(str, provider.chat_calls[0]["system_context"])
+    assert "testuser" in system_context
+    assert "Engine analysis is available" in system_context
+
+
+def test_chat_send_message_prepends_cached_explanation_as_first_history_turn(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    db = open_db(db_path)
+    save_explanation(db, "g-1", 1, "claude", "Cached explanation text.")
+    db.close()
+    thread: Any = create_thread(
+        client, "testuser", scope="game", game_id="g-1", ply=1
+    ).json()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "why?"})
+
+    provider = stub_provider(stub_registry, "claude")
+    history = cast(list[ChatMessage], provider.chat_calls[0]["history"])
+    assert history[0].role == "assistant"
+    assert history[0].content == "Cached explanation text."
+    assert history[0].created_at == thread["created_at"]
+
+
+def test_chat_send_message_prepends_cached_advice_as_first_history_turn(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    db = open_db(db_path)
+    key = ReportKey(
+        username="testuser",
+        agent_id="claude",
+        prompt_version=PROMPT_VERSION,
+        since=thread["since"],
+        until=thread["until"],
+        time_class=thread["time_class"],
+    )
+    save_report(db, key, "prompt text", "Cached advice text.", games_analyzed=5)
+    db.close()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "so?"})
+
+    provider = stub_provider(stub_registry, "claude")
+    history = cast(list[ChatMessage], provider.chat_calls[0]["history"])
+    assert history[0].role == "assistant"
+    assert history[0].content == "Cached advice text."
+    assert history[0].created_at == thread["created_at"]
+
+
+# --- toolkit: cross-player guard, find_games/opening_stats scoping ---
+
+
+def test_chat_toolkit_get_game_cross_player_guard(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="mine", username="testuser"),
+            make_game(id="theirs", username="rival", opponent="testuser"),
+        ],
+    )
+    thread: Any = create_thread(client, "testuser", scope="game", game_id="mine").json()
+    provider = stub_provider(stub_registry, "claude")
+    probed: list[GameDetail | None] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        probed.append(await toolkit.get_game("theirs"))
+        probed.append(await toolkit.get_game("mine"))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    assert probed[0] is None  # another player's game -- refused
+    assert probed[1] is not None
+    assert probed[1].id == "mine"
+
+
+def test_chat_toolkit_find_games_scoped_to_thread_username(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(
+        db_path,
+        [
+            make_game(id="mine-1", username="testuser", opponent="rival", result="win"),
+            make_game(
+                id="mine-2", username="testuser", opponent="hikaru", result="loss"
+            ),
+            make_game(id="theirs", username="rival", opponent="testuser"),
+        ],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    found: list[GameSummary] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        found.extend(await toolkit.find_games(opponent="rival"))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    assert [g.id for g in found] == ["mine-1"]
+
+
+def test_chat_toolkit_find_games_limit_is_capped(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(
+        db_path,
+        [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(30)],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    found: list[GameSummary] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        found.extend(await toolkit.find_games(limit=9999))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    assert 0 < len(found) < 30  # capped well below the model's own ask
+
+
+def test_chat_toolkit_opening_stats_uses_the_thread_window(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    old_opening = Opening(eco="C20", name="King's Pawn Game", ply=1)
+    new_opening = Opening(eco="D00", name="Queen's Pawn Game", ply=1)
+    seed_analyzed(
+        db_path,
+        [
+            make_analyzed("g-old", ["e4", "e5"], end_time=100, opening=old_opening),
+            make_analyzed("g-new", ["d4", "d5"], end_time=500, opening=new_opening),
+        ],
+    )
+    # seed_analyzed stores games + analyses only; opening_stats reads from
+    # storage's own classified-opening columns, set separately here (the
+    # sync route's job in production, via classify_backlog).
+    db = open_db(db_path)
+    set_opening(db, "g-old", old_opening)
+    set_opening(db, "g-new", new_opening)
+    db.close()
+
+    thread: Any = create_thread(client, "testuser", scope="report", since=200).json()
+    provider = stub_provider(stub_registry, "claude")
+    found: list[OpeningStats] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        found.extend(await toolkit.opening_stats())
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    assert [o.eco for o in found] == ["D00"]

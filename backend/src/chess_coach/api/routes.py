@@ -2,18 +2,30 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from typing import Annotated, cast
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
+from chess_coach.api.chat import (
+    CHAT_MESSAGE_CAP,
+    ApiChatToolkit,
+    cached_assistant_turn,
+    game_scope_context,
+    report_scope_context,
+    time_class_or_none,
+    window_or_none,
+)
 from chess_coach.api.runs import MAX_FINISHED_RUNS, AnalysisRun, evict_finished
 from chess_coach.coach import (
     PROMPT_VERSION,
+    ChatToolkit,
     CoachProvider,
     CoachProviderError,
     PlayerHighlights,
@@ -27,6 +39,7 @@ from chess_coach.coach import (
 )
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
+    ChatMessage,
     Color,
     EvalLine,
     Game,
@@ -49,18 +62,28 @@ from chess_coach.engine import (
 from chess_coach.ingestion import sync_games
 from chess_coach.openings import OpeningBook, RepertoireNode, build_repertoire
 from chess_coach.storage import (
+    ChatScope,
+    ChatThread,
+    ChatThreadSummary,
     Db,
     GameFilters,
     ReportKey,
+    append_chat_exchange,
+    clear_chat_provider_state,
     count_games,
     count_games_needing_analysis,
+    create_chat_thread,
+    delete_chat_thread,
     games_missing_opening,
     games_needing_analysis,
+    get_chat_thread,
     get_explanation,
     get_game,
     get_report,
     latest_game_time,
     list_analyzed_games,
+    list_chat_messages,
+    list_chat_threads,
     list_games,
     list_players,
     list_repertoire_games,
@@ -101,12 +124,29 @@ def _providers(request: Request) -> dict[str, CoachProvider]:
     return cast(dict[str, CoachProvider], request.app.state.providers)
 
 
+def _chat_inflight(request: Request) -> set[str]:
+    return cast(set[str], request.app.state.chat_inflight)
+
+
 DbDep = Annotated[Db, Depends(_db)]
 BookDep = Annotated[OpeningBook, Depends(_book)]
 CfgDep = Annotated[AppConfig, Depends(_cfg)]
 PoolDep = Annotated[AnalysisPool | None, Depends(_pool)]
 RunsDep = Annotated[dict[str, AnalysisRun], Depends(_runs)]
 ProvidersDep = Annotated[dict[str, CoachProvider], Depends(_providers)]
+ChatInFlightDep = Annotated[set[str], Depends(_chat_inflight)]
+
+
+def _build_analyst(pool: AnalysisPool, cfg: AppConfig) -> PositionAnalystFn:
+    """The API layer's `PositionAnalystFn` implementation, wrapping the
+    engine pool with config depth/multipv -- this is where coach meets
+    engine; they never import each other. Shared by explain, coach, and
+    chat (docs/07-api.md)."""
+
+    async def _analyst(fen: str) -> list[EvalLine]:
+        return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
+
+    return _analyst
 
 
 class SyncResult(BaseModel):
@@ -589,13 +629,7 @@ async def explain_move(
     except EngineError as exc:
         raise HTTPException(status_code=502, detail=f"engine failure: {exc}") from exc
     prompt = render_explain_prompt(ctx, lines)
-
-    # The API layer's PositionAnalystFn implementation, wrapping the engine
-    # pool — this is where coach meets engine; they never import each other.
-    async def _analyst(fen: str) -> list[EvalLine]:
-        return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
-
-    analyst: PositionAnalystFn = _analyst
+    analyst = _build_analyst(pool, cfg)
 
     async def stream() -> AsyncIterator[dict[str, str]]:
         chunks: list[str] = []
@@ -821,11 +855,7 @@ async def coach_player(
     # provider to its single-turn path and the report still generates.
     analyst: PositionAnalystFn | None = None
     if pool is not None:
-
-        async def _analyst(fen: str) -> list[EvalLine]:
-            return await pool.eval_lines(fen, cfg.engine.depth, cfg.engine.multipv)
-
-        analyst = _analyst
+        analyst = _build_analyst(pool, cfg)
 
     try:
         advice = await provider.complete(prompt, analyst)
@@ -849,3 +879,249 @@ async def coach_player(
         generated_at=generated_at,
         games_analyzed=report.games_analyzed,
     )
+
+
+# --- Chat (docs/07-api.md "Chat"; docs/future-improvements/coach-chat.md
+# --- is the design record) ---------------------------------------------
+
+
+class ChatThreadCreateRequest(BaseModel):
+    scope: ChatScope
+    agent_id: str | None = None  # None -> config default agent
+    game_id: str | None = None  # scope="game" only
+    ply: int | None = None  # scope="game" only; requires analysis
+    # The same window/time-control scope /report and /coach take, pinned
+    # for the thread's life.
+    since: int | None = None
+    until: int | None = None
+    time_class: TimeClass | None = None
+
+
+@router.post("/players/{username}/chat/threads")
+def start_chat_thread(
+    username: str,
+    body: ChatThreadCreateRequest,
+    db: DbDep,
+    cfg: CfgDep,
+    providers: ProvidersDep,
+) -> ChatThread:
+    """Create a chat thread anchored to a game (optionally a ply) or to
+    the report window; mints a uuid4 thread id.
+
+    `scope="game"` requires `game_id` (400 without; 404 for an unknown
+    game, or one belonging to another player); a `ply` anchor additionally
+    requires analysis (409 unanalyzed, 400 out of range, mirroring
+    `/explain`). `scope="report"` rejects `game_id`/`ply` (400). An
+    unknown `agent_id` is 400; omitted means the configured default agent.
+    """
+    user = username.lower()
+    agent_id = cfg.coach.default_agent if body.agent_id is None else body.agent_id
+    if providers.get(agent_id) is None:
+        raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
+
+    if body.scope == "report":
+        if body.game_id is not None or body.ply is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="scope=report does not take a game_id or ply",
+            )
+    else:  # scope == "game"
+        if body.game_id is None:
+            raise HTTPException(status_code=400, detail="scope=game requires game_id")
+        game = get_game(db, body.game_id)
+        if game is None or game.username != user:
+            # A game id from another player's perspective 404s exactly like
+            # an unknown one — the thread can never be created against a
+            # game outside {username}.
+            raise HTTPException(status_code=404, detail=f"unknown game: {body.game_id}")
+        if body.ply is not None:
+            if game.analysis is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="no analysis for this game — analyze this game first",
+                )
+            try:
+                build_move_context(game, game.analysis, game.opening, body.ply)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return create_chat_thread(
+        db,
+        thread_id=str(uuid4()),
+        username=user,
+        agent_id=agent_id,
+        scope=body.scope,
+        game_id=body.game_id,
+        ply=body.ply,
+        since=body.since if body.since is not None else 0,
+        until=body.until if body.until is not None else 0,
+        time_class=body.time_class if body.time_class is not None else "",
+    )
+
+
+@router.get("/players/{username}/chat/threads")
+def player_chat_threads(username: str, db: DbDep) -> list[ChatThreadSummary]:
+    """The player's threads, most recently updated first."""
+    return list_chat_threads(db, username.lower())
+
+
+class ChatThreadDetail(ChatThread):
+    """Thread + full transcript, oldest first."""
+
+    messages: list[ChatMessage]
+
+
+@router.get("/chat/threads/{thread_id}")
+def chat_thread_detail(thread_id: str, db: DbDep) -> ChatThreadDetail:
+    thread = get_chat_thread(db, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail=f"unknown chat thread: {thread_id}")
+    messages = list_chat_messages(db, thread_id)
+    return ChatThreadDetail(**thread.model_dump(), messages=messages)
+
+
+@router.delete("/chat/threads/{thread_id}", status_code=204)
+def remove_chat_thread(thread_id: str, db: DbDep) -> None:
+    if not delete_chat_thread(db, thread_id):
+        raise HTTPException(status_code=404, detail=f"unknown chat thread: {thread_id}")
+
+
+class ChatMessageRequest(BaseModel):
+    text: str
+
+
+class ChatSseError(BaseModel):
+    """Mid-stream `error` SSE payload — too late for an HTTPException,
+    mirroring ExplainError/EvalError."""
+
+    message: str
+
+
+@router.post("/chat/threads/{thread_id}/messages")
+async def send_chat_message(
+    thread_id: str,
+    body: ChatMessageRequest,
+    db: DbDep,
+    cfg: CfgDep,
+    pool: PoolDep,
+    providers: ProvidersDep,
+    inflight: ChatInFlightDep,
+) -> EventSourceResponse:
+    """SSE reply to one chat message: `text`/`tool` events mirroring coach
+    `ChatEvent` while the agent works, then `done` with the full reply —
+    persisted (with the new `provider_state`) before `done` is emitted.
+    `error` on a mid-stream `CoachProviderError`: nothing persisted,
+    `provider_state` cleared. 404 unknown thread; 409 while a reply is
+    already streaming for this thread, or the thread is at the message cap.
+    """
+    if thread_id in inflight:
+        raise HTTPException(
+            status_code=409,
+            detail="a reply is already streaming for this thread",
+        )
+    inflight.add(thread_id)
+    entered_stream = False
+    try:
+        text = body.text.strip()
+        if not text:
+            raise HTTPException(
+                status_code=400, detail="message text must not be blank"
+            )
+        thread = await run_in_threadpool(get_chat_thread, db, thread_id)
+        if thread is None:
+            raise HTTPException(
+                status_code=404, detail=f"unknown chat thread: {thread_id}"
+            )
+        history = await run_in_threadpool(list_chat_messages, db, thread_id)
+        if len(history) >= CHAT_MESSAGE_CAP:
+            raise HTTPException(
+                status_code=409,
+                detail="this thread is at the message cap — start a new chat",
+            )
+        provider = providers.get(thread.agent_id)
+        if provider is None:
+            raise HTTPException(
+                status_code=400, detail=f"unknown coach agent: {thread.agent_id}"
+            )
+
+        analyst = _build_analyst(pool, cfg) if pool is not None else None
+        engine_available = analyst is not None
+        if thread.scope == "game":
+            system_context = await game_scope_context(db, thread, analyst)
+        else:
+            system_context = await report_scope_context(db, thread, engine_available)
+        cached_turn = await cached_assistant_turn(db, thread)
+        full_history = history if cached_turn is None else [cached_turn, *history]
+
+        toolkit: ChatToolkit = ApiChatToolkit(
+            db,
+            thread.username,
+            since=window_or_none(thread.since),
+            until=window_or_none(thread.until),
+            time_class=time_class_or_none(thread.time_class),
+            analyst=analyst,
+        )
+        entered_stream = True
+    finally:
+        if not entered_stream:
+            inflight.discard(thread_id)
+
+    async def stream() -> AsyncIterator[dict[str, str]]:
+        persisted = False
+        try:
+            # aclosing: a client disconnect closes this generator, which
+            # must abort generation now, not at GC time.
+            async with aclosing(
+                provider.chat(
+                    system_context=system_context,
+                    history=full_history,
+                    message=text,
+                    toolkit=toolkit,
+                    provider_state=thread.provider_state,
+                )
+            ) as events:
+                async for event in events:
+                    if event.type == "done":
+                        now = int(time.time())
+                        await run_in_threadpool(
+                            append_chat_exchange,
+                            db,
+                            thread_id,
+                            ChatMessage(role="user", content=text, created_at=now),
+                            ChatMessage(
+                                role="assistant", content=event.text, created_at=now
+                            ),
+                            event.provider_state,
+                        )
+                        persisted = True
+                        yield {"event": "done", "data": event.model_dump_json()}
+                        return
+                    yield {"event": event.type, "data": event.model_dump_json()}
+        except CoachProviderError as exc:
+            # Too late for an HTTPException: events are already on the
+            # wire, so the failure becomes an SSE event instead.
+            yield {
+                "event": "error",
+                "data": ChatSseError(message=str(exc)).model_dump_json(),
+            }
+            return
+        finally:
+            # Client disconnect (GeneratorExit, caught by neither branch
+            # above) and the provider-error path both leave `persisted`
+            # False: the discarded turn may have reached the provider's
+            # warm session, so the next turn must replay from the stored
+            # transcript rather than resume a diverged one. The two
+            # cleanups are independent: freeing the slot is sync and
+            # cannot fail, so it happens first — a state-clear failure
+            # must not leave the thread answering 409 forever. The clear
+            # itself runs shielded because the disconnect path delivers
+            # cancellation right here, and an unshielded await would be
+            # cancelled before the write lands — on exactly the path the
+            # clear exists for.
+            inflight.discard(thread_id)
+            if not persisted:
+                await asyncio.shield(
+                    run_in_threadpool(clear_chat_provider_state, db, thread_id)
+                )
+
+    return EventSourceResponse(stream())

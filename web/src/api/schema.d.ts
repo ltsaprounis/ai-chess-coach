@@ -315,6 +315,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/{username}/chat/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Player Chat Threads
+         * @description The player's threads, most recently updated first.
+         */
+        get: operations["player_chat_threads_api_players__username__chat_threads_get"];
+        put?: never;
+        /**
+         * Start Chat Thread
+         * @description Create a chat thread anchored to a game (optionally a ply) or to
+         *     the report window; mints a uuid4 thread id.
+         *
+         *     `scope="game"` requires `game_id` (400 without; 404 for an unknown
+         *     game, or one belonging to another player); a `ply` anchor additionally
+         *     requires analysis (409 unanalyzed, 400 out of range, mirroring
+         *     `/explain`). `scope="report"` rejects `game_id`/`ply` (400). An
+         *     unknown `agent_id` is 400; omitted means the configured default agent.
+         */
+        post: operations["start_chat_thread_api_players__username__chat_threads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chat Thread Detail */
+        get: operations["chat_thread_detail_api_chat_threads__thread_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove Chat Thread */
+        delete: operations["remove_chat_thread_api_chat_threads__thread_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/threads/{thread_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Chat Message
+         * @description SSE reply to one chat message: `text`/`tool` events mirroring coach
+         *     `ChatEvent` while the agent works, then `done` with the full reply —
+         *     persisted (with the new `provider_state`) before `done` is emitted.
+         *     `error` on a mid-stream `CoachProviderError`: nothing persisted,
+         *     `provider_state` cleared. 404 unknown thread; 409 while a reply is
+         *     already streaming for this thread, or the thread is at the message cap.
+         */
+        post: operations["send_chat_message_api_chat_threads__thread_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -362,6 +436,167 @@ export interface components {
              * @default false
              */
             played: boolean;
+        };
+        /**
+         * ChatMessage
+         * @description One chat turn — the unit both the transcript store and the
+         *     provider replay path share.
+         *
+         *     Stored per thread by storage (docs/03-storage.md) and passed as
+         *     `history` through the coach provider seam (docs/06-coach.md,
+         *     `CoachProvider.chat`), which is what makes it a domain type. The
+         *     stored transcript is the conversation's single source of truth;
+         *     provider-side sessions are only ever a cache of it.
+         */
+        ChatMessage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: number;
+        };
+        /** ChatMessageRequest */
+        ChatMessageRequest: {
+            /** Text */
+            text: string;
+        };
+        /** ChatThread */
+        ChatThread: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Agent Id */
+            agent_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "report" | "game";
+            /** Game Id */
+            game_id?: string | null;
+            /** Ply */
+            ply?: number | null;
+            /**
+             * Since
+             * @default 0
+             */
+            since: number;
+            /**
+             * Until
+             * @default 0
+             */
+            until: number;
+            /**
+             * Time Class
+             * @default
+             */
+            time_class: string;
+            /** Provider State */
+            provider_state?: string | null;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ChatThreadCreateRequest */
+        ChatThreadCreateRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "report" | "game";
+            /** Agent Id */
+            agent_id?: string | null;
+            /** Game Id */
+            game_id?: string | null;
+            /** Ply */
+            ply?: number | null;
+            /** Since */
+            since?: number | null;
+            /** Until */
+            until?: number | null;
+            /** Time Class */
+            time_class?: ("bullet" | "blitz" | "rapid" | "daily") | null;
+        };
+        /**
+         * ChatThreadDetail
+         * @description Thread + full transcript, oldest first.
+         */
+        ChatThreadDetail: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Agent Id */
+            agent_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "report" | "game";
+            /** Game Id */
+            game_id?: string | null;
+            /** Ply */
+            ply?: number | null;
+            /**
+             * Since
+             * @default 0
+             */
+            since: number;
+            /**
+             * Until
+             * @default 0
+             */
+            until: number;
+            /**
+             * Time Class
+             * @default
+             */
+            time_class: string;
+            /** Provider State */
+            provider_state?: string | null;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /** Messages */
+            messages: components["schemas"]["ChatMessage"][];
+        };
+        /**
+         * ChatThreadSummary
+         * @description One thread-list row.
+         */
+        ChatThreadSummary: {
+            /** Id */
+            id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "report" | "game";
+            /** Game Id */
+            game_id: string | null;
+            /** Ply */
+            ply: number | null;
+            /** Since */
+            since: number;
+            /** Until */
+            until: number;
+            /** Time Class */
+            time_class: string;
+            /** Agent Id */
+            agent_id: string;
+            /** Title */
+            title: string;
+            /** Messages */
+            messages: number;
+            /** Updated At */
+            updated_at: number;
         };
         /**
          * CoachAgentInfo
@@ -1436,6 +1671,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoachResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    player_chat_threads_api_players__username__chat_threads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatThreadSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_chat_thread_api_players__username__chat_threads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatThreadCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatThread"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_thread_detail_api_chat_threads__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatThreadDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_chat_thread_api_chat_threads__thread_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_chat_message_api_chat_threads__thread_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
