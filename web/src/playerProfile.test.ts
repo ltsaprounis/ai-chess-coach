@@ -131,6 +131,11 @@ describe("errorExampleLabel", () => {
   });
 });
 
+// The example link must deep-link to the mistake's position via the
+// Game page's `?ply=` param when the data carries one
+// (docs/08-frontend.md "Dashboard"), and fall back to the bare game
+// link when it doesn't — shared by the Dashboard's Recurring-mistakes
+// table and the profile card.
 describe("errorExampleHref", () => {
   it("is null with no example game to link to", () => {
     expect(errorExampleHref(pattern())).toBeNull();
@@ -142,9 +147,26 @@ describe("errorExampleHref", () => {
     );
   });
 
+  it("links the game alone when the ply is absent, not just null", () => {
+    expect(
+      errorExampleHref(
+        pattern({
+          example_game_id: "abc-123-uuid:leo",
+          example_ply: undefined,
+        }),
+      ),
+    ).toBe("/games/abc-123-uuid:leo");
+  });
+
   it("links to the game's ply deep link when a ply is known", () => {
     expect(
       errorExampleHref(pattern({ example_game_id: "g1", example_ply: 27 })),
     ).toBe("/games/g1?ply=27");
+  });
+
+  it("keeps ply 0 — the initial position is a valid deep link", () => {
+    expect(
+      errorExampleHref(pattern({ example_game_id: "g1", example_ply: 0 })),
+    ).toBe("/games/g1?ply=0");
   });
 });
