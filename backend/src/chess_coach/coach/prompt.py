@@ -7,11 +7,19 @@ are effectively UI changes too.
 """
 
 import re
-from collections import defaultdict
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from chess_coach.coach.context import MoveContext, build_move_context
+from chess_coach.coach.repertoire import (
+    REPERTOIRE_SAMPLE_FLOOR,
+    FacedFamily,
+    Family,
+    FamilyRecord,
+    family_impact,
+    family_score,
+    rollup_chosen_families,
+    rollup_faced_families,
+)
 from chess_coach.domain import (
     MATE_SCORE,
     ChatMessage,
@@ -19,8 +27,11 @@ from chess_coach.domain import (
     ErrorPattern,
     EvalLine,
     GameDetail,
+    MonthStats,
     OpeningStats,
+    PlayerProfile,
     PlayerReport,
+    ProfileOpening,
     Record,
 )
 
@@ -28,6 +39,13 @@ from chess_coach.domain import (
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
 PROMPT_VERSION = "2026-07-opponent-citations"
+
+# The narrative's own version, independent of PROMPT_VERSION above -- the
+# report template and the profile prompt evolve on separate schedules
+# (docs/06-coach.md, "Player profile"). Row metadata, never a cache key:
+# a bump only flags the stored narrative as stale in the UI and must
+# never trigger a silent re-bill.
+PROFILE_PROMPT_VERSION = "profile-v1"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -59,8 +77,6 @@ CHAT_SYSTEM_PROMPT = (
 # Losses this large can only come from mate scores (evals clamp mate to
 # +/-MATE_SCORE); render them as words, not nonsense centipawns.
 _MATE_SCALE = MATE_SCORE - 1_000
-
-_REPERTOIRE_SAMPLE_FLOOR = 5
 
 _INSTRUCTIONS = (
     "## Instructions\n"
@@ -109,7 +125,7 @@ def render_prompt(report: PlayerReport) -> str:
     sections = [
         _student_section(report),
         _phase_section(report),
-        _trend_section(report),
+        _trend_section(report.months),
         _terminations_section(report),
         _repertoire_section(report),
         _error_patterns_section(report, handles),
@@ -264,15 +280,20 @@ def _rate(count: int, denom: int) -> str:
 # --- trend, terminations ------------------------------------------------
 
 
-def _trend_section(report: PlayerReport) -> str:
-    if not report.months:
+def _trend_section(months: list[MonthStats]) -> str:
+    """Renders `months` as-is -- shared by the report prompt (its own
+    `report.months`) and `render_profile_prompt`, which renders the
+    profile's capped `months` through the same table rather than
+    growing a second trend format.
+    """
+    if not months:
         return ""
     lines = [
         "## Trend",
         "| Month | Games | Rating | ACPL | Blunder % |",
         "|---|---|---|---|---|",
     ]
-    for m in report.months:
+    for m in months:
         rating = str(m.rating_end) if m.rating_end is not None else "n/a"
         acpl = _pawns_or_na(m.acpl)
         blunder_pct = (
@@ -310,41 +331,12 @@ def _terminations_section(report: PlayerReport) -> str:
 
 
 # --- repertoire, split by color -----------------------------------------
-
-
-@dataclass
-class _FamilyRecord:
-    """Fields shared by both rollup partitions -- enough for impact/score."""
-
-    games: int
-    wins: int
-    losses: int
-    draws: int
-    opening_acpl: float | None
-    avg_cp_loss: float | None
-
-
-@dataclass
-class _Family(_FamilyRecord):
-    """A chosen-partition family: one (color, system) rolled up."""
-
-    label: str
-    system: str
-    first_moves: str
-
-
-@dataclass
-class _FacedFamily(_FamilyRecord):
-    """A faced-partition family: one (color, name root) rolled up.
-
-    No `system` -- for faced lines the name is the opponent's choice, and
-    the player's own reply (hence `system`) varies member to member, so
-    there is no single system to show (docs/06-coach.md, "Family
-    rollup").
-    """
-
-    label: str
-    first_moves: str
+#
+# The family rollup itself (partition by `faced`, collapse by key,
+# move-weighted sums) lives in `chess_coach.coach.repertoire`, shared
+# with `profile.py`'s repertoire rows -- everything below is this
+# module's own concern: sample-floor filtering, sorting and markdown
+# rendering (docs/06-coach.md, "Family rollup").
 
 
 def _repertoire_section(report: PlayerReport) -> str:
@@ -368,36 +360,36 @@ def _repertoire_color_section(label: str, rows: list[OpeningStats]) -> str:
     families from *both* partitions fold into one shared long-tail line.
     """
     total_games = sum(r.games for r in rows)
-    chosen_families = _rollup_chosen_families([r for r in rows if not r.faced])
-    faced_families = _rollup_faced_families([r for r in rows if r.faced])
+    chosen_families = rollup_chosen_families([r for r in rows if not r.faced])
+    faced_families = rollup_faced_families([r for r in rows if r.faced])
 
-    chosen_main = [f for f in chosen_families if f.games >= _REPERTOIRE_SAMPLE_FLOOR]
-    chosen_tail = [f for f in chosen_families if f.games < _REPERTOIRE_SAMPLE_FLOOR]
-    faced_main = [f for f in faced_families if f.games >= _REPERTOIRE_SAMPLE_FLOOR]
-    faced_tail = [f for f in faced_families if f.games < _REPERTOIRE_SAMPLE_FLOOR]
-    chosen_main.sort(key=lambda f: -_family_impact(f))
-    faced_main.sort(key=lambda f: -_family_impact(f))
+    chosen_main = [f for f in chosen_families if f.games >= REPERTOIRE_SAMPLE_FLOOR]
+    chosen_tail = [f for f in chosen_families if f.games < REPERTOIRE_SAMPLE_FLOOR]
+    faced_main = [f for f in faced_families if f.games >= REPERTOIRE_SAMPLE_FLOOR]
+    faced_tail = [f for f in faced_families if f.games < REPERTOIRE_SAMPLE_FLOOR]
+    chosen_main.sort(key=lambda f: -family_impact(f))
+    faced_main.sort(key=lambda f: -family_impact(f))
 
     parts = [
         f"### As {label} ({_plural(total_games, 'game')})",
         _chosen_subtable(chosen_main),
         _faced_subtable(faced_main, label),
     ]
-    tail: list[_FamilyRecord] = [*chosen_tail, *faced_tail]
+    tail: list[FamilyRecord] = [*chosen_tail, *faced_tail]
     if tail:
         tail_games = sum(f.games for f in tail)
         parts.append(
             f"Long tail: {_plural(len(tail), 'line')} under "
-            f"{_REPERTOIRE_SAMPLE_FLOOR} games, {_plural(tail_games, 'game')} total."
+            f"{REPERTOIRE_SAMPLE_FLOOR} games, {_plural(tail_games, 'game')} total."
         )
     return "\n".join(parts)
 
 
-def _chosen_subtable(families: list[_Family]) -> str:
+def _chosen_subtable(families: list[Family]) -> str:
     lines = ["#### Systems you chose"]
     if not families:
         lines.append(
-            f"No line yet reaches the {_REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
+            f"No line yet reaches the {REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
         )
         return "\n".join(lines)
     lines += [
@@ -412,17 +404,17 @@ def _chosen_subtable(families: list[_Family]) -> str:
         # legible on its own, not just inferable from the full line.
         lines.append(
             f"| {f.label} -- {f.system} ({f.first_moves}) | {f.games} "
-            f"| {_family_score(f)}% | {_pawns_or_na(f.opening_acpl)} "
+            f"| {_family_score_pct(f)}% | {_pawns_or_na(f.opening_acpl)} "
             f"| {_pawns_or_na(f.avg_cp_loss)} |"
         )
     return "\n".join(lines)
 
 
-def _faced_subtable(families: list[_FacedFamily], label: str) -> str:
+def _faced_subtable(families: list[FacedFamily], label: str) -> str:
     lines = [f"#### What you face as {label}"]
     if not families:
         lines.append(
-            f"No line yet reaches the {_REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
+            f"No line yet reaches the {REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
         )
         return "\n".join(lines)
     lines += [
@@ -435,121 +427,16 @@ def _faced_subtable(families: list[_FacedFamily], label: str) -> str:
         # and the player's own reply to it.
         lines.append(
             f"| {f.label} ({f.first_moves}) | {f.games} "
-            f"| {_family_score(f)}% | {_pawns_or_na(f.opening_acpl)} "
+            f"| {_family_score_pct(f)}% | {_pawns_or_na(f.opening_acpl)} "
             f"| {_pawns_or_na(f.avg_cp_loss)} |"
         )
     return "\n".join(lines)
 
 
-def _rollup_chosen_families(rows: list[OpeningStats]) -> list[_Family]:
-    """Collapse the chosen partition by (color, system) -- rows already
-    share one color and are pre-filtered to `not faced`.
-
-    Labels the family with its most-played member's name root (the name
-    up to the first colon); ties broken by games, then eco, then name for
-    determinism. Both ACPL columns re-weight by moves, not by games:
-    `opening_acpl` by each row's `opening_moves`, `avg_cp_loss` by its
-    `player_moves` -- the exact denominators `OpeningStats` carries for
-    this reason. Weighting by game count instead would rebuild the
-    mean-of-per-game-means one level above the row it was just removed
-    from (docs/06-coach.md, "Family rollup").
-    """
-    groups: dict[str, list[OpeningStats]] = defaultdict(list)
-    for row in rows:
-        groups[row.system].append(row)
-
-    families: list[_Family] = []
-    for system, members in groups.items():
-        lead = min(members, key=lambda r: (-r.games, r.eco, r.name))
-        families.append(
-            _Family(
-                label=lead.name.split(":")[0].strip(),
-                system=system,
-                first_moves=lead.first_moves,
-                games=sum(r.games for r in members),
-                wins=sum(r.wins for r in members),
-                losses=sum(r.losses for r in members),
-                draws=sum(r.draws for r in members),
-                opening_acpl=_weighted_mean(
-                    [
-                        (r.opening_acpl, r.opening_moves)
-                        for r in members
-                        if r.opening_acpl is not None
-                    ]
-                ),
-                avg_cp_loss=_weighted_mean(
-                    [
-                        (r.avg_cp_loss, r.player_moves)
-                        for r in members
-                        if r.avg_cp_loss is not None
-                    ]
-                ),
-            )
-        )
-    return families
-
-
-def _rollup_faced_families(rows: list[OpeningStats]) -> list[_FacedFamily]:
-    """Collapse the faced partition by (color, name root) -- rows already
-    share one color and are pre-filtered to `faced`.
-
-    For faced lines the name *is* the opponent's choice, while the
-    player's own system varies with their replies, so keying on `system`
-    (as the chosen partition does) would split one opposing gambit across
-    as many families as the player has tried answers to it. Summing and
-    the move-weighted ACPL re-weighting are otherwise identical to
-    `_rollup_chosen_families` -- only the key differs (docs/06-coach.md,
-    "Family rollup").
-    """
-    groups: dict[str, list[OpeningStats]] = defaultdict(list)
-    for row in rows:
-        groups[row.name.split(":")[0].strip()].append(row)
-
-    families: list[_FacedFamily] = []
-    for label, members in groups.items():
-        lead = min(members, key=lambda r: (-r.games, r.eco, r.name))
-        families.append(
-            _FacedFamily(
-                label=label,
-                first_moves=lead.first_moves,
-                games=sum(r.games for r in members),
-                wins=sum(r.wins for r in members),
-                losses=sum(r.losses for r in members),
-                draws=sum(r.draws for r in members),
-                opening_acpl=_weighted_mean(
-                    [
-                        (r.opening_acpl, r.opening_moves)
-                        for r in members
-                        if r.opening_acpl is not None
-                    ]
-                ),
-                avg_cp_loss=_weighted_mean(
-                    [
-                        (r.avg_cp_loss, r.player_moves)
-                        for r in members
-                        if r.avg_cp_loss is not None
-                    ]
-                ),
-            )
-        )
-    return families
-
-
-def _weighted_mean(pairs: list[tuple[float, int]]) -> float | None:
-    total_weight = sum(w for _, w in pairs)
-    if not total_weight:
-        return None
-    return round(sum(v * w for v, w in pairs) / total_weight, 1)
-
-
-def _family_impact(f: _FamilyRecord) -> float:
-    score = (f.wins + f.draws / 2) / f.games if f.games else 0.0
-    return f.games * (0.5 - score)
-
-
-def _family_score(f: _FamilyRecord) -> str:
-    score = (f.wins + f.draws / 2) / f.games if f.games else 0.0
-    return f"{score * 100:.0f}"
+def _family_score_pct(f: FamilyRecord) -> str:
+    """`family_score` (repertoire.py) as the rounded percent string every
+    repertoire table cell renders."""
+    return f"{family_score(f) * 100:.0f}"
 
 
 # --- error patterns ------------------------------------------------------
@@ -761,6 +648,281 @@ def _pawns_or_na(value: float | None) -> str:
     return f"{value / 100:.2f}" if value is not None else "n/a"
 
 
+# --- player profile (docs/06-coach.md, "Player profile") -------------------
+#
+# Two renderers over `PlayerProfile` -- the coach's compact, durable
+# distillation of an already-built report (`profile.py:build_profile`).
+# `render_profile_prompt` asks an LLM for the narrative layer;
+# `render_profile_context` is the ~250-token block `render_explain_prompt`
+# and `render_game_chat_context` embed at the top when given a profile.
+# Neither renders per-example game identity (unlike the report's
+# error-pattern table) and the narrative instructions forbid the model
+# from inventing one: this text is stored and reused inside other
+# prompts, where a game reference could not be resolved into a link or
+# checked by a tool (docs/06-coach.md, "Narrative").
+
+
+def _profile_intro(profile: PlayerProfile) -> str:
+    window = ""
+    if profile.window_start is not None and profile.window_end is not None:
+        window = (
+            f", {_format_date(profile.window_start)} to "
+            f"{_format_date(profile.window_end)}"
+        )
+    return (
+        f"# Player profile -- {profile.username}\n"
+        "*(ACPL = average centipawn loss per move, shown in pawns; lower "
+        "is better. Every figure below is move-weighted over the games "
+        "covered.)*\n"
+        f"Covered: {_plural(profile.games_covered, 'game')}{window}."
+    )
+
+
+def _profile_ratings_section(profile: PlayerProfile) -> str:
+    if not profile.time_classes:
+        return ""
+    lines = [
+        "## Ratings",
+        "| Time class | Score | Rating |",
+        "|---|---|---|",
+    ]
+    for tc in profile.time_classes:
+        lines.append(
+            f"| {tc.time_class.capitalize()} | {_score_line(tc.record)} "
+            f"| {tc.rating_start} → {tc.rating_end} "
+            f"(range {tc.rating_min}-{tc.rating_max}) |"
+        )
+    return "\n".join(lines)
+
+
+def _profile_quality_section(profile: PlayerProfile) -> str:
+    """Mirrors `_phase_section`'s shape over `PlayerProfile`'s own field
+    names (`games_covered` where the report has `games_analyzed`) -- kept
+    as its own function rather than a shared parametrization, since the
+    two source types diverge in exactly that one field.
+    """
+    lines = [
+        "## Quality",
+        "| Phase | Moves | ACPL | Blunder % |",
+        "|---|---|---|---|",
+    ]
+    for phase in ("opening", "middlegame", "endgame"):
+        stats = profile.phases.get(phase)
+        if stats is None:
+            continue
+        acpl = _pawns_or_na(stats.acpl)
+        blunder_pct = _rate(stats.judgment_counts.get("blunder", 0), stats.moves)
+        lines.append(
+            f"| {phase.capitalize()} | {stats.moves} | {acpl} | {blunder_pct} |"
+        )
+
+    counts = profile.judgment_counts
+    total_moves = profile.player_moves
+    quality = ", ".join(
+        f"{j} {_rate(counts.get(j, 0), total_moves)} ({counts.get(j, 0)})"
+        for j in ("best", "good", "inaccuracy", "mistake", "blunder")
+    )
+    blunders_per_game = (
+        round(counts.get("blunder", 0) / profile.games_covered, 1)
+        if profile.games_covered
+        else 0.0
+    )
+    lines.append(
+        f"Overall {_pawns_or_na(profile.overall_acpl)} ACPL over {total_moves} "
+        f"moves -- {quality}; {blunders_per_game} blunders/game."
+    )
+    return "\n".join(lines)
+
+
+def _profile_opening_entry(o: ProfileOpening) -> str:
+    return f"{o.name} ({o.moves}) -- {o.games}g, {o.score * 100:.0f}%"
+
+
+def _profile_repertoire_section(profile: PlayerProfile) -> str:
+    if not profile.openings:
+        return ""
+    parts = ["## Repertoire"]
+    for color, label in (("white", "White"), ("black", "Black")):
+        rows = [o for o in profile.openings if o.color == color]
+        if not rows:
+            continue
+        parts.append(_profile_repertoire_color_section(label, rows))
+    return "\n\n".join(parts)
+
+
+def _profile_repertoire_color_section(label: str, rows: list[ProfileOpening]) -> str:
+    chosen = [o for o in rows if not o.faced]
+    faced = [o for o in rows if o.faced]
+    lines = [f"### As {label}"]
+    if chosen:
+        lines.append("Systems you chose:")
+        lines.extend(f"- {_profile_opening_entry(o)}" for o in chosen)
+    if faced:
+        lines.append(f"What you face as {label}:")
+        lines.extend(f"- {_profile_opening_entry(o)}" for o in faced)
+    return "\n".join(lines)
+
+
+def _profile_error_patterns_section(profile: PlayerProfile) -> str:
+    """Counts and share only -- no example identity, unlike
+    `_error_patterns_section` above: the profile prompt offers no game
+    citation of any kind (docs/06-coach.md, "Narrative").
+    """
+    if not profile.error_patterns:
+        return ""
+    lines = [
+        "## Recurring error patterns",
+        "| Pattern | Count | % of blunders |",
+        "|---|---|---|",
+    ]
+    for e in profile.error_patterns:
+        lines.append(f"| {e.label} | {e.count} | {e.share_of_blunders * 100:.1f}% |")
+    return "\n".join(lines)
+
+
+_PROFILE_INSTRUCTIONS = (
+    "## Instructions\n"
+    "Write the player's narrative now, following these rules:\n"
+    "- **Length and shape.** Three to five sentences describing this "
+    "student's tendencies, then a short list of weaknesses -- a handful "
+    "of bullets, not an essay.\n"
+    "- **Evidence.** Every claim must tie to a figure stated above -- a "
+    "rating, an ACPL, a blunder rate, a repertoire score, an "
+    "error-pattern count. Never assert a tendency the facts do not "
+    "support.\n"
+    "- **Audience and register.** Write for a club player, not a fellow "
+    "engine: pawns, never centipawns, and address the student directly "
+    'as "you".\n'
+    "- **No invented lines.** Do not assert a concrete variation, "
+    "opening trap, or line of play beyond what the facts state -- these "
+    "are aggregates, not annotated games, and there is no engine here "
+    "to verify a claimed line.\n"
+    "- **No game citations.** Never reference a specific game, date, or "
+    "opponent, and never write a link or handle of any kind -- this "
+    "text is stored and reused inside other prompts, where a game "
+    "reference could not be resolved into a link or checked.\n"
+    "- **Honesty.** If a section's sample is too thin to support a "
+    "claim, say so or omit it rather than filling space."
+)
+
+
+def render_profile_prompt(profile: PlayerProfile) -> str:
+    """The narrative-generation prompt (docs/06-coach.md, "Player
+    profile"): the facts -- fuller than `render_profile_context`, e.g. a
+    full months table rather than one compact trend line -- followed by
+    instructions asking for 3-5 sentences of tendencies plus a short
+    weakness list, every claim tied to a figure stated in the facts.
+    """
+    sections = [
+        _profile_intro(profile),
+        _profile_ratings_section(profile),
+        _profile_quality_section(profile),
+        _trend_section(profile.months),
+        _profile_repertoire_section(profile),
+        _profile_error_patterns_section(profile),
+        _PROFILE_INSTRUCTIONS,
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def _profile_ratings_line(profile: PlayerProfile) -> str | None:
+    if not profile.time_classes:
+        return None
+    parts = "; ".join(
+        f"{tc.time_class.capitalize()} {tc.rating_end} ({tc.record.games}g)"
+        for tc in profile.time_classes
+    )
+    return f"- Ratings: {parts}"
+
+
+def _profile_quality_line(profile: PlayerProfile) -> str:
+    overall_blunder = _rate(
+        profile.judgment_counts.get("blunder", 0), profile.player_moves
+    )
+    phase_bits: list[str] = []
+    for phase in ("opening", "middlegame", "endgame"):
+        stats = profile.phases.get(phase)
+        rate = (
+            _rate(stats.judgment_counts.get("blunder", 0), stats.moves)
+            if stats is not None
+            else "n/a"
+        )
+        phase_bits.append(f"{phase} {rate}")
+    return (
+        f"- Quality: {_pawns_or_na(profile.overall_acpl)} ACPL overall, "
+        f"{overall_blunder} blunders overall ({', '.join(phase_bits)})"
+    )
+
+
+def _profile_trend_line(profile: PlayerProfile) -> str | None:
+    months = profile.months
+    if not months:
+        return None
+    first, last = months[0], months[-1]
+    first_rating = first.rating_end if first.rating_end is not None else "n/a"
+    if len(months) == 1:
+        return f"- Trend: {first.month} rating {first_rating}"
+    last_rating = last.rating_end if last.rating_end is not None else "n/a"
+    return (
+        f"- Trend: {first.month} {first_rating} → {last.month} {last_rating} "
+        f"({_plural(len(months), 'month')})"
+    )
+
+
+def _profile_opening_entry_with_color(o: ProfileOpening) -> str:
+    color_word = "White" if o.color == "white" else "Black"
+    return f"{color_word} {_profile_opening_entry(o)}"
+
+
+def _profile_chosen_line(profile: PlayerProfile) -> str | None:
+    chosen = [o for o in profile.openings if not o.faced]
+    if not chosen:
+        return None
+    parts = "; ".join(_profile_opening_entry_with_color(o) for o in chosen)
+    return f"- Chosen systems: {parts}"
+
+
+def _profile_faced_line(profile: PlayerProfile) -> str | None:
+    faced = [o for o in profile.openings if o.faced]
+    if not faced:
+        return None
+    parts = "; ".join(_profile_opening_entry_with_color(o) for o in faced)
+    return f"- Faced lines: {parts}"
+
+
+def _profile_errors_line(profile: PlayerProfile) -> str | None:
+    if not profile.error_patterns:
+        return None
+    parts = "; ".join(f"{e.label} ({e.count})" for e in profile.error_patterns)
+    return f"- Errors: {parts}"
+
+
+def render_profile_context(profile: PlayerProfile) -> str:
+    """The ~250-token block `render_explain_prompt` and
+    `render_game_chat_context` embed at the top when given a profile
+    (docs/06-coach.md, "Player profile"): the facts one line each, then
+    -- when `profile.narrative` is set -- the stored narrative under a
+    "Coach's read" line. Total over `narrative=None`: renders the facts
+    alone.
+    """
+    lines = ["## Student profile"]
+    for line in (
+        _profile_ratings_line(profile),
+        _profile_quality_line(profile),
+        _profile_trend_line(profile),
+        _profile_chosen_line(profile),
+        _profile_faced_line(profile),
+        _profile_errors_line(profile),
+    ):
+        if line:
+            lines.append(line)
+    if profile.narrative is not None:
+        lines.append("")
+        lines.append("Coach's read:")
+        lines.append(profile.narrative)
+    return "\n".join(lines)
+
+
 # How many of a candidate line's moves to show -- enough to read the plan,
 # short enough to keep the table scannable.
 _PV_MOVES_SHOWN = 5
@@ -782,8 +944,19 @@ _EXPLAIN_INSTRUCTIONS = (
 )
 
 
-def render_explain_prompt(ctx: MoveContext, lines: list[EvalLine]) -> str:
+def render_explain_prompt(
+    ctx: MoveContext,
+    lines: list[EvalLine],
+    *,
+    profile: PlayerProfile | None = None,
+) -> str:
+    """Given a `profile`, the student-profile context block opens the
+    prompt (docs/06-coach.md, "Player profile"); with `None` (the
+    default) the prompt renders exactly as it always did -- an empty
+    leading section is filtered out below like every other empty one.
+    """
     sections = [
+        render_profile_context(profile) if profile is not None else "",
         _explain_intro(ctx),
         _explain_positions(ctx),
         _explain_move(ctx),
@@ -925,15 +1098,22 @@ def render_game_chat_context(
     ply: int | None = None,
     lines: list[EvalLine] | None = None,
     engine_available: bool,
+    profile: PlayerProfile | None = None,
 ) -> str:
     """The game-scope chat seed: the game's identity, plus -- when a ply
     anchor is set -- the same `MoveContext` fields and seeded eval lines
     `render_explain_prompt` uses. Raises `ValueError` when `ply` is out of
     range (`build_move_context` mirrors `render_explain_prompt`'s own
     check) or when the game has no analysis to anchor at all -- there is
-    no `MoveContext` to build without one.
+    no `MoveContext` to build without one. Given a `profile`, the
+    student-profile context block opens the seed exactly as in
+    `render_explain_prompt`; with `None` (the default) the seed renders
+    exactly as it always did.
     """
-    sections = [_game_chat_identity_section(detail)]
+    sections: list[str] = []
+    if profile is not None:
+        sections.append(render_profile_context(profile))
+    sections.append(_game_chat_identity_section(detail))
     if ply is not None:
         if detail.analysis is None:
             raise ValueError(
@@ -957,7 +1137,7 @@ def render_report_chat_context(report: PlayerReport, *, engine_available: bool) 
     sections = [
         _student_section(report),
         _phase_section(report),
-        _trend_section(report),
+        _trend_section(report.months),
         _terminations_section(report),
         _repertoire_section(report),
         _error_patterns_section(report, {}),

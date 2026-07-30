@@ -221,6 +221,94 @@ describe("api.analyze", () => {
   });
 });
 
+describe("api.profile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the player's profile with no request body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ profile: { username: "alice" }, narrative: null }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.profile("alice");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/players/alice/profile");
+  });
+});
+
+describe("api.generateProfile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts once with the given agent id", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ profile: { username: "alice" }, narrative: null }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.generateProfile("alice", { agentId: "coach-a" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/profile",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agent_id: "coach-a" }),
+      }),
+    );
+  });
+
+  it("sends a null agent id (server default) when none is given", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ profile: { username: "alice" }, narrative: null }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.generateProfile("alice");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/players/alice/profile",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agent_id: null }),
+      }),
+    );
+  });
+
+  it("throws an HttpError carrying the response status (e.g. 409, no analyzed games yet)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { message: "no analyzed games yet -- sync and analyze first" },
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await api.generateProfile("alice");
+      expect.unreachable("expected api.generateProfile to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).status).toBe(409);
+      expect((error as HttpError).message).toBe(
+        "no analyzed games yet -- sync and analyze first",
+      );
+    }
+  });
+});
+
 describe("score and sortWorstFirst", () => {
   it("counts draws as half a point", () => {
     expect(

@@ -5,7 +5,6 @@ Mirrors test_coach.py's provider-stubbing patterns (the SDKs are stubbed;
 no real LLM ever runs).
 """
 
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,10 +35,12 @@ from chess_coach.coach import (
     ChatToolkit,
     CoachProvider,
     CoachProviderError,
+    build_profile,
     build_report,
     create_provider,
     render_chat_prompt,
     render_game_chat_context,
+    render_profile_context,
     render_report_chat_context,
 )
 from chess_coach.coach.providers import PositionAnalystFn
@@ -56,20 +57,18 @@ from chess_coach.domain import (
 )
 from tests.coach_scenario import scenario_games
 from tests.factories import make_analyzed, make_game
+from tests.snapshots import write_or_check
 
 RUY = Opening(eco="C60", name="Ruy Lopez", ply=5)
 GAME_CONTEXT_SNAPSHOT = (
     Path(__file__).parent / "testdata" / "coach_chat_game_context.md"
 )
+GAME_CONTEXT_WITH_PROFILE_SNAPSHOT = (
+    Path(__file__).parent / "testdata" / "coach_chat_game_context_with_profile.md"
+)
 REPORT_CONTEXT_SNAPSHOT = (
     Path(__file__).parent / "testdata" / "coach_chat_report_context.md"
 )
-
-
-def _write_or_check(path: Path, text: str) -> None:
-    if os.environ.get("UPDATE_SNAPSHOTS"):
-        path.write_text(text)
-    assert text == path.read_text()
 
 
 # --- seed renderers ---------------------------------------------------------
@@ -103,7 +102,7 @@ def test_render_game_chat_context_matches_snapshot() -> None:
     assert context == render_game_chat_context(
         detail, ply=5, lines=lines, engine_available=True
     ), "render_game_chat_context is not deterministic"
-    _write_or_check(GAME_CONTEXT_SNAPSHOT, context)
+    write_or_check(GAME_CONTEXT_SNAPSHOT, context)
 
 
 def test_render_game_chat_context_no_ply_no_engine() -> None:
@@ -134,6 +133,34 @@ def test_render_game_chat_context_unanalyzed_game_with_ply_raises() -> None:
         render_game_chat_context(detail, ply=1, engine_available=True)
 
 
+def test_render_game_chat_context_profile_none_is_byte_identical_to_default() -> None:
+    """docs/06-coach.md: with `profile=None` (the default), the seed
+    renders exactly as it always did."""
+    detail = _game_detail()
+
+    assert render_game_chat_context(
+        detail, engine_available=False, profile=None
+    ) == render_game_chat_context(detail, engine_available=False)
+
+
+def test_render_game_chat_context_with_profile_opens_with_profile_block() -> None:
+    """docs/06-coach.md: given a `profile`, the student-profile context
+    block opens the seed exactly as in render_explain_prompt; everything
+    after it is the profile-less rendering, unchanged.
+    """
+    detail = _game_detail()
+    profile = build_profile(build_report("testuser", scenario_games()))
+
+    with_profile = render_game_chat_context(
+        detail, ply=5, engine_available=True, profile=profile
+    )
+    without_profile = render_game_chat_context(detail, ply=5, engine_available=True)
+
+    assert with_profile.startswith(render_profile_context(profile))
+    assert with_profile == f"{render_profile_context(profile)}\n\n{without_profile}"
+    write_or_check(GAME_CONTEXT_WITH_PROFILE_SNAPSHOT, with_profile)
+
+
 def test_render_report_chat_context_matches_snapshot() -> None:
     report = build_report(
         "testuser",
@@ -147,7 +174,7 @@ def test_render_report_chat_context_matches_snapshot() -> None:
     assert context == render_report_chat_context(report, engine_available=True), (
         "render_report_chat_context is not deterministic"
     )
-    _write_or_check(REPORT_CONTEXT_SNAPSHOT, context)
+    write_or_check(REPORT_CONTEXT_SNAPSHOT, context)
 
 
 def test_render_report_chat_context_omits_coaching_brief_instructions() -> None:

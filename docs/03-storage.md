@@ -94,6 +94,23 @@ chat_messages (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (thread_id, seq)
 );
+player_profiles (                    -- the durable student profile
+  -- (docs/06-coach.md, "Player profile"): one row per player — the
+  -- LLM narrative plus the facts snapshot it described. Facts are
+  -- re-derived fresh on every profile GET; this row is the
+  -- narrative's provenance and the embed paths' single read, not the
+  -- source of current numbers. games_covered and the covered window
+  -- ride inside the facts JSON (`PlayerProfile` carries them)
+  username TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,            -- agent that wrote the narrative
+  prompt_version TEXT NOT NULL,      -- coach.PROFILE_PROMPT_VERSION at
+                                     --   save; staleness metadata,
+                                     --   never a cache key
+  facts TEXT NOT NULL,               -- JSON PlayerProfile, narrative
+                                     --   field excluded
+  narrative TEXT NOT NULL,           -- the LLM layer, markdown
+  created_at INTEGER NOT NULL        -- unix seconds
+);
 ```
 
 The window columns are NOT NULL with sentinels on purpose: SQLite
@@ -224,6 +241,25 @@ def save_report(db: Db, key: ReportKey, prompt: str, advice: str,
 #   Returns the created_at (unix seconds) it persisted. Storage reads
 #   that clock exactly once per call; callers use the return value
 #   instead of taking a second, possibly-disagreeing reading.
+
+# Player profile (docs/06-coach.md, "Player profile"). One row per
+# player, upserted on regeneration under any agent — the profile is
+# singular, not per-agent. `CachedProfile` is storage's own result
+# type around the domain payload, like `CachedReport`.
+class CachedProfile(BaseModel):
+    profile: PlayerProfile   # the facts snapshot, narrative attached
+    agent_id: str
+    prompt_version: str      # coach.PROFILE_PROMPT_VERSION at save
+    created_at: int
+
+def get_player_profile(db: Db, username: str) -> CachedProfile | None
+def save_player_profile(db: Db, username: str, *, agent_id: str,
+                        prompt_version: str, facts: PlayerProfile,
+                        narrative: str) -> int
+#   Serializes `facts` with its narrative field excluded into the
+#   facts column and `narrative` beside it; get re-attaches them into
+#   one PlayerProfile. Returns the created_at it persisted — the same
+#   single-clock-read rule as save_report.
 
 # Chat threads (docs/future-improvements/coach-chat.md). Transcripts
 # are `domain.ChatMessage` rows; thread row types are storage's own

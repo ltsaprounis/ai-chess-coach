@@ -6,12 +6,16 @@ from chess_coach.coach.highlights import (
     PlayerHighlights,
     build_highlights,
 )
+from chess_coach.coach.profile import build_profile
 from chess_coach.coach.prompt import (
+    PROFILE_PROMPT_VERSION,
     PROMPT_VERSION,
     append_game_links,
     render_chat_prompt,
     render_explain_prompt,
     render_game_chat_context,
+    render_profile_context,
+    render_profile_prompt,
     render_prompt,
     render_report_chat_context,
 )
@@ -29,6 +33,7 @@ from chess_coach.coach.providers import (
 from chess_coach.coach.report import build_report
 
 __all__ = [
+    "PROFILE_PROMPT_VERSION",
     "PROMPT_VERSION",
     "ChatEvent",
     "ChatToolkit",
@@ -44,11 +49,14 @@ __all__ = [
     "append_game_links",
     "build_highlights",
     "build_move_context",
+    "build_profile",
     "build_report",
     "create_provider",
     "render_chat_prompt",
     "render_explain_prompt",
     "render_game_chat_context",
+    "render_profile_context",
+    "render_profile_prompt",
     "render_prompt",
     "render_report_chat_context",
 ]

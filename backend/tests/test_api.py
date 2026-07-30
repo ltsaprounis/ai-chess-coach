@@ -17,12 +17,14 @@ import chess_coach.api.routes as routes
 from chess_coach.api import create_app
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
+    PROFILE_PROMPT_VERSION,
     PROMPT_VERSION,
     ChatEvent,
     ChatToolkit,
     CoachProviderError,
     ExplainEvent,
     PositionAnalystFn,
+    build_profile,
     build_report,
 )
 from chess_coach.config import (
@@ -44,6 +46,7 @@ from chess_coach.domain import (
     GameSummary,
     Opening,
     OpeningStats,
+    PlayerProfile,
     RepertoireGame,
     TimeClass,
 )
@@ -62,10 +65,12 @@ from chess_coach.storage import (
     ReportKey,
     get_chat_thread,
     get_explanation,
+    get_player_profile,
     list_chat_messages,
     open_db,
     save_analysis,
     save_explanation,
+    save_player_profile,
     save_report,
     set_opening,
     upsert_games,
@@ -86,8 +91,13 @@ class StubProvider:
         # One entry per `complete` call, so tests can see whether that
         # call carried a working analyst (pool up) or None (pool down).
         self.complete_analysts: list[PositionAnalystFn | None] = []
+        self.complete_error: CoachProviderError | None = None
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
+        # One entry per `explain` call, so tests can inspect the prompt the
+        # route built (e.g. whether a stored player-profile block opened
+        # it) without reaching into the SSE body.
+        self.explain_prompts: list[str] = []
         # --- chat ---
         # One entry per `chat` call, so tests can inspect what seed/history/
         # provider_state the route built without reaching into the SSE body.
@@ -114,12 +124,15 @@ class StubProvider:
     ) -> str:
         self.prompts.append(prompt)
         self.complete_analysts.append(analyst)
+        if self.complete_error is not None:
+            raise self.complete_error
         return self.advice
 
     async def explain(
         self, prompt: str, analyst: PositionAnalystFn
     ) -> AsyncGenerator[ExplainEvent]:
         self.explain_calls += 1
+        self.explain_prompts.append(prompt)
         # Calling the analyst once proves the API layer's engine-seam
         # wiring reaches this stub, without a real engine.
         lines = await analyst(chess.STARTING_FEN)
@@ -349,6 +362,33 @@ def seed_analyzed(db_path: Path, games: list[AnalyzedGame]) -> None:
     for g in games:
         save_analysis(db, g.analysis, ANALYSIS_VERSION)
     db.close()
+
+
+def seed_profile(
+    db_path: Path,
+    username: str = "testuser",
+    *,
+    agent_id: str = "claude",
+    prompt_version: str = "profile-v0",
+    narrative: str = "zzz-stored-narrative-marker-zzz",
+    games: list[AnalyzedGame] | None = None,
+) -> PlayerProfile:
+    """Persist a `player_profiles` row directly (bypassing the LLM and the
+    POST route), for tests that only need a stored row already in place.
+    Returns the facts snapshot it stored, narrative attached -- the same
+    shape `get_player_profile` returns."""
+    db = open_db(db_path)
+    facts = build_profile(build_report(username, games or []))
+    save_player_profile(
+        db,
+        username,
+        agent_id=agent_id,
+        prompt_version=prompt_version,
+        facts=facts,
+        narrative=narrative,
+    )
+    db.close()
+    return facts.model_copy(update={"narrative": narrative})
 
 
 def test_games_list_with_filters(client: TestClient, db_path: Path) -> None:
@@ -1691,6 +1731,136 @@ def test_coach_filters_reach_list_analyzed_games_and_the_prompt(
     assert "Scope: rapid only" in body["prompt"]
 
 
+# --- Player profile (docs/07-api.md "Player profile"; docs/06-coach.md
+# --- "Player profile" is the contract) -----------------------------------
+
+
+def test_profile_get_unknown_player_returns_empty_facts_and_no_narrative(
+    client: TestClient,
+) -> None:
+    """No stored games at all -- empty facts and no narrative, 200 like
+    `/report` -- never a 404."""
+    body: Any = get(client, "/api/players/nobody-here/profile").json()
+
+    assert body["profile"]["username"] == "nobody-here"
+    assert body["profile"]["games_covered"] == 0
+    assert body["profile"]["narrative"] is None
+    assert body["narrative"] is None
+
+
+def test_profile_get_with_analyzed_games_and_no_stored_row_is_fresh_facts_only(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    body: Any = get(client, "/api/players/testuser/profile").json()
+
+    assert body["profile"]["username"] == "testuser"
+    assert body["profile"]["games_covered"] == 1
+    assert body["profile"]["narrative"] is None
+    assert body["narrative"] is None
+
+
+def test_profile_get_attaches_the_stored_narrative_and_its_metadata(
+    client: TestClient, db_path: Path
+) -> None:
+    """Facts are always fresh, but the narrative metadata's `games_covered`
+    is the *stored* snapshot's, not the fresh figure -- generating over 1
+    game and then analyzing a second must move `profile.games_covered` to
+    2 while the narrative metadata stays pinned at 1, which is the "N
+    generated; M now" delta the UI needs (docs/07-api.md)."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    generated: Any = post(client, "/api/players/testuser/profile").json()
+    assert generated["narrative"] is not None
+    assert generated["profile"]["games_covered"] == 1
+
+    seed(db_path, [make_game(id="g-2", end_time=2)], analyzed={"g-2"})
+
+    body: Any = get(client, "/api/players/testuser/profile").json()
+    assert body["profile"]["games_covered"] == 2  # fresh: both games now
+    assert body["profile"]["narrative"] == generated["profile"]["narrative"]
+    assert body["narrative"] == generated["narrative"]
+    assert body["narrative"]["games_covered"] == 1  # stored: pinned at generation
+    assert body["narrative"]["generated_at"] == generated["narrative"]["generated_at"]
+
+
+def test_profile_post_400s_on_unknown_agent(client: TestClient, db_path: Path) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = post(client, "/api/players/testuser/profile", json={"agent_id": "nope"})
+    assert response.status_code == 400
+    assert "unknown coach agent" in response.json()["error"]["message"]
+
+
+def test_profile_post_409s_without_analyzed_games(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")])  # stored but unanalyzed
+
+    response = post(client, "/api/players/testuser/profile")
+    assert response.status_code == 409
+    assert "analyze first" in response.json()["error"]["message"]
+
+
+def test_profile_post_routes_to_the_requested_agent(
+    client: TestClient, db_path: Path
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    body: Any = post(
+        client, "/api/players/testuser/profile", json={"agent_id": "beta"}
+    ).json()
+    assert body["narrative"]["agent_id"] == "beta"
+    assert body["profile"]["narrative"] == "advice from beta"
+
+
+def test_profile_post_persists_and_a_subsequent_get_sees_it(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+    provider.advice = "You tend to misplay closed positions."
+
+    generated: Any = post(client, "/api/players/testuser/profile").json()
+    assert generated["profile"]["narrative"] == provider.advice
+    assert generated["narrative"]["agent_id"] == "claude"
+    assert generated["narrative"]["prompt_version"] == PROFILE_PROMPT_VERSION
+    assert generated["narrative"]["games_covered"] == 1
+    assert generated["narrative"]["generated_at"] > 0
+
+    fetched: Any = get(client, "/api/players/testuser/profile").json()
+    assert fetched == generated
+
+    # The prompt is the profile-facts prompt (render_profile_prompt), not
+    # /coach's coaching-brief prompt -- carries the player's own facts.
+    assert len(provider.prompts) == 1
+    assert "testuser" in provider.prompts[0]
+    assert "# Player profile" in provider.prompts[0]
+    # Never the engine analyst on this path (docs/06-coach.md, "Player
+    # profile": a narrative summarizes aggregates and asserts no concrete
+    # line, so there is nothing here for an engine to verify).
+    assert provider.complete_analysts == [None]
+
+
+def test_profile_post_502s_when_the_provider_fails(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    stub_provider(stub_registry, "claude").complete_error = CoachProviderError(
+        "agent crashed"
+    )
+
+    response = post(client, "/api/players/testuser/profile")
+    assert response.status_code == 502
+    assert "agent crashed" in response.json()["error"]["message"]
+
+    # Nothing persisted on a failed generation.
+    db = open_db(db_path)
+    assert get_player_profile(db, "testuser") is None
+    db.close()
+
+
 def test_eval_streams_eval_events_then_done(client: TestClient) -> None:
     response = get(client, "/api/eval", params={"fen": chess.STARTING_FEN})
     assert response.status_code == 200
@@ -1930,6 +2100,42 @@ def test_explain_provider_error_mid_stream_is_an_sse_error_and_caches_nothing(
     db = open_db(db_path)
     assert get_explanation(db, "g-1", 1, "claude") is None
     db.close()
+
+
+def test_explain_embeds_the_stored_player_profile_when_one_exists(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md "Player profile", "Embedding": the explain prompt
+    opens with the stored profile block (facts + narrative) when a
+    `player_profiles` row exists for the game's player -- read fresh per
+    call, never rebuilt."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    stored = seed_profile(db_path)
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.explain_prompts) == 1
+    prompt = provider.explain_prompts[0]
+    assert "## Student profile" in prompt
+    assert stored.narrative is not None
+    assert stored.narrative in prompt
+
+
+def test_explain_prompt_has_no_profile_block_without_a_stored_row(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """No stored row -> `profile=None` -> the prompt renders exactly as it
+    did before the profile feature existed."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+
+    provider = stub_provider(stub_registry, "claude")
+    assert len(provider.explain_prompts) == 1
+    assert "## Student profile" not in provider.explain_prompts[0]
 
 
 def test_unknown_user_maps_to_404_envelope(
@@ -2402,6 +2608,44 @@ def test_chat_send_message_report_scope_seeds_report_context(
     system_context = cast(str, provider.chat_calls[0]["system_context"])
     assert "testuser" in system_context
     assert "Engine analysis is available" in system_context
+
+
+def test_chat_send_message_game_scope_embeds_the_stored_player_profile(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md "Player profile", "Embedding": the game-scope seed
+    opens with the stored profile block exactly as the explain prompt
+    does, read fresh (stored row only) per message."""
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    stored = seed_profile(db_path)
+    thread: Any = create_thread(client, "testuser", scope="game", game_id="g-1").json()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    provider = stub_provider(stub_registry, "claude")
+    system_context = cast(str, provider.chat_calls[0]["system_context"])
+    assert "## Student profile" in system_context
+    assert stored.narrative is not None
+    assert stored.narrative in system_context
+
+
+def test_chat_send_message_report_scope_does_not_embed_the_player_profile(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """The report seed never embeds the profile block -- the report is the
+    profile's own source (docs/06-coach.md, "Player profile")."""
+    seed_analyzed(
+        db_path,
+        [make_analyzed("g-1", ["e4", "e5", "Nf3", "Nc6"], losses=[0, 40])],
+    )
+    seed_profile(db_path)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "so?"})
+
+    provider = stub_provider(stub_registry, "claude")
+    system_context = cast(str, provider.chat_calls[0]["system_context"])
+    assert "## Student profile" not in system_context
 
 
 def test_chat_send_message_prepends_cached_explanation_as_first_history_turn(

@@ -1,7 +1,6 @@
 """Coach component tests (docs/06-coach.md)."""
 
 import asyncio
-import os
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
@@ -29,6 +28,8 @@ from copilot.tools import Tool, ToolInvocation, ToolResult
 
 import chess_coach.coach.providers as providers_module
 from chess_coach.coach import (
+    PROFILE_PROMPT_VERSION,
+    PROMPT_VERSION,
     ClaudeAgentSdkProvider,
     CoachProvider,
     CoachProviderError,
@@ -37,9 +38,12 @@ from chess_coach.coach import (
     MoveContext,
     append_game_links,
     build_move_context,
+    build_profile,
     build_report,
     create_provider,
     render_explain_prompt,
+    render_profile_context,
+    render_profile_prompt,
     render_prompt,
 )
 from chess_coach.domain import (
@@ -52,13 +56,25 @@ from chess_coach.domain import (
     Phase,
     PlayerReport,
     Record,
+    Result,
     TimeClass,
 )
 from tests.coach_scenario import scenario_games
 from tests.factories import make_analysis, make_analyzed, make_game
+from tests.snapshots import write_or_check
 
 RUY = Opening(eco="C60", name="Ruy Lopez", ply=5)
 PROMPT_SNAPSHOT = Path(__file__).parent / "testdata" / "coach_prompt.md"
+PROFILE_PROMPT_SNAPSHOT = Path(__file__).parent / "testdata" / "coach_profile_prompt.md"
+PROFILE_CONTEXT_SNAPSHOT = (
+    Path(__file__).parent / "testdata" / "coach_profile_context.md"
+)
+PROFILE_CONTEXT_NO_NARRATIVE_SNAPSHOT = (
+    Path(__file__).parent / "testdata" / "coach_profile_context_no_narrative.md"
+)
+EXPLAIN_PROMPT_WITH_PROFILE_SNAPSHOT = (
+    Path(__file__).parent / "testdata" / "coach_explain_prompt_with_profile.md"
+)
 
 
 def test_build_report_aggregates_player_stats() -> None:
@@ -555,9 +571,7 @@ def test_render_prompt_matches_snapshot() -> None:
     prompt = render_prompt(report)
 
     assert prompt == render_prompt(report), "render_prompt is not deterministic"
-    if os.environ.get("UPDATE_SNAPSHOTS"):
-        PROMPT_SNAPSHOT.write_text(prompt)
-    assert prompt == PROMPT_SNAPSHOT.read_text()
+    write_or_check(PROMPT_SNAPSHOT, prompt)
 
 
 def test_mate_scale_losses_render_as_words_not_centipawns() -> None:
@@ -949,6 +963,295 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
     assert result == "Keep grinding tactics. stray link here too."
 
 
+# --- player profile (docs/06-coach.md, "Player profile") ------------------
+
+
+def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
+    assert PROFILE_PROMPT_VERSION == "profile-v1"
+    assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
+
+
+def test_build_profile_copies_report_scalars_and_denominators() -> None:
+    """games_covered/window/player_moves/overall_acpl/judgment_counts/
+    phases/time_classes carry no aggregation of their own -- build_profile
+    copies them straight off the report (docs/06-coach.md)."""
+    report = build_report("testuser", scenario_games())
+    profile = build_profile(report)
+
+    assert profile.username == report.username
+    assert profile.games_covered == report.games_analyzed
+    assert profile.window_start == report.window_start
+    assert profile.window_end == report.window_end
+    assert profile.player_moves == report.player_moves
+    assert profile.overall_acpl == report.overall_acpl
+    assert profile.judgment_counts == report.judgment_counts
+    assert profile.phases == report.phases
+    assert profile.time_classes == report.time_classes
+    assert profile.narrative is None
+
+
+def test_build_profile_months_capped_to_last_six_oldest_first() -> None:
+    """docs/06-coach.md keeps only "the most recent months of trend" as
+    contract and leaves the cap to the tests; build_profile keeps the
+    last six, oldest first. Eight distinct months of games so the cap
+    itself -- not just the fixture's natural span -- is under test."""
+    games = [
+        make_analyzed(
+            f"g-{month}",
+            ["e4", "e5"],
+            color="white",
+            result="win",
+            end_time=int(datetime(2026, month, 15, tzinfo=UTC).timestamp()),
+        )
+        for month in range(1, 9)  # January through August: 8 distinct months
+    ]
+    profile = build_profile(build_report("testuser", games))
+
+    assert [m.month for m in profile.months] == [
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+    ]  # the 6 most recent, oldest first -- January and February dropped
+
+
+def test_build_profile_error_patterns_reuse_the_report_list() -> None:
+    report = build_report("testuser", scenario_games())
+    profile = build_profile(report)
+
+    assert profile.error_patterns == report.error_patterns
+
+
+def test_build_profile_repertoire_rows_agree_with_report_prompt_tables() -> None:
+    """Cross-checks docs/06-coach.md's requirement that the profile's
+    repertoire rows reuse the *exact* family rollup the report prompt
+    renders -- not a second implementation that merely happens to agree
+    today. Every number here is read off testdata/coach_prompt.md's
+    "Systems you chose" / "What you face" tables for this same scenario.
+    """
+    report = build_report("testuser", scenario_games())
+    profile = build_profile(report)
+    by_key = {(o.color, o.faced, o.name): o for o in profile.openings}
+
+    chosen_white = by_key[("white", False, "Queen's Pawn Game")]
+    assert chosen_white.moves == "1.d4 2.Bf4 3.e3"  # the family's shared `system`
+    assert chosen_white.games == 6
+    assert chosen_white.score == pytest.approx(0.583, abs=0.001)  # 58% in the table
+
+    faced_white = by_key[("white", True, "Englund Gambit Complex")]
+    # faced rows carry the full line (both sides), never a `system` --
+    # the Englund is the *opponent's* choice (docs/06-coach.md).
+    assert faced_white.moves == "1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7"
+    assert faced_white.games == 5
+    assert faced_white.score == pytest.approx(0.4, abs=0.001)  # 40% in the table
+
+    chosen_black = by_key[("black", False, "Pirc Defense")]
+    # Two lichess names (Classical, Austrian Attack) roll up into one
+    # family, same as the report prompt's "Pirc Defense" row.
+    assert chosen_black.moves == "1...d6 2...Nf6 3...g6"
+    assert chosen_black.games == 6
+
+
+def test_build_profile_excludes_below_floor_families() -> None:
+    """The two-game Ruy Lopez family never clears the 5-game sample floor
+    (docs/06-coach.md, "Sample floor and sort"), and Black has no faced
+    row above it either (the report prompt renders "No line yet reaches
+    the 5-game sample floor" there) -- both must be absent from the
+    profile. Unlike the report prompt, the profile has no long-tail line
+    to fall back into: a below-floor family simply never appears.
+    """
+    report = build_report("testuser", scenario_games())
+    profile = build_profile(report)
+
+    names = {(o.color, o.faced, o.name) for o in profile.openings}
+    assert ("white", False, "Ruy Lopez") not in names
+    assert not any(color == "black" and faced for color, faced, _ in names)
+    assert len(profile.openings) == 3  # white chosen, white faced, black chosen
+
+
+_CHOSEN_LINES: dict[str, list[str]] = {
+    "System Alpha": ["d4", "d5", "c4", "e6", "Nc3", "Nf6"],
+    "System Beta": ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"],
+    "System Gamma": ["Nf3", "d5", "g3", "Nf6", "Bg2", "e6"],
+    "System Delta": ["c4", "e5", "Nc3", "Nf6", "g3", "d5"],
+}
+
+
+def _white_chosen_games(
+    prefix: str, name: str, eco: str, count: int
+) -> list[AnalyzedGame]:
+    """`count` White wins in a system distinct from every other system
+    below -- ply 5 is White's own 3rd move, an odd ply, which resolves
+    `faced=False` for a White row (docs/06-coach.md)."""
+    return [
+        make_analyzed(
+            f"{prefix}-{i}",
+            _CHOSEN_LINES[name],
+            color="white",
+            result="win",
+            opening=Opening(eco=eco, name=name, ply=5),
+        )
+        for i in range(count)
+    ]
+
+
+def _white_faced_games(
+    prefix: str, name: str, eco: str, results: list[Result]
+) -> list[AnalyzedGame]:
+    """One game per entry in `results` -- ply 2 is Black's reply, an even
+    ply, which resolves `faced=True` for a White row (docs/06-coach.md).
+    """
+    return [
+        make_analyzed(
+            f"{prefix}-{i}",
+            ["d4", "e5", "dxe5"],
+            color="white",
+            result=result,
+            opening=Opening(eco=eco, name=name, ply=2),
+        )
+        for i, result in enumerate(results)
+    ]
+
+
+def test_build_profile_caps_chosen_and_faced_rows_per_color() -> None:
+    """The caps are implementation detail by contract (docs/06-coach.md
+    leaves them to the tests): build_profile keeps the top 3 chosen
+    families per color by games played and the top 2 faced families per
+    color by impact (games x win-rate deficit -- the report tables' own
+    sort, docs/06-coach.md "Sample floor and sort"). Four chosen and
+    three faced families all clear the 5-game sample floor here, so the
+    cap -- not the floor -- is what must bind.
+    """
+    games = [
+        *_white_chosen_games("a", "System Alpha", "A01", 9),
+        *_white_chosen_games("b", "System Beta", "A02", 8),
+        *_white_chosen_games("c", "System Gamma", "A03", 7),
+        *_white_chosen_games("d", "System Delta", "A04", 6),
+        *_white_faced_games("e", "Gambit Echo", "B01", ["loss"] * 6),
+        *_white_faced_games(
+            "f", "Gambit Foxtrot", "B02", ["loss", "loss", "loss", "win", "win"]
+        ),
+        *_white_faced_games(
+            "g", "Gambit Golf", "B03", ["win", "win", "win", "win", "loss"]
+        ),
+    ]
+    profile = build_profile(build_report("testuser", games))
+
+    chosen_names = [o.name for o in profile.openings if not o.faced]
+    faced_names = [o.name for o in profile.openings if o.faced]
+    # Impact: Echo 6*(0.5-0)=3.0, Foxtrot 5*(0.5-0.4)=0.5, Golf
+    # 5*(0.5-0.8)=-1.5 -- Golf is winning, so it has the *least* impact
+    # and is the one the cap must drop.
+    assert chosen_names == ["System Alpha", "System Beta", "System Gamma"]
+    assert faced_names == ["Gambit Echo", "Gambit Foxtrot"]
+
+
+def test_build_profile_empty_report_is_total() -> None:
+    """No analyzed games -> every list empty, every count zero, no crash:
+    build_profile must stay total over an empty report."""
+    profile = build_profile(build_report("testuser", []))
+
+    assert profile.games_covered == 0
+    assert profile.window_start is None
+    assert profile.window_end is None
+    assert profile.player_moves == 0
+    assert profile.overall_acpl == 0.0
+    assert profile.judgment_counts == dict.fromkeys(
+        ("best", "good", "inaccuracy", "mistake", "blunder"), 0
+    )
+    assert profile.time_classes == []
+    assert profile.months == []
+    assert profile.openings == []
+    assert profile.error_patterns == []
+    assert profile.narrative is None
+    assert all(
+        stats.moves == 0 and stats.acpl is None for stats in profile.phases.values()
+    )
+
+
+def test_render_profile_prompt_matches_snapshot() -> None:
+    """docs/06-coach.md: render_profile_prompt is snapshot-tested like
+    every other coach prompt. Regenerate deliberately with
+    `UPDATE_SNAPSHOTS=1 uv run pytest -k snapshot`, then read the diff of
+    testdata/coach_profile_prompt.md as the review artifact.
+    """
+    profile = build_profile(build_report("testuser", scenario_games()))
+    prompt = render_profile_prompt(profile)
+
+    assert prompt == render_profile_prompt(profile), (
+        "render_profile_prompt is not deterministic"
+    )
+    write_or_check(PROFILE_PROMPT_SNAPSHOT, prompt)
+
+
+def test_render_profile_prompt_forbids_game_citations_in_instructions() -> None:
+    profile = build_profile(build_report("testuser", scenario_games()))
+    prompt = render_profile_prompt(profile)
+
+    assert "No game citations" in prompt
+    assert "cite [g" not in prompt  # no link-handle apparatus offered at all
+
+
+def test_render_profile_prompt_addresses_the_student_as_you() -> None:
+    profile = build_profile(build_report("testuser", scenario_games()))
+    assert '"you"' in render_profile_prompt(profile)
+
+
+def test_render_profile_prompt_empty_profile_has_no_empty_sections() -> None:
+    prompt = render_profile_prompt(build_profile(build_report("testuser", [])))
+
+    assert "Ratings" not in prompt
+    assert "Trend" not in prompt
+    assert "Repertoire" not in prompt
+    assert "Recurring error patterns" not in prompt
+
+
+_PROFILE_NARRATIVE = (
+    "You favor solid structures as White with the London System and "
+    "press the Pirc as Black, but your results dip sharply against the "
+    "Englund Gambit, scoring only 40% there. Your opening-phase ACPL "
+    "(1.30) is worse than your middlegame ACPL (0.32), suggesting early "
+    "inaccuracies rather than calculation trouble later. Back-rank "
+    "vulnerabilities and mate-in-N walks each account for a third of "
+    "your blunders."
+)
+
+
+def test_render_profile_context_matches_snapshot_with_narrative() -> None:
+    profile = build_profile(build_report("testuser", scenario_games())).model_copy(
+        update={"narrative": _PROFILE_NARRATIVE}
+    )
+    context = render_profile_context(profile)
+
+    assert context == render_profile_context(profile), (
+        "render_profile_context is not deterministic"
+    )
+    assert "Coach's read" in context
+    assert _PROFILE_NARRATIVE in context
+    write_or_check(PROFILE_CONTEXT_SNAPSHOT, context)
+
+
+def test_render_profile_context_matches_snapshot_without_narrative() -> None:
+    """Total over narrative=None (docs/06-coach.md): renders the facts
+    alone, with no "Coach's read" section at all."""
+    profile = build_profile(build_report("testuser", scenario_games()))
+    assert profile.narrative is None
+
+    context = render_profile_context(profile)
+
+    assert "Coach's read" not in context
+    write_or_check(PROFILE_CONTEXT_NO_NARRATIVE_SNAPSHOT, context)
+
+
+def test_render_profile_context_empty_profile_renders_facts_alone() -> None:
+    context = render_profile_context(build_profile(build_report("testuser", [])))
+
+    assert context.startswith("## Student profile")
+    assert "Coach's read" not in context
+
+
 async def test_agent_sdk_provider_collects_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1253,6 +1556,32 @@ def test_render_explain_prompt_mate_scale_no_opening_no_lines() -> None:
     assert "walked into a forced mate; judged **blunder**" in prompt
     assert "10050" not in prompt
     assert "Candidate lines" not in prompt
+
+
+def test_render_explain_prompt_profile_none_is_byte_identical_to_default() -> None:
+    """docs/06-coach.md: with `profile=None` (the default), the prompt
+    renders exactly as it always did."""
+    lines = [EvalLine(multipv=1, depth=18, eval_cp=35, eval_mate=None, pv_san=["d4"])]
+
+    assert render_explain_prompt(
+        _EXPLAIN_CTX, lines, profile=None
+    ) == render_explain_prompt(_EXPLAIN_CTX, lines)
+
+
+def test_render_explain_prompt_with_profile_opens_with_profile_block() -> None:
+    """docs/06-coach.md: given a `profile`, the prompt opens with
+    `render_profile_context(profile)`; everything after it is exactly
+    the profile-less rendering, unchanged.
+    """
+    profile = build_profile(build_report("testuser", scenario_games()))
+    lines = [EvalLine(multipv=1, depth=18, eval_cp=35, eval_mate=None, pv_san=["d4"])]
+
+    with_profile = render_explain_prompt(_EXPLAIN_CTX, lines, profile=profile)
+    without_profile = render_explain_prompt(_EXPLAIN_CTX, lines)
+
+    assert with_profile.startswith(render_profile_context(profile))
+    assert with_profile == f"{render_profile_context(profile)}\n\n{without_profile}"
+    write_or_check(EXPLAIN_PROMPT_WITH_PROFILE_SNAPSHOT, with_profile)
 
 
 # --- ClaudeAgentSdkProvider.explain -----------------------------------------

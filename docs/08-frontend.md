@@ -180,7 +180,36 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    swap, or a line pruned by `min_games`). All the path/ranking/
    formatting logic is pure and unit-tested in `repertoireTree.ts`
    (kept apart from the Dashboard's flat-table `openings.ts`).
-6. **Coach** — `POST /coach` with the agent chosen in Settings;
+6. **Coach** — above the window-scoped advice flow, a
+   **player-profile card** (`components/ProfileCard.tsx`) reads
+   `GET /players/{u}/profile` (docs/06-coach.md "Player profile"):
+   the player's full stored history, never scoped by the
+   time-window/time-control filters below. It shows the free facts
+   `build_profile` distills — rating and games per time class,
+   overall ACPL in pawns plus blunder share, the top chosen systems
+   and faced problem lines per color, and recurring error patterns
+   with counts and a deep-linked example (`/games/{id}?ply=`) — and,
+   once one exists, the stored narrative as markdown under a "The
+   coach's read on {username}" header labelled with its agent
+   (resolved against the same `/coach/agents` roster the page
+   fetches for its picker, falling back to the raw id) and
+   generation date. A Generate/Regenerate button posts
+   `/players/{u}/profile` with the page's selected agent — the same
+   user-triggered-only rule as advice and the in-game Explain button
+   — with a pending state and, on success, an in-place update
+   (`queryClient.setQueryData`, no refetch). A staleness hint,
+   worded like the advice one below, appears when the stored
+   narrative's own `games_covered` no longer matches the response's
+   always-fresh `profile.games_covered`. Two empty states: no
+   narrative yet shows the facts with the Generate call-to-action;
+   zero analyzed games shows a short note instead, with no Generate
+   action since the POST would 409. Pure formatting/partitioning
+   helpers (`isProfileStale`, `formatPawns`, `blunderShare`,
+   `openingsFor`, `errorExampleLabel`/`errorExampleHref`) live in
+   `playerProfile.ts`, unit-tested apart from the component,
+   mirroring `highlights.ts` beside the Dashboard.
+
+   `POST /coach` with the agent chosen in Settings;
    renders the advice (markdown) and the generated prompt with a copy
    button (the manual-use fallback). Advice anchors open in a new tab
    (`target="_blank"`): the advice carries app-relative game links

@@ -371,6 +371,53 @@ class PlayerReport(BaseModel):
     critical_positions: list[CriticalPosition]
 
 
+class ProfileOpening(BaseModel):
+    """One repertoire family in the player profile.
+
+    A row of the profile's compact repertoire: a family the player
+    chooses (`faced=False`, `moves` is their own system) or a line they
+    keep facing (`faced=True`, `moves` is the full line with both sides
+    answering). Rolled up from `OpeningStats` under the family rules
+    stated once in docs/06-coach.md — the profile restates the
+    repertoire, it never re-derives its semantics.
+    """
+
+    color: Color
+    name: str  # family label — the most-played member's name root
+    moves: str  # chosen: the player's own system; faced: the full line
+    games: int
+    score: float  # (wins + draws/2) / games, 0-1
+    faced: bool
+
+
+class PlayerProfile(BaseModel):
+    """The durable who-is-this-student artifact (docs/06-coach.md).
+
+    Two layers. Deterministic facts, distilled from a `PlayerReport` by
+    `build_profile` — free, recomputed on demand. And an LLM
+    `narrative`, generated only on explicit user action and cached by
+    storage (docs/03-storage.md, `player_profiles`), where the facts
+    persist beside it as the snapshot the narrative described. Kept
+    compact on purpose: `render_profile_context` turns it into the
+    ~250-token block other coach prompts embed at the top, so every
+    list here is capped by the builder.
+    """
+
+    username: str
+    games_covered: int  # analyzed games behind the facts
+    window_start: int | None  # covered span, as in PlayerReport
+    window_end: int | None
+    player_moves: int  # denominator for judgment_counts
+    overall_acpl: float
+    judgment_counts: dict[Judgment, int]
+    phases: dict[Phase, PhaseStats]
+    time_classes: list[TimeClassStats]
+    months: list[MonthStats]  # most recent months only, oldest first
+    openings: list[ProfileOpening]  # chosen + faced, capped per color
+    error_patterns: list[ErrorPattern]
+    narrative: str | None = None  # stored LLM layer; None until generated
+
+
 class GameSummary(BaseModel):
     """One row of the games list — everything the list views render,
     nothing they don't.
