@@ -162,6 +162,17 @@ function errorExampleLabel(
   return parts.length > 0 ? parts.join(" · ") : "view game";
 }
 
+/** Deep link to the example game, landing on the mistake's position
+ *  (docs/08-frontend.md "Dashboard") when the report carries a ply. */
+export function errorExampleHref(
+  pattern: PlayerReport["error_patterns"][number],
+): string {
+  const base = `/games/${pattern.example_game_id}`;
+  return pattern.example_ply !== null && pattern.example_ply !== undefined
+    ? `${base}?ply=${pattern.example_ply}`
+    : base;
+}
+
 export default function Dashboard() {
   const { username = "" } = useParams();
   const [minGames, setMinGames] = useState(5);
@@ -705,7 +716,7 @@ export default function Dashboard() {
                         {pattern.example_game_id !== null &&
                         pattern.example_game_id !== undefined ? (
                           <Link
-                            to={`/games/${pattern.example_game_id}`}
+                            to={errorExampleHref(pattern)}
                             target="_blank"
                             rel="noreferrer"
                           >
