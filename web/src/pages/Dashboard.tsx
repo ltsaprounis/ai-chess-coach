@@ -20,6 +20,7 @@ import {
 } from "../highlights.ts";
 import { groupByFamily, type OpeningFamily } from "../openings.ts";
 import { clampPage, pageCount } from "../pagination.ts";
+import { errorExampleHref, errorExampleLabel } from "../playerProfile.ts";
 import {
   latestRatings,
   monthlyActivity,
@@ -141,36 +142,6 @@ function terminationRows(
       ...row,
       share: Math.round((row.games / (totals.get(row.result) ?? 1)) * 100),
     }));
-}
-
-function errorExampleLabel(
-  pattern: PlayerReport["error_patterns"][number],
-): string {
-  const parts: string[] = [];
-  if (
-    pattern.example_end_time !== null &&
-    pattern.example_end_time !== undefined
-  ) {
-    parts.push(new Date(pattern.example_end_time * 1000).toLocaleDateString());
-  }
-  if (
-    pattern.example_move_number !== null &&
-    pattern.example_move_number !== undefined
-  ) {
-    parts.push(`move ${pattern.example_move_number}`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : "view game";
-}
-
-/** Deep link to the example game, landing on the mistake's position
- *  (docs/08-frontend.md "Dashboard") when the report carries a ply. */
-export function errorExampleHref(
-  pattern: PlayerReport["error_patterns"][number],
-): string {
-  const base = `/games/${pattern.example_game_id}`;
-  return pattern.example_ply !== null && pattern.example_ply !== undefined
-    ? `${base}?ply=${pattern.example_ply}`
-    : base;
 }
 
 export default function Dashboard() {
@@ -707,27 +678,25 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {analyzed.error_patterns.map((pattern) => (
-                    <tr key={pattern.pattern}>
-                      <td>{pattern.label}</td>
-                      <td>{pattern.count}</td>
-                      <td>{Math.round(pattern.share_of_blunders * 100)}%</td>
-                      <td>
-                        {pattern.example_game_id !== null &&
-                        pattern.example_game_id !== undefined ? (
-                          <Link
-                            to={errorExampleHref(pattern)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {errorExampleLabel(pattern)}
-                          </Link>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {analyzed.error_patterns.map((pattern) => {
+                    const href = errorExampleHref(pattern);
+                    return (
+                      <tr key={pattern.pattern}>
+                        <td>{pattern.label}</td>
+                        <td>{pattern.count}</td>
+                        <td>{Math.round(pattern.share_of_blunders * 100)}%</td>
+                        <td>
+                          {href !== null ? (
+                            <Link to={href} target="_blank" rel="noreferrer">
+                              {errorExampleLabel(pattern)}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

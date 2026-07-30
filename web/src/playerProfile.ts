@@ -58,8 +58,7 @@ export function openingsFor(
 }
 
 /** The recurring-mistakes example link's label: date + move number
- *  when both are known, else a plain fallback — mirrors the
- *  Dashboard's own `errorExampleLabel` (docs/08-frontend.md,
+ *  when both are known, else a plain fallback (docs/08-frontend.md,
  *  Dashboard "Recurring mistakes"). */
 export function errorExampleLabel(pattern: ProfileErrorPattern): string {
   const parts: string[] = [];
