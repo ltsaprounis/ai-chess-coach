@@ -406,6 +406,102 @@ def count_games(
     return int(row["n"])
 
 
+def count_analyzed_games(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> int:
+    """`count_games` plus the analysis join — how many of that scope are
+    analyzed.
+
+    `len(list_analyzed_games(...))` for the same filters without
+    materializing (and re-parsing the evals of) every game. The profile
+    needs the analyzed count for a scope it is not otherwise aggregating
+    — the staleness hint compares a stored narrative's coverage against
+    the live figure for that same scope (docs/07-api.md, "Player
+    profile") — and replaying an archive to learn one integer is not a
+    trade worth making.
+    """
+    clauses = ["g.username = ?"]
+    params: list[object] = [username]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
+    (row,) = db.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM games AS g
+        JOIN analyses AS a ON a.game_id = g.id
+        WHERE {" AND ".join(clauses)}
+        """,
+        params,
+    ).fetchall()
+    return int(row["n"])
+
+
+def list_game_summaries(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> list[GameSummary]:
+    """Every stored game in the scope as a `GameSummary`, analyzed or
+    not — the report's volume layer (docs/06-coach.md, "Volume and
+    quality").
+
+    `GameSummary` rather than `Game` on purpose: the volume aggregates
+    read ratings, results, openings and the opening ply prefix, all of
+    which this row carries, and none of which justify shipping a PGN
+    per game. Unpaged, like `list_analyzed_games` — the caller is
+    aggregating the whole scope, and a page limit would silently
+    truncate the very denominator this exists to provide.
+
+    Window semantics mirror `list_analyzed_games` exactly (`since`
+    inclusive, `until` exclusive), so the volume list and the analyzed
+    list describe the same scope and cannot drift.
+    """
+    clauses = ["g.username = ?"]
+    params: list[object] = [username]
+    if since is not None:
+        clauses.append("g.end_time >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("g.end_time < ?")
+        params.append(until)
+    if time_class is not None:
+        clauses.append("g.time_class = ?")
+        params.append(time_class)
+    rows = db.execute(
+        f"""
+        SELECT {_SUMMARY_COLUMNS}, a.game_id IS NOT NULL AS analyzed
+        FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
+        WHERE {" AND ".join(clauses)}
+        ORDER BY g.end_time DESC
+        """,
+        params,
+    ).fetchall()
+    return [
+        GameSummary.model_validate(
+            {
+                **_summary_fields(row),
+                "opening": _opening_from_row(row),
+                "analyzed": bool(row["analyzed"]),
+            }
+        )
+        for row in rows
+    ]
+
+
 def games_missing_opening(db: Db, username: str) -> list[Game]:
     """Games not yet classified (new, or from before openings shipped)."""
     rows = db.execute(

@@ -25,6 +25,7 @@ from chess_coach.domain import (
     GameDetail,
     GameSummary,
     OpeningStats,
+    PlayerProfile,
     PlayerReport,
     Result,
     TimeClass,
@@ -35,12 +36,12 @@ from chess_coach.storage import (
     Db,
     GameFilters,
     ReportKey,
-    count_games,
     get_explanation,
     get_game,
     get_player_profile,
     get_report,
     list_analyzed_games,
+    list_game_summaries,
     list_games,
     opening_stats,
 )
@@ -55,6 +56,30 @@ CHAT_MESSAGE_CAP = 40
 # model chooses its own window per call -- capped so an ambitious limit
 # can't render the whole archive into one tool result.
 _FIND_GAMES_LIMIT_CAP = 25
+
+
+def profile_for_game(
+    db: Db, username: str, time_class: TimeClass
+) -> PlayerProfile | None:
+    """The stored profile to embed when coaching one game
+    (docs/06-coach.md, "Player profile", "Embedding").
+
+    Prefers the row for the game's own time control -- a bullet game
+    should be explained to a coach who knows this student's *bullet*
+    tendencies, not an average over controls they play very differently
+    -- and falls back to the all-controls row, which is what existed
+    before profiles were scoped and remains what a student who only ever
+    generated the mixed profile has. None when neither is stored, which
+    renders the prompt exactly as it was before profiles existed.
+
+    Shared by the explain miss path and the game-scope chat seed so the
+    two can never disagree about which profile a game gets.
+    """
+    scoped = get_player_profile(db, username, time_class=time_class)
+    if scoped is not None:
+        return scoped.profile
+    mixed = get_player_profile(db, username)
+    return mixed.profile if mixed is not None else None
 
 
 def window_or_none(value: int) -> int | None:
@@ -154,7 +179,8 @@ async def game_scope_context(
     an `EngineError` from a live pool maps to 502, mirroring `/explain`.
     The thread player's stored profile, when one exists, opens the seed
     exactly as it opens the explain prompt (docs/06-coach.md, "Player
-    profile", "Embedding") -- stored row only, never a fresh aggregation.
+    profile", "Embedding") -- stored row only, never a fresh aggregation,
+    and the row for this game's own time control by preference.
     """
     assert thread.game_id is not None  # scope=game is validated at creation
     game = await run_in_threadpool(get_game, db, thread.game_id)
@@ -174,13 +200,15 @@ async def game_scope_context(
                 status_code=502, detail=f"engine failure: {exc}"
             ) from exc
 
-    cached_profile = await run_in_threadpool(get_player_profile, db, thread.username)
+    profile = await run_in_threadpool(
+        profile_for_game, db, thread.username, game.time_class
+    )
     return render_game_chat_context(
         game,
         ply=thread.ply,
         lines=lines,
         engine_available=analyst is not None,
-        profile=cached_profile.profile if cached_profile is not None else None,
+        profile=profile,
     )
 
 
@@ -200,16 +228,17 @@ async def report_scope_context(
         games = list_analyzed_games(
             db, thread.username, since=since, until=until, time_class=time_class
         )
-        games_in_scope = count_games(
+        all_games = list_game_summaries(
             db, thread.username, since=since, until=until, time_class=time_class
         )
         return build_report(
             thread.username,
             games,
+            all_games=all_games,
             time_class=time_class,
             requested_since=since,
             requested_until=until,
-            games_in_scope=games_in_scope,
+            games_in_scope=len(all_games),
         )
 
     report = await run_in_threadpool(_load_report)

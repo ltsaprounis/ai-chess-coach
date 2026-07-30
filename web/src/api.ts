@@ -272,19 +272,34 @@ export const api = {
     json(await fetch("/api/coach/agents")),
   /** The student profile: facts always fresh, narrative + its
    *  metadata attached when one is stored — never an LLM call
-   *  (docs/07-api.md, "Player profile"). */
-  profile: async (username: string): Promise<ProfileResponse> =>
-    json(await fetch(`/api/players/${encodeURIComponent(username)}/profile`)),
+   *  (docs/07-api.md, "Player profile").
+   *
+   *  Takes the same `since`/`time_class` scoping as `report`, with one
+   *  asymmetry worth knowing at the call site: the facts honour both,
+   *  but the narrative is stored per time control only, so changing the
+   *  window re-scopes the numbers and leaves the narrative alone. */
+  profile: async (
+    username: string,
+    query: StatsQuery = {},
+  ): Promise<ProfileResponse> =>
+    json(
+      await fetch(
+        `/api/players/${encodeURIComponent(username)}/profile${queryString(query)}`,
+      ),
+    ),
   /**
    * Regenerate the stored narrative — user-triggered only (LLM calls
    * cost money; `profile` above never generates). `agentId` mirrors
    * `coach`'s own convention: omitted sends `agent_id: null`, which
    * the server resolves to its configured default. 409 when the
    * player has no analyzed games yet to describe.
+   *
+   * `timeClass` is the narrative's only scope — deliberately no window,
+   * since the server generates over that control's full history.
    */
   generateProfile: async (
     username: string,
-    options: { agentId?: string } = {},
+    options: { agentId?: string; timeClass?: TimeClass } = {},
   ): Promise<ProfileResponse> =>
     json(
       await fetch(`/api/players/${encodeURIComponent(username)}/profile`, {
@@ -292,6 +307,7 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agent_id: options.agentId ?? null,
+          time_class: options.timeClass ?? null,
         } satisfies ProfileGenerateRequest),
       }),
     ),

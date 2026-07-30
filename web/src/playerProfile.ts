@@ -9,19 +9,43 @@ type ProfileErrorPattern = PlayerProfile["error_patterns"][number];
 
 /**
  * True once the stored narrative's own snapshot (`games_covered` at
- * generation time) no longer matches the response's always-fresh
- * `profile.games_covered` — the same "generated over N, you have M
- * now" signal the Coach page's advice staleness hint uses
- * (docs/07-api.md, `ProfileNarrative`). No narrative at all is never
- * stale — there is nothing to compare against.
+ * generation time) no longer matches the live count for that same
+ * scope — the "generated over N, you have M now" signal the Coach
+ * page's advice staleness hint uses (docs/07-api.md,
+ * `ProfileNarrative`). No narrative at all is never stale — there is
+ * nothing to compare against.
+ *
+ * `narrativeGamesNow` and not `profile.games_covered`: the narrative
+ * covers its time control's whole history while the facts honour the
+ * page's window filter too, so comparing against the facts' count
+ * would flag every windowed view as stale. A null falls back to the
+ * facts' count, which is correct precisely when no window is applied.
  */
 export function isProfileStale(
   profile: Pick<PlayerProfile, "games_covered">,
   narrative: Pick<ProfileNarrative, "games_covered"> | null,
+  narrativeGamesNow: number | null = null,
 ): boolean {
-  return (
-    narrative !== null && narrative.games_covered !== profile.games_covered
-  );
+  if (narrative === null) {
+    return false;
+  }
+  const now = narrativeGamesNow ?? profile.games_covered;
+  return narrative.games_covered !== now;
+}
+
+/** How the profile's scope reads in a sentence: the time control it
+ *  covers, or "all time controls" when the facts mix them. */
+export function scopeLabel(profile: Pick<PlayerProfile, "time_class">): string {
+  return profile.time_class ?? "all time controls";
+}
+
+/** True when the quality figures rest on a subset of the games behind
+ *  the volume figures — the case that must be stated rather than
+ *  implied (docs/06-coach.md, "Volume and quality"). */
+export function hasPartialCoverage(
+  profile: Pick<PlayerProfile, "games_covered" | "games_in_scope">,
+): boolean {
+  return profile.games_in_scope > profile.games_covered;
 }
 
 /** Centipawns to pawns, two decimals, no sign — every value this

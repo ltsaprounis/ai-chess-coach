@@ -6,8 +6,10 @@ import {
   errorExampleHref,
   errorExampleLabel,
   formatPawns,
+  hasPartialCoverage,
   isProfileStale,
   openingsFor,
+  scopeLabel,
 } from "../playerProfile.ts";
 
 type Props = {
@@ -15,6 +17,10 @@ type Props = {
   /** The stored narrative's metadata, or `null` when nothing has been
    *  generated yet. */
   narrative: ProfileNarrative | null;
+  /** Live analyzed-game count for the *narrative's* scope, which is
+   *  wider than the card's whenever a window filter is applied — the
+   *  staleness hint's only honest basis. */
+  narrativeGamesNow: number | null;
   /** Resolves an agent id to its roster label — the same helper the
    *  Coach page already applies to advice (falls back to the raw id
    *  when the roster hasn't loaded or no longer lists it). */
@@ -84,32 +90,35 @@ function OpeningRows({
 export default function ProfileCard({
   profile,
   narrative,
+  narrativeGamesNow,
   agentLabel,
   generating,
   generateError,
   onGenerate,
 }: Props) {
+  const scope = scopeLabel(profile);
+
   if (profile.games_covered === 0) {
     return (
       <section className="panel profile-card">
-        <h2>Player profile</h2>
+        <h2>Player profile — {scope}</h2>
         <p className="panel-empty">
-          No analyzed games yet —{" "}
+          No analyzed {profile.time_class ?? ""} games in this window —{" "}
           <Link to={`/players/${profile.username}/games`}>
             analyze some games
           </Link>{" "}
-          to build a profile.
+          or widen the filters above to build a profile.
         </p>
       </section>
     );
   }
 
   const narrativeText = profile.narrative ?? null;
-  const stale = isProfileStale(profile, narrative);
+  const stale = isProfileStale(profile, narrative, narrativeGamesNow);
 
   return (
     <section className="panel profile-card">
-      <h2>Player profile</h2>
+      <h2>Player profile — {scope}</h2>
 
       <div className="tiles">
         {profile.time_classes.map((entry) => (
@@ -126,9 +135,72 @@ export default function ProfileCard({
       <p>
         Overall quality: {formatPawns(profile.overall_acpl)} pawns average loss
         per move · {Math.round(blunderShare(profile) * 100)}% of moves are
-        blunders ({profile.games_covered} analyzed game
-        {profile.games_covered === 1 ? "" : "s"}).
+        blunders.
       </p>
+
+      {/* The two denominators, stated (docs/06-coach.md, "Volume and
+          quality"). Ratings and records above come from every game;
+          the quality figures come from the analyzed ones, and saying
+          so is the difference between an honest profile and one that
+          presents whatever the engine happened to reach as the whole
+          player. */}
+      <p className="agent-note">
+        {hasPartialCoverage(profile) ? (
+          <>
+            Ratings, records and repertoire cover all {profile.games_in_scope}{" "}
+            games; quality figures cover the {profile.games_covered} analyzed so
+            far.
+          </>
+        ) : (
+          <>All {profile.games_in_scope} games in scope are analyzed.</>
+        )}
+      </p>
+
+      {profile.periods.length > 1 && (
+        <>
+          <h3>Recent form</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Window</th>
+                  <th>Games</th>
+                  <th>Score</th>
+                  <th>Rating</th>
+                  <th>Avg loss</th>
+                  <th>Blunders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {profile.periods.map((period) => (
+                  <tr key={period.label}>
+                    <td>{period.label}</td>
+                    <td>{period.games}</td>
+                    <td>
+                      {period.record.games > 0
+                        ? `${Math.round(
+                            ((period.record.wins + period.record.draws / 2) /
+                              period.record.games) *
+                              100,
+                          )}%`
+                        : "—"}
+                    </td>
+                    <td>{period.rating_end ?? "—"}</td>
+                    <td>
+                      {period.acpl !== null ? formatPawns(period.acpl) : "—"}
+                    </td>
+                    <td>
+                      {period.blunder_rate !== null
+                        ? `${(period.blunder_rate * 100).toFixed(1)}%`
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <div className="chart-row">
         {COLORS.map((color) => (
@@ -189,7 +261,18 @@ export default function ProfileCard({
         <p className="panel-empty">No tagged error patterns yet.</p>
       )}
 
-      <h3>The coach's read on {profile.username}</h3>
+      <h3>
+        The coach's read on {profile.username} in {scope}
+      </h3>
+
+      {/* The narrative covers the time control's whole history, never
+          the selected window — so when a window is applied the facts
+          above and this text describe different spans, and saying so
+          is cheaper than a reader assuming they match. */}
+      <p className="agent-note">
+        Written for the coach, covering {scope} across all time — the window
+        filter above re-scopes the figures, not this.
+      </p>
 
       {narrative !== null && narrativeText !== null ? (
         <>
@@ -207,10 +290,10 @@ export default function ProfileCard({
           </p>
           {stale && (
             <p role="alert">
-              This profile was generated over {narrative.games_covered} analyzed
-              game{narrative.games_covered === 1 ? "" : "s"} — you now have{" "}
-              {profile.games_covered}. Regenerate for a profile that covers your
-              latest games.
+              This profile was generated over {narrative.games_covered} analyzed{" "}
+              {scope} game{narrative.games_covered === 1 ? "" : "s"} — you now
+              have {narrativeGamesNow ?? profile.games_covered}. Regenerate for
+              a profile that covers your latest games.
             </p>
           )}
           {generateError !== null && <p role="alert">{generateError}</p>}
@@ -221,8 +304,8 @@ export default function ProfileCard({
       ) : (
         <>
           <p className="panel-empty">
-            No narrative yet — generate the coach's read on {profile.username}'s
-            tendencies from the facts above.
+            No {scope} narrative yet — generate the coach's read on{" "}
+            {profile.username}'s tendencies in {scope}.
           </p>
           {generateError !== null && <p role="alert">{generateError}</p>}
           <button

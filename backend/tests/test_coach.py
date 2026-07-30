@@ -50,6 +50,7 @@ from chess_coach.domain import (
     AnalyzedGame,
     ErrorPattern,
     EvalLine,
+    GameSummary,
     LlmConfig,
     MoveEval,
     Opening,
@@ -60,7 +61,7 @@ from chess_coach.domain import (
     TimeClass,
 )
 from tests.coach_scenario import scenario_games
-from tests.factories import make_analysis, make_analyzed, make_game
+from tests.factories import make_analysis, make_analyzed, make_game, summarize
 from tests.snapshots import write_or_check
 
 RUY = Opening(eco="C60", name="Ruy Lopez", ply=5)
@@ -967,7 +968,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v1"
+    assert PROFILE_PROMPT_VERSION == "profile-v2"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -1194,18 +1195,42 @@ def test_render_profile_prompt_forbids_game_citations_in_instructions() -> None:
     assert "cite [g" not in prompt  # no link-handle apparatus offered at all
 
 
-def test_render_profile_prompt_addresses_the_student_as_you() -> None:
+def test_render_profile_prompt_briefs_the_coach_in_the_third_person() -> None:
+    """The narrative is stored and pasted into other prompts, where the
+    reader is another coach -- so v1's 'address the student directly as
+    "you"' told that coach *they* were the one hanging pieces
+    (docs/06-coach.md, "Narrative"). The instructions must now forbid
+    the second person rather than require it."""
     profile = build_profile(build_report("testuser", scenario_games()))
-    assert '"you"' in render_profile_prompt(profile)
+    prompt = render_profile_prompt(profile)
+
+    assert 'never address the reader as "you"' in prompt
+    assert "third person" in prompt
+    assert "address the student directly" not in prompt
+
+
+def test_render_profile_prompt_facts_never_address_the_student() -> None:
+    """Not just the instructions: the rendered facts themselves said
+    "Systems you chose", which models copy into the narrative."""
+    profile = build_profile(build_report("testuser", scenario_games()))
+    facts = render_profile_prompt(profile).split("## Instructions")[0]
+
+    assert "Systems the student chose:" in facts
+    assert "Systems you chose:" not in facts
+    assert "What you face" not in facts
 
 
 def test_render_profile_prompt_empty_profile_has_no_empty_sections() -> None:
+    """Section *headers*, not bare words: the instruction block names
+    "Ratings" and "Recent form" in its own prose, so a substring check
+    for those would pass only by accident."""
     prompt = render_profile_prompt(build_profile(build_report("testuser", [])))
 
-    assert "Ratings" not in prompt
-    assert "Trend" not in prompt
-    assert "Repertoire" not in prompt
-    assert "Recurring error patterns" not in prompt
+    assert "## Ratings" not in prompt
+    assert "## Recent form" not in prompt
+    assert "## Trend" not in prompt
+    assert "## Repertoire" not in prompt
+    assert "## Recurring error patterns" not in prompt
 
 
 _PROFILE_NARRATIVE = (
@@ -2315,3 +2340,239 @@ async def test_copilot_provider_explain_times_out_when_session_stalls(
         await asyncio.wait_for(drain(), timeout=1)
     assert streamed == ["The bishop was "]
     assert captured["session_disconnected"] is True
+
+
+# --- volume vs quality (docs/06-coach.md, "Volume and quality") ----------
+
+
+def _partly_analyzed() -> tuple[list[AnalyzedGame], list[GameSummary]]:
+    """Three analyzed losses at rating 1400, then two unanalyzed wins at
+    1500 — an archive whose analyzed subset misrepresents both the
+    player's rating and their record, which is exactly the shape the
+    split exists to handle.
+    """
+    analyzed = [
+        make_analyzed(
+            f"g-old-{i}",
+            ["d4", "d5", "Bf4", "Nf6", "e3", "e6"],
+            result="loss",
+            opening=Opening(eco="D02", name="London System", ply=3),
+            end_time=1_780_000_000 + i,
+            player_rating=1400,
+        )
+        for i in range(3)
+    ]
+    newer = [
+        make_game(
+            id=f"g-new-{i}",
+            san_moves=["d4", "d5", "Bf4", "Nf6", "e3", "e6"],
+            result="win",
+            time_class="blitz",
+            end_time=1_781_000_000 + i,
+            player_rating=1500,
+        )
+        for i in range(2)
+    ]
+    # Classified but unanalyzed, as storage actually stores them:
+    # opening classification is independent of engine analysis.
+    all_games = [summarize(g) for g in analyzed] + [
+        summarize(
+            g, analyzed=False, opening=Opening(eco="D02", name="London System", ply=3)
+        )
+        for g in newer
+    ]
+    return analyzed, all_games
+
+
+def test_build_report_takes_ratings_and_record_from_every_game() -> None:
+    """The bug the split fixes: with only the analyzed list, "current
+    rating" is whichever game the engine happened to reach last, and the
+    win/loss record is a biased subsample."""
+    analyzed, all_games = _partly_analyzed()
+
+    biased = build_report("testuser", analyzed)
+    correct = build_report("testuser", analyzed, all_games=all_games)
+
+    assert biased.record.games == 3
+    assert biased.record.wins == 0
+    assert biased.time_classes[0].rating_end == 1400
+
+    assert correct.record.games == 5
+    assert correct.record.wins == 2  # the two unanalyzed wins now count
+    assert correct.time_classes[0].rating_end == 1500  # the real latest rating
+
+
+def test_build_report_keeps_quality_over_the_analyzed_subset() -> None:
+    """The other half of the contract: nothing an engine produces may be
+    diluted by games it never saw."""
+    analyzed, all_games = _partly_analyzed()
+
+    correct = build_report("testuser", analyzed, all_games=all_games)
+    quality_only = build_report("testuser", analyzed)
+
+    assert correct.games_analyzed == 3
+    assert correct.player_moves == quality_only.player_moves
+    assert correct.overall_acpl == quality_only.overall_acpl
+    assert correct.judgment_counts == quality_only.judgment_counts
+    assert correct.phases == quality_only.phases
+
+
+def test_opening_stats_separates_games_from_analyzed_games() -> None:
+    """`OpeningStats.analyzed_games` has always been declared as "how many
+    of `games` have engine analysis"; before the split the two were the
+    same number by construction."""
+    analyzed, all_games = _partly_analyzed()
+
+    (row,) = build_report("testuser", analyzed, all_games=all_games).openings
+
+    assert row.games == 5  # every game in the family
+    assert row.analyzed_games == 3  # the ACPL columns' own sample
+    assert row.wins == 2  # score reflects all five, not the analyzed three
+
+
+def test_build_report_without_all_games_is_unchanged() -> None:
+    """The default must stay byte-identical for callers that genuinely
+    only have analyzed games, which is why `all_games` is optional."""
+    analyzed, _ = _partly_analyzed()
+
+    report = build_report("testuser", analyzed)
+
+    assert report.record.games == report.games_analyzed
+    assert all(o.games == o.analyzed_games for o in report.openings)
+
+
+def test_month_volume_counts_every_game_but_acpl_only_analyzed() -> None:
+    analyzed, all_games = _partly_analyzed()
+
+    months = {
+        m.month: m
+        for m in build_report("testuser", analyzed, all_games=all_games).months
+    }
+
+    unanalyzed_month = months["2026-06"]
+    assert unanalyzed_month.games == 2  # both played
+    assert unanalyzed_month.acpl is None  # neither analyzed -- absent, not 0.0
+    assert unanalyzed_month.blunder_rate is None
+
+
+# --- recent form (docs/06-coach.md, "Recent form") -----------------------
+
+
+def test_periods_are_nested_trailing_windows_narrowest_first() -> None:
+    report = build_report("testuser", scenario_games())
+
+    labels = [p.label for p in report.periods]
+    assert labels[-1] == "whole span"
+    assert labels[:-1] == ["last 30 days"]  # 90d would restate the span
+    # Nested, so each wider window contains the narrower one.
+    assert report.periods[0].games <= report.periods[-1].games
+
+
+def test_periods_are_anchored_to_the_newest_game_not_the_clock() -> None:
+    """A player who stopped three months ago still gets a recent-form
+    read; anchoring to `now` would hand them empty windows instead."""
+    ancient = [
+        make_analyzed(
+            f"g-{i}",
+            ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"],
+            end_time=1_600_000_000 + i * 86_400 * 20,
+        )
+        for i in range(6)
+    ]
+
+    periods = build_report("testuser", ancient).periods
+
+    recent = next(p for p in periods if p.days == 30)
+    assert recent.games > 0
+    assert recent.analyzed_games > 0
+
+
+def test_period_windows_that_would_restate_the_whole_span_are_dropped() -> None:
+    """Two games a day apart make "last 30 days" and "whole span" the
+    same row; showing both invites a narrative to read a difference that
+    cannot exist."""
+    short = [
+        make_analyzed(f"g-{i}", ["e4", "e5"], end_time=1_780_000_000 + i * 86_400)
+        for i in range(2)
+    ]
+
+    assert [p.label for p in build_report("testuser", short).periods] == ["whole span"]
+
+
+def test_period_with_games_but_no_analysis_reports_absent_quality() -> None:
+    analyzed, all_games = _partly_analyzed()
+
+    whole = next(
+        p
+        for p in build_report("testuser", analyzed, all_games=all_games).periods
+        if p.days is None
+    )
+
+    assert whole.games == 5
+    assert whole.analyzed_games == 3
+    assert whole.acpl is not None  # some analysis exists in this window
+
+
+# --- profile scope (docs/06-coach.md, "Player profile") ------------------
+
+
+def test_build_profile_carries_the_reports_time_class_and_scope_count() -> None:
+    analyzed, all_games = _partly_analyzed()
+    report = build_report(
+        "testuser",
+        analyzed,
+        all_games=all_games,
+        time_class="blitz",
+        games_in_scope=len(all_games),
+    )
+
+    profile = build_profile(report)
+
+    assert profile.time_class == "blitz"
+    assert profile.games_covered == 3  # analyzed — the quality denominator
+    assert profile.games_in_scope == 5  # every game behind the volume figures
+    assert profile.periods == report.periods
+
+
+def test_profile_prompt_states_the_time_control_and_both_denominators() -> None:
+    analyzed, all_games = _partly_analyzed()
+    profile = build_profile(
+        build_report(
+            "testuser",
+            analyzed,
+            all_games=all_games,
+            time_class="blitz",
+            games_in_scope=len(all_games),
+        )
+    )
+
+    prompt = render_profile_prompt(profile)
+
+    assert "their blitz games" in prompt
+    assert "3 of 5 analyzed" in prompt
+
+
+def test_profile_context_block_names_its_scope() -> None:
+    """The embed path's whole risk: a rapid profile pasted into a prompt
+    with no scope line reads as a description of the whole player."""
+    analyzed, all_games = _partly_analyzed()
+    profile = build_profile(
+        build_report("testuser", analyzed, all_games=all_games, time_class="blitz")
+    )
+
+    context = render_profile_context(profile)
+
+    assert context.startswith("## Student profile -- their blitz games")
+
+
+def test_profile_context_states_coverage_only_when_it_is_partial() -> None:
+    analyzed, all_games = _partly_analyzed()
+    partial = build_profile(
+        build_report(
+            "testuser", analyzed, all_games=all_games, games_in_scope=len(all_games)
+        )
+    )
+    complete = build_profile(build_report("testuser", analyzed))
+
+    assert "3 of 5 games analyzed" in render_profile_context(partial)
+    assert "Coverage:" not in render_profile_context(complete)

@@ -25,11 +25,14 @@ from chess_coach.domain import (
     Color,
     CriticalPosition,
     ErrorPattern,
+    GameSummary,
     Judgment,
     MonthStats,
     MoveEval,
+    Opening,
     OpeningStats,
     OpponentStats,
+    PeriodStats,
     Phase,
     PhaseStats,
     PlayerReport,
@@ -94,16 +97,96 @@ _ERROR_LABELS: dict[str, str] = {
 }
 
 
+@dataclass
+class _VolumeGame:
+    """One game as the volume layer sees it (docs/06-coach.md, "Volume
+    and quality").
+
+    The volume aggregates -- record, ratings, monthly counts,
+    terminations, opposition, repertoire counts -- need nothing an
+    engine produces, so they must not be restricted to analyzed games:
+    doing so reports a rating from whichever game happened to be
+    analyzed last and a win rate over a biased subsample. This row is
+    the common shape both inputs reduce to, so those aggregates have
+    exactly one implementation regardless of which they were handed.
+
+    `san_moves` holds only the opening prefix, which is all
+    `_representative_lines` reads -- `GameSummary.first_plies` is that
+    prefix already, and `_FIRST_PLIES` is pinned to
+    `_REPRESENTATIVE_PLIES` in storage precisely so the two agree.
+    """
+
+    id: str
+    color: Color
+    time_class: TimeClass
+    result: Result
+    end_time: int
+    player_rating: int
+    opponent_rating: int
+    termination: str | None
+    opening: Opening | None
+    san_moves: list[str]
+    analyzed: bool
+
+
+def _volume_from_analyzed(game: AnalyzedGame) -> _VolumeGame:
+    return _VolumeGame(
+        id=game.id,
+        color=game.color,
+        time_class=game.time_class,
+        result=game.result,
+        end_time=game.end_time,
+        player_rating=game.player_rating,
+        opponent_rating=game.opponent_rating,
+        termination=game.termination,
+        opening=game.opening,
+        san_moves=game.san_moves[:_REPRESENTATIVE_PLIES],
+        analyzed=True,
+    )
+
+
+def _volume_from_summary(game: GameSummary) -> _VolumeGame:
+    return _VolumeGame(
+        id=game.id,
+        color=game.color,
+        time_class=game.time_class,
+        result=game.result,
+        end_time=game.end_time,
+        player_rating=game.player_rating,
+        opponent_rating=game.opponent_rating,
+        termination=game.termination,
+        opening=game.opening,
+        san_moves=game.first_plies,
+        analyzed=game.analyzed,
+    )
+
+
 def build_report(
     username: str,
     games: list[AnalyzedGame],
     *,
+    all_games: list[GameSummary] | None = None,
     time_class: TimeClass | None = None,
     requested_since: int | None = None,
     requested_until: int | None = None,
     games_in_scope: int | None = None,
 ) -> PlayerReport:
-    """Pure aggregation over analyzed games; every figure move-weighted.
+    """Pure aggregation; every ACPL figure move-weighted.
+
+    Two layers with two denominators (docs/06-coach.md, "Volume and
+    quality"). `games` are the analyzed games and carry the quality
+    layer -- ACPL, judgments, phases, error patterns, turning points --
+    which nothing but an engine can produce. `all_games` is every stored
+    game in the same scope, analyzed or not, and carries the volume
+    layer: record, ratings, monthly counts, terminations, opposition,
+    and the repertoire's game counts.
+
+    `all_games` defaults to None, which aggregates volume over the
+    analyzed games alone -- the behaviour before the split, kept so a
+    caller that genuinely has only analyzed games (and every existing
+    test) reads unchanged. Callers with the full list should pass it:
+    with a partly-analyzed archive the two differ sharply, and the
+    volume figures are simply wrong without it.
 
     `requested_since`/`requested_until`/`games_in_scope` carry no
     aggregation logic of their own -- they are copied verbatim onto the
@@ -111,6 +194,12 @@ def build_report(
     is stated, not implied"). All default to None.
     """
     summaries = [_summarize_game(g) for g in games]
+    quality_by_id = dict(zip((g.id for g in games), summaries, strict=True))
+    volume = (
+        [_volume_from_summary(g) for g in all_games]
+        if all_games is not None
+        else [_volume_from_analyzed(g) for g in games]
+    )
 
     player_moves = sum(s.player_moves for s in summaries)
     player_loss = sum(s.player_loss for s in summaries)
@@ -119,23 +208,26 @@ def build_report(
         username=username,
         games_analyzed=len(games),
         player_moves=player_moves,
-        window_start=min((g.end_time for g in games), default=None),
-        window_end=max((g.end_time for g in games), default=None),
+        # The covered span is the scope's span, not the analyzed
+        # subset's -- with `all_games` omitted the two are identical.
+        window_start=min((g.end_time for g in volume), default=None),
+        window_end=max((g.end_time for g in volume), default=None),
         time_class=time_class,
         requested_since=requested_since,
         requested_until=requested_until,
         games_in_scope=games_in_scope,
-        record=_record(games),
+        record=_record(volume),
         overall_acpl=round(player_loss / player_moves, 1) if player_moves else 0.0,
         phases=_phase_stats(summaries),
         judgment_counts={
             j: sum(s.judgment_counts[j] for s in summaries) for j in _JUDGMENTS
         },
-        time_classes=_time_class_stats(games),
-        months=_month_stats(games, summaries),
-        terminations=_termination_stats(games),
-        opponents=_opponent_stats(games),
-        openings=_opening_stats(games, summaries),
+        time_classes=_time_class_stats(volume),
+        months=_month_stats(volume, quality_by_id),
+        periods=_period_stats(volume, quality_by_id),
+        terminations=_termination_stats(volume),
+        opponents=_opponent_stats(volume),
+        openings=_opening_stats(volume, quality_by_id),
         error_patterns=_error_patterns(games),
         critical_positions=_critical_positions(games),
     )
@@ -237,7 +329,7 @@ def _phase_stats(summaries: list[_GameSummary]) -> dict[Phase, PhaseStats]:
     return stats
 
 
-def _record(games: list[AnalyzedGame]) -> Record:
+def _record(games: list[_VolumeGame]) -> Record:
     return Record(
         games=len(games),
         wins=sum(g.result == "win" for g in games),
@@ -249,8 +341,8 @@ def _record(games: list[AnalyzedGame]) -> Record:
 # --- time classes, months, terminations, opponents -------------------------
 
 
-def _time_class_stats(games: list[AnalyzedGame]) -> list[TimeClassStats]:
-    buckets: dict[TimeClass, list[AnalyzedGame]] = defaultdict(list)
+def _time_class_stats(games: list[_VolumeGame]) -> list[TimeClassStats]:
+    buckets: dict[TimeClass, list[_VolumeGame]] = defaultdict(list)
     for g in games:
         buckets[g.time_class].append(g)
 
@@ -276,18 +368,27 @@ def _time_class_stats(games: list[AnalyzedGame]) -> list[TimeClassStats]:
 
 
 def _month_stats(
-    games: list[AnalyzedGame], summaries: list[_GameSummary]
+    games: list[_VolumeGame], quality_by_id: dict[str, _GameSummary]
 ) -> list[MonthStats]:
-    buckets: dict[str, list[int]] = defaultdict(list)
-    for i, g in enumerate(games):
+    """`games`/`rating_end` over every game in the month, ACPL and
+    blunder rate over the analyzed ones (docs/06-coach.md, "Volume and
+    quality"): a month whose games are half analyzed still played all of
+    them, and its closing rating is the real one.
+
+    A month with games but no analysis yet reads acpl/blunder_rate as
+    None -- absent, which is what it is, not 0.0.
+    """
+    buckets: dict[str, list[_VolumeGame]] = defaultdict(list)
+    for g in games:
         month = datetime.fromtimestamp(g.end_time, tz=UTC).strftime("%Y-%m")
-        buckets[month].append(i)
+        buckets[month].append(g)
 
     result: list[MonthStats] = []
     for month in sorted(buckets):
-        indices = buckets[month]
-        month_games = [games[i] for i in indices]
-        month_summaries = [summaries[i] for i in indices]
+        month_games = buckets[month]
+        month_summaries = [
+            s for g in month_games if (s := quality_by_id.get(g.id)) is not None
+        ]
         latest = max(month_games, key=lambda g: g.end_time)
         moves = sum(s.player_moves for s in month_summaries)
         loss = sum(s.player_loss for s in month_summaries)
@@ -304,7 +405,84 @@ def _month_stats(
     return result
 
 
-def _termination_stats(games: list[AnalyzedGame]) -> list[TerminationStats]:
+# Trailing windows the profile reports performance over, narrowest
+# first (docs/06-coach.md, "Recent form"). Nested rather than disjoint:
+# a thin recent window is still backed by the wider ones behind it, so
+# a narrative always has *some* window with a real sample that is more
+# recent than the whole span.
+_PERIOD_DAYS: tuple[int, ...] = (30, 90)
+_DAY_SECONDS = 86_400
+
+
+def _period_stats(
+    games: list[_VolumeGame], quality_by_id: dict[str, _GameSummary]
+) -> list[PeriodStats]:
+    """Performance over trailing windows ending at the most recent game
+    in scope (docs/06-coach.md, "Recent form").
+
+    Anchored to the newest game rather than to `now` so the windows
+    describe the data rather than the clock: a player who stopped
+    playing three months ago would otherwise get three empty windows
+    and a profile that says nothing. Windows that would restate the
+    whole span are dropped -- with two months of history, "last 90
+    days" and "all time" are the same row, and showing both invites a
+    narrative to read a difference that cannot exist.
+    """
+    if not games:
+        return []
+
+    newest = max(g.end_time for g in games)
+    oldest = min(g.end_time for g in games)
+    span_days = (newest - oldest) / _DAY_SECONDS
+
+    periods = [
+        _period(
+            games, quality_by_id, label=f"last {days} days", days=days, newest=newest
+        )
+        for days in _PERIOD_DAYS
+        if days < span_days
+    ]
+    # "whole span", not "all time": these facts may already be scoped to
+    # a window the caller chose, and calling that "all time" would state
+    # something false about the player's history.
+    periods.append(
+        _period(games, quality_by_id, label="whole span", days=None, newest=newest)
+    )
+    return periods
+
+
+def _period(
+    games: list[_VolumeGame],
+    quality_by_id: dict[str, _GameSummary],
+    *,
+    label: str,
+    days: int | None,
+    newest: int,
+) -> PeriodStats:
+    members = (
+        games
+        if days is None
+        else [g for g in games if g.end_time >= newest - days * _DAY_SECONDS]
+    )
+    summaries = [s for g in members if (s := quality_by_id.get(g.id)) is not None]
+    moves = sum(s.player_moves for s in summaries)
+    loss = sum(s.player_loss for s in summaries)
+    blunders = sum(s.judgment_counts["blunder"] for s in summaries)
+    latest = max(members, key=lambda g: g.end_time) if members else None
+    return PeriodStats(
+        label=label,
+        days=days,
+        games=len(members),
+        record=_record(members),
+        analyzed_games=len(summaries),
+        player_moves=moves,
+        acpl=round(loss / moves, 1) if moves else None,
+        blunder_rate=round(blunders / moves, 4) if moves else None,
+        rating_end=latest.player_rating if latest is not None else None,
+    )
+
+
+def _termination_stats(games: list[_VolumeGame]) -> list[TerminationStats]:
     counts: dict[tuple[Result, str], int] = defaultdict(int)
     for g in games:
         counts[(g.result, g.termination or "unknown")] += 1
@@ -316,7 +494,7 @@ def _termination_stats(games: list[AnalyzedGame]) -> list[TerminationStats]:
     ]
 
 
-def _opponent_stats(games: list[AnalyzedGame]) -> OpponentStats | None:
+def _opponent_stats(games: list[_VolumeGame]) -> OpponentStats | None:
     if not games:
         return None
     diffs = [g.player_rating - g.opponent_rating for g in games]
@@ -339,20 +517,32 @@ def _opponent_stats(games: list[AnalyzedGame]) -> OpponentStats | None:
 
 
 def _opening_stats(
-    games: list[AnalyzedGame], summaries: list[_GameSummary]
+    games: list[_VolumeGame], quality_by_id: dict[str, _GameSummary]
 ) -> list[OpeningStats]:
-    groups: dict[tuple[Color, str, str], list[int]] = defaultdict(list)
+    """Repertoire rows over every classified game, with the ACPL columns
+    over the analyzed members only (docs/06-coach.md, "Volume and
+    quality").
+
+    `games` and the win/loss/draw columns are volume: an opening's score
+    is a fact about every game played in it, and computing it over the
+    analyzed subset alone made a repertoire's win rate an artifact of
+    which games the engine had reached. `analyzed_games` is the ACPL
+    columns' own sample -- the field has always been declared as "how
+    many of `games` have engine analysis" and only now can differ.
+    """
+    groups: dict[tuple[Color, str, str], list[_VolumeGame]] = defaultdict(list)
     plies: dict[tuple[Color, str, str], list[int]] = defaultdict(list)
-    for i, g in enumerate(games):
+    for g in games:
         if g.opening is not None:
             key = (g.color, g.opening.eco, g.opening.name)
-            groups[key].append(i)
+            groups[key].append(g)
             plies[key].append(g.opening.ply)
 
     stats: list[OpeningStats] = []
-    for (color, eco, name), indices in groups.items():
-        members = [games[i] for i in indices]
-        member_summaries = [summaries[i] for i in indices]
+    for (color, eco, name), members in groups.items():
+        member_summaries = [
+            s for g in members if (s := quality_by_id.get(g.id)) is not None
+        ]
         opening_moves = sum(s.phase_moves["opening"] for s in member_summaries)
         opening_loss = sum(s.phase_loss["opening"] for s in member_summaries)
         total_moves = sum(s.player_moves for s in member_summaries)
@@ -377,7 +567,7 @@ def _opening_stats(
                 wins=sum(g.result == "win" for g in members),
                 losses=sum(g.result == "loss" for g in members),
                 draws=sum(g.result == "draw" for g in members),
-                analyzed_games=len(members),
+                analyzed_games=len(member_summaries),
                 opening_acpl=(
                     round(opening_loss / opening_moves, 1) if opening_moves else None
                 ),
@@ -417,7 +607,7 @@ def _impact(games: int, wins: int, draws: int) -> float:
 _REPRESENTATIVE_PLIES = 6
 
 
-def _representative_lines(members: list[AnalyzedGame], color: Color) -> tuple[str, str]:
+def _representative_lines(members: list[_VolumeGame], color: Color) -> tuple[str, str]:
     """The group's representative line, ties broken by lowest game id.
 
     `system` -- the key consumers roll rows up on -- is picked by the

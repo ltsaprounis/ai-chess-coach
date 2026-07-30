@@ -1094,3 +1094,32 @@ th[aria-sort="descending"] .th-sort {
   opacity: 0.65;
   font-style: italic;
 }
+
+/* Coach page: the player profile sits behind a disclosure so the page
+   opens on the advice flow the student came for, with the profile one
+   click away (docs/08-frontend.md, Coach). */
+.profile-details {
+  margin: 1rem 0;
+}
+
+.profile-details > summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+  font-weight: 600;
+}
+
+.profile-details > summary:hover {
+  color: var(--muted);
+}
+
+.profile-details > summary .agent-note {
+  font-weight: 400;
+}
+
+/* The card is a full-width block here, not a flex column beside a
+   sibling panel — .panel's `flex: 1 1 22rem` would otherwise leave it
+   sized for a row it is not in. */
+.profile-details .profile-card {
+  flex: none;
+  margin-top: 0.5rem;
+}

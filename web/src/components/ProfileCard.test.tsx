@@ -14,7 +14,9 @@ import ProfileCard from "./ProfileCard";
 function profile(partial: Partial<PlayerProfile> = {}): PlayerProfile {
   return {
     username: "alice",
+    time_class: "rapid",
     games_covered: 42,
+    games_in_scope: 42,
     window_start: 1_700_000_000,
     window_end: 1_720_000_000,
     player_moves: 1_000,
@@ -38,6 +40,7 @@ function profile(partial: Partial<PlayerProfile> = {}): PlayerProfile {
       },
     ],
     months: [],
+    periods: [],
     openings: [],
     error_patterns: [],
     narrative: null,
@@ -60,6 +63,7 @@ function narrativeMeta(
 type RenderProps = {
   profile: PlayerProfile;
   narrative?: ProfileNarrative | null;
+  narrativeGamesNow?: number | null;
   generating?: boolean;
   generateError?: string | null;
 };
@@ -67,6 +71,7 @@ type RenderProps = {
 function render({
   profile: p,
   narrative = null,
+  narrativeGamesNow = null,
   generating = false,
   generateError = null,
 }: RenderProps): string {
@@ -75,6 +80,7 @@ function render({
       <ProfileCard
         profile={p}
         narrative={narrative}
+        narrativeGamesNow={narrativeGamesNow}
         agentLabel={(id) => `Agent ${id}`}
         generating={generating}
         generateError={generateError}
@@ -163,7 +169,7 @@ describe("ProfileCard", () => {
         narrative: narrativeMeta({ games_covered: 42 }),
       });
       expect(html).toContain('role="alert"');
-      expect(html).toContain("generated over 42 analyzed games");
+      expect(html).toContain("generated over 42 analyzed rapid games");
       expect(html).toContain("you now have 50");
     });
 
@@ -172,7 +178,7 @@ describe("ProfileCard", () => {
         profile: profile({ games_covered: 30, narrative: "Some read." }),
         narrative: narrativeMeta({ games_covered: 42 }),
       });
-      expect(html).toContain("generated over 42 analyzed games");
+      expect(html).toContain("generated over 42 analyzed rapid games");
       expect(html).toContain("you now have 30");
     });
   });
@@ -180,7 +186,7 @@ describe("ProfileCard", () => {
   describe("generate / regenerate action", () => {
     it("offers a primary Generate call-to-action when no narrative exists yet", () => {
       const html = render({ profile: profile({ games_covered: 10 }) });
-      expect(html).toContain("No narrative yet");
+      expect(html).toContain("No rapid narrative yet");
       expect(html).toContain(">Generate<");
       expect(html).not.toContain(">Regenerate<");
     });
@@ -229,12 +235,132 @@ describe("ProfileCard", () => {
     });
   });
 
+  describe("coverage and scope", () => {
+    it("names the time control the profile covers", () => {
+      const html = render({ profile: profile({ time_class: "bullet" }) });
+      expect(html).toContain("Player profile — bullet");
+    });
+
+    it("says all time controls when the facts mix them", () => {
+      const html = render({ profile: profile({ time_class: null }) });
+      expect(html).toContain("Player profile — all time controls");
+    });
+
+    // The headline correctness fix: quality figures come from analyzed
+    // games, everything else from all of them, and the card must say so
+    // rather than presenting the analyzed subset as the whole history.
+    it("states both denominators when coverage is partial", () => {
+      const html = render({
+        profile: profile({ games_covered: 40, games_in_scope: 120 }),
+      });
+      expect(html).toContain("cover all 120 games");
+      expect(html).toContain("40 analyzed");
+    });
+
+    it("says so plainly when everything in scope is analyzed", () => {
+      const html = render({
+        profile: profile({ games_covered: 42, games_in_scope: 42 }),
+      });
+      expect(html).toContain("All 42 games in scope are analyzed");
+    });
+
+    it("renders the recent-form windows with their own denominators", () => {
+      const html = render({
+        profile: profile({
+          periods: [
+            {
+              label: "last 30 days",
+              days: 30,
+              games: 12,
+              record: { games: 12, wins: 6, losses: 4, draws: 2 },
+              analyzed_games: 8,
+              player_moves: 300,
+              acpl: 42,
+              blunder_rate: 0.031,
+              rating_end: 1540,
+            },
+            {
+              label: "whole span",
+              days: null,
+              games: 42,
+              record: { games: 42, wins: 20, losses: 15, draws: 7 },
+              analyzed_games: 42,
+              player_moves: 1000,
+              acpl: 35,
+              blunder_rate: 0.01,
+              rating_end: 1523,
+            },
+          ],
+        }),
+      });
+      expect(html).toContain("Recent form");
+      expect(html).toContain("last 30 days");
+      expect(html).toContain("whole span");
+      expect(html).toContain("0.42");
+      expect(html).toContain("3.1%");
+    });
+
+    it("omits recent form when there is only the whole span to show", () => {
+      const html = render({
+        profile: profile({
+          periods: [
+            {
+              label: "whole span",
+              days: null,
+              games: 42,
+              record: { games: 42, wins: 20, losses: 15, draws: 7 },
+              analyzed_games: 42,
+              player_moves: 1000,
+              acpl: 35,
+              blunder_rate: 0.01,
+              rating_end: 1523,
+            },
+          ],
+        }),
+      });
+      expect(html).not.toContain("Recent form");
+    });
+
+    it("shows an absent-quality window as a dash, never as zero loss", () => {
+      const html = render({
+        profile: profile({
+          periods: [
+            {
+              label: "last 30 days",
+              days: 30,
+              games: 5,
+              record: { games: 5, wins: 3, losses: 2, draws: 0 },
+              analyzed_games: 0,
+              player_moves: 0,
+              acpl: null,
+              blunder_rate: null,
+              rating_end: 1540,
+            },
+            {
+              label: "whole span",
+              days: null,
+              games: 42,
+              record: { games: 42, wins: 20, losses: 15, draws: 7 },
+              analyzed_games: 42,
+              player_moves: 1000,
+              acpl: 35,
+              blunder_rate: 0.01,
+              rating_end: 1523,
+            },
+          ],
+        }),
+      });
+      expect(html).toContain("—");
+      expect(html).not.toContain("0.00");
+    });
+  });
+
   describe("empty states", () => {
     it("shows a short note with no Generate action at zero analyzed games", () => {
       const html = render({ profile: profile({ games_covered: 0 }) });
-      expect(html).toContain("No analyzed games yet");
+      expect(html).toContain("No analyzed rapid games in this window");
       expect(html).not.toContain("<button");
-      expect(html).not.toContain("No narrative yet");
+      expect(html).not.toContain("No rapid narrative yet");
     });
 
     it("shows the facts plus a Generate call-to-action with no narrative yet", () => {
@@ -245,7 +371,7 @@ describe("ProfileCard", () => {
           error_patterns: [],
         }),
       });
-      expect(html).toContain("No narrative yet");
+      expect(html).toContain("No rapid narrative yet");
       expect(html).toContain(">Generate<");
       expect(html).toContain("No chosen systems with enough games yet.");
       expect(html).toContain("No recurring problem lines yet.");

@@ -153,6 +153,11 @@ class PhaseStats(BaseModel):          # acpl is None when moves == 0 —
     judgment_counts: dict[Judgment, int]
 
 class PlayerReport(BaseModel):
+    # Two layers, two denominators (06-coach.md, "Volume and
+    # quality"): volume fields describe every stored game in scope,
+    # quality fields the analyzed subset. Mixing them made a
+    # partly-analyzed archive report a rating from whichever game the
+    # engine happened to reach last.
     username: str; games_analyzed: int; player_moves: int
     window_start: int | None; window_end: int | None
     time_class: TimeClass | None      # the filter applied; None = all
@@ -165,6 +170,7 @@ class PlayerReport(BaseModel):
     judgment_counts: dict[Judgment, int]
     time_classes: list[TimeClassStats]   # rating movement per control
     months: list[MonthStats]             # games/rating/ACPL/blunder %
+    periods: list[PeriodStats]           # trailing recent-form windows
     terminations: list[TerminationStats] # how games actually ended
     opponents: OpponentStats | None      # score vs stronger/weaker
     openings: list[OpeningStats]
@@ -173,15 +179,17 @@ class PlayerReport(BaseModel):
 ```
 
 Composites elided above for brevity (`CriticalPosition`,
-`TimeClassStats`, `MonthStats`, `OpponentStats`, `TerminationStats`,
+`TimeClassStats`, `MonthStats`, `PeriodStats`, `OpponentStats`,
+`TerminationStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
 `RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`,
 `PlayerProfile`, `ProfileOpening`) also
 live in `domain.py` — the component docs state their shapes where
 they are used. `PlayerProfile` is the coach's two-layer distillation
-of the report (docs/06-coach.md, "Player profile"): component 6
-defines and renders it, 3 stores it beside its LLM narrative, and 7
-serves it and embeds its context block into the other coach prompts.
+of the report (docs/06-coach.md, "Player profile"), scoped to one
+time control: component 6 defines and renders it, 3 stores it beside
+its LLM narrative keyed by (player, control), and 7 serves it and
+embeds its context block into the other coach prompts.
 Types may grow, but changes to them are contract changes —
 update the affected component docs in the same commit.
 

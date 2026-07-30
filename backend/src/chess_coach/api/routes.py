@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from functools import partial
 from typing import Annotated, cast
 from uuid import uuid4
 
@@ -18,6 +19,7 @@ from chess_coach.api.chat import (
     ApiChatToolkit,
     cached_assistant_turn,
     game_scope_context,
+    profile_for_game,
     report_scope_context,
     time_class_or_none,
     window_or_none,
@@ -74,7 +76,7 @@ from chess_coach.storage import (
     ReportKey,
     append_chat_exchange,
     clear_chat_provider_state,
-    count_games,
+    count_analyzed_games,
     count_games_needing_analysis,
     create_chat_thread,
     delete_chat_thread,
@@ -89,6 +91,7 @@ from chess_coach.storage import (
     list_analyzed_games,
     list_chat_messages,
     list_chat_threads,
+    list_game_summaries,
     list_games,
     list_players,
     list_repertoire_games,
@@ -639,12 +642,10 @@ async def explain_move(
     # where fresh facts under an older narrative could contradict each
     # other, and rebuilding facts would put a full-archive aggregation on
     # every explain call. No row -> None -> the prompt renders unchanged.
-    cached_profile = await run_in_threadpool(get_player_profile, db, game.username)
-    prompt = render_explain_prompt(
-        ctx,
-        lines,
-        profile=cached_profile.profile if cached_profile is not None else None,
+    profile = await run_in_threadpool(
+        profile_for_game, db, game.username, game.time_class
     )
+    prompt = render_explain_prompt(ctx, lines, profile=profile)
     analyst = _build_analyst(pool, cfg)
 
     async def stream() -> AsyncIterator[dict[str, str]]:
@@ -733,22 +734,29 @@ def player_report(
     until: int | None = None,
     time_class: TimeClass | None = None,
 ) -> PlayerReport:
-    """Aggregated stats over the player's analyzed games.
+    """Aggregated stats over the player's games.
 
     `since`/`until` (epoch seconds) restrict to a time window;
     `time_class` restricts to one time control.
+
+    Both lists go in (docs/06-coach.md, "Volume and quality"): the
+    analyzed games carry ACPL, judgments and error patterns, the full
+    scope carries ratings, records and repertoire counts. `all_games`
+    also *is* the scope count, so it replaces the separate
+    `count_games` query rather than adding to it.
     """
     user = username.lower()
-    games_in_scope = count_games(
+    all_games = list_game_summaries(
         db, user, since=since, until=until, time_class=time_class
     )
     return build_report(
         user,
         list_analyzed_games(db, user, since=since, until=until, time_class=time_class),
+        all_games=all_games,
         time_class=time_class,
         requested_since=since,
         requested_until=until,
-        games_in_scope=games_in_scope,
+        games_in_scope=len(all_games),
     )
 
 
@@ -848,16 +856,17 @@ async def coach_player(
                 status_code=409,
                 detail="no analyzed games yet — sync and analyze first",
             )
-        games_in_scope = count_games(
+        all_games = list_game_summaries(
             db, user, since=since, until=until, time_class=time_class
         )
         report = build_report(
             user,
             games,
+            all_games=all_games,
             time_class=time_class,
             requested_since=since,
             requested_until=until,
-            games_in_scope=games_in_scope,
+            games_in_scope=len(all_games),
         )
         return render_prompt(report), report
 
@@ -918,33 +927,83 @@ class ProfileNarrative(BaseModel):
 class ProfileResponse(BaseModel):
     profile: PlayerProfile  # facts always fresh; narrative attached when stored
     narrative: ProfileNarrative | None = None  # None when nothing is stored yet
+    # Analyzed games in the *narrative's* own scope (its time control over
+    # the player's full history), which is not the response's scope
+    # whenever a window filter is applied. The staleness hint compares
+    # this against `narrative.games_covered`; comparing against
+    # `profile.games_covered` instead would flag every windowed view as
+    # stale, since a 30-day facts count can never match a full-history
+    # narrative's. None when no narrative is stored.
+    narrative_games_now: int | None = None
 
 
-def _load_profile_facts(db: Db, username: str) -> PlayerProfile:
-    """Fresh facts over the player's full stored history, no window or
-    time-class filters (docs/07-api.md, "Player profile"):
-    `list_analyzed_games` -> `build_report` -> `build_profile`.
-    `narrative` is always None here -- callers attach the stored one, if
-    any. An unknown player has no stored games, so this is simply the
-    profile of an empty report, mirroring `/report`.
+def _load_profile_facts(
+    db: Db,
+    username: str,
+    *,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> PlayerProfile:
+    """Fresh facts over the requested scope (docs/07-api.md, "Player
+    profile"): `list_analyzed_games` + `list_game_summaries` ->
+    `build_report` -> `build_profile`.
+
+    Both lists, for the reason `/report` passes both: ratings, records
+    and repertoire counts describe every game in scope, and restricting
+    them to the analyzed subset reports a rating from whichever game the
+    engine happened to reach last (docs/06-coach.md, "Volume and
+    quality"). `narrative` is always None here -- callers attach the
+    stored one, if any. An unknown player has no stored games, so this is
+    simply the profile of an empty report, mirroring `/report`.
     """
-    games = list_analyzed_games(db, username)
-    report = build_report(username, games)
+    games = list_analyzed_games(
+        db, username, since=since, until=until, time_class=time_class
+    )
+    all_games = list_game_summaries(
+        db, username, since=since, until=until, time_class=time_class
+    )
+    report = build_report(
+        username,
+        games,
+        all_games=all_games,
+        time_class=time_class,
+        requested_since=since,
+        requested_until=until,
+        games_in_scope=len(all_games),
+    )
     return build_profile(report)
 
 
 @router.get("/players/{username}/profile")
-def player_profile(username: str, db: DbDep) -> ProfileResponse:
+def player_profile(
+    username: str,
+    db: DbDep,
+    since: int | None = None,
+    until: int | None = None,
+    time_class: TimeClass | None = None,
+) -> ProfileResponse:
     """The student profile (docs/06-coach.md, "Player profile"): facts are
-    always freshly aggregated over the player's full stored history --
-    never an LLM call -- and the stored narrative, when one exists, is
-    attached to the facts' `narrative` field alongside its own metadata.
-    An unknown player has no stored games, so this returns empty facts and
-    no narrative, 200 like `/report`.
+    always freshly aggregated -- never an LLM call -- and the stored
+    narrative, when one exists, is attached to the facts' `narrative`
+    field alongside its own metadata.
+
+    Facts honour all three filters. The narrative is looked up by
+    `time_class` alone, because that is the only dimension it is stored
+    under: `since` moves with the calendar, so keying the narrative on it
+    would strand every stored row overnight. A windowed request therefore
+    returns windowed facts beside a narrative describing that control's
+    whole history -- `narrative_games_now` states the latter's own live
+    count so the UI can label both honestly.
+
+    An unknown player has no stored games, so this returns empty facts
+    and no narrative, 200 like `/report`.
     """
     user = username.lower()
-    facts = _load_profile_facts(db, user)
-    cached = get_player_profile(db, user)
+    facts = _load_profile_facts(
+        db, user, since=since, until=until, time_class=time_class
+    )
+    cached = get_player_profile(db, user, time_class=time_class)
     if cached is None:
         return ProfileResponse(profile=facts)
     return ProfileResponse(
@@ -955,11 +1014,17 @@ def player_profile(username: str, db: DbDep) -> ProfileResponse:
             generated_at=cached.created_at,
             games_covered=cached.profile.games_covered,
         ),
+        # The narrative's scope, not the request's: no window, since that
+        # is how POST generates it.
+        narrative_games_now=count_analyzed_games(db, user, time_class=time_class),
     )
 
 
 class ProfileGenerateRequest(BaseModel):
     agent_id: str | None = None  # None -> config default agent
+    # Which time control to describe; None -> all controls mixed. The
+    # narrative's only scope dimension, and its storage key.
+    time_class: TimeClass | None = None
 
 
 @router.post("/players/{username}/profile")
@@ -977,10 +1042,16 @@ async def regenerate_player_profile(
     concrete line, so there is nothing for an engine to verify) ->
     `save_player_profile`. Responds with the same shape as `GET`. 409 when
     there are no analyzed games to describe.
+
+    Generated over the time control's **full** history, never a window:
+    the narrative is the durable artifact other prompts embed, and one
+    written over "the last 30 days" would be silently wrong the moment
+    those 30 days moved. Time control is the one scope it carries.
     """
     agent_id = cfg.coach.default_agent
     if body is not None and body.agent_id is not None:
         agent_id = body.agent_id
+    time_class = body.time_class if body is not None else None
     provider = providers.get(agent_id)
     if provider is None:
         raise HTTPException(status_code=400, detail=f"unknown coach agent: {agent_id}")
@@ -989,12 +1060,16 @@ async def regenerate_player_profile(
     # Threadpool: list_analyzed_games hits storage and build_report replays
     # every game with python-chess, mirroring /coach's own offload of the
     # same pipeline.
-    facts = await run_in_threadpool(_load_profile_facts, db, user)
+    facts = await run_in_threadpool(
+        partial(_load_profile_facts, db, user, time_class=time_class)
+    )
     if facts.games_covered == 0:
-        raise HTTPException(
-            status_code=409,
-            detail="no analyzed games yet -- sync and analyze first",
+        detail = (
+            f"no analyzed {time_class} games yet -- sync and analyze first"
+            if time_class is not None
+            else "no analyzed games yet -- sync and analyze first"
         )
+        raise HTTPException(status_code=409, detail=detail)
     prompt = render_profile_prompt(facts)
 
     try:
@@ -1007,13 +1082,16 @@ async def regenerate_player_profile(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     generated_at = await run_in_threadpool(
-        save_player_profile,
-        db,
-        user,
-        agent_id=agent_id,
-        prompt_version=PROFILE_PROMPT_VERSION,
-        facts=facts,
-        narrative=advice,
+        partial(
+            save_player_profile,
+            db,
+            user,
+            time_class=time_class,
+            agent_id=agent_id,
+            prompt_version=PROFILE_PROMPT_VERSION,
+            facts=facts,
+            narrative=advice,
+        )
     )
     return ProfileResponse(
         profile=facts.model_copy(update={"narrative": advice}),
@@ -1023,6 +1101,10 @@ async def regenerate_player_profile(
             generated_at=generated_at,
             games_covered=facts.games_covered,
         ),
+        # Just generated over exactly this scope, so the two agree by
+        # construction — the UI's staleness hint stays quiet until games
+        # are actually added.
+        narrative_games_now=facts.games_covered,
     )
 
 

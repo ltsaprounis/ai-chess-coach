@@ -5,8 +5,10 @@ import {
   errorExampleHref,
   errorExampleLabel,
   formatPawns,
+  hasPartialCoverage,
   isProfileStale,
   openingsFor,
+  scopeLabel,
 } from "./playerProfile.ts";
 
 describe("isProfileStale", () => {
@@ -29,6 +31,45 @@ describe("isProfileStale", () => {
   it("is true even when the fresh count is lower (re-sync edge case), not just higher", () => {
     expect(isProfileStale({ games_covered: 5 }, { games_covered: 10 })).toBe(
       true,
+    );
+  });
+
+  // The narrative covers its time control's full history while the
+  // facts honour the window filter too, so under a window the two
+  // counts describe different scopes and must not be compared.
+  it("compares against the narrative's own scope, not the windowed facts", () => {
+    expect(
+      isProfileStale({ games_covered: 12 }, { games_covered: 40 }, 40),
+    ).toBe(false);
+  });
+
+  it("is stale when the narrative's own scope has grown, whatever the window shows", () => {
+    expect(
+      isProfileStale({ games_covered: 12 }, { games_covered: 40 }, 55),
+    ).toBe(true);
+  });
+});
+
+describe("scopeLabel", () => {
+  it("names the time control the profile covers", () => {
+    expect(scopeLabel({ time_class: "rapid" })).toBe("rapid");
+  });
+
+  it("says all time controls when the facts mix them", () => {
+    expect(scopeLabel({ time_class: null })).toBe("all time controls");
+  });
+});
+
+describe("hasPartialCoverage", () => {
+  it("is true when quality figures rest on a subset of the games", () => {
+    expect(hasPartialCoverage({ games_covered: 40, games_in_scope: 120 })).toBe(
+      true,
+    );
+  });
+
+  it("is false once every game in scope is analyzed", () => {
+    expect(hasPartialCoverage({ games_covered: 40, games_in_scope: 40 })).toBe(
+      false,
     );
   });
 });

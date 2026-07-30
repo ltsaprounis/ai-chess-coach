@@ -17,6 +17,7 @@ from chess_coach.storage.db import Db, open_db
 from chess_coach.storage.explanations import get_explanation, save_explanation
 from chess_coach.storage.games import (
     GameFilters,
+    count_analyzed_games,
     count_games,
     count_games_needing_analysis,
     games_missing_opening,
@@ -24,6 +25,7 @@ from chess_coach.storage.games import (
     get_game,
     latest_game_time,
     list_analyzed_games,
+    list_game_summaries,
     list_games,
     list_players,
     opening_stats,
@@ -49,6 +51,7 @@ __all__ = [
     "ReportKey",
     "append_chat_exchange",
     "clear_chat_provider_state",
+    "count_analyzed_games",
     "count_games",
     "count_games_needing_analysis",
     "create_chat_thread",
@@ -64,6 +67,7 @@ __all__ = [
     "list_analyzed_games",
     "list_chat_messages",
     "list_chat_threads",
+    "list_game_summaries",
     "list_games",
     "list_players",
     "list_repertoire_games",
