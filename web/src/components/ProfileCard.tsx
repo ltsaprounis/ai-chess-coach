@@ -4,11 +4,15 @@ import { Link } from "react-router-dom";
 import type { Color, PlayerProfile, ProfileNarrative } from "../api.ts";
 import {
   blunderShare,
+  comparisonVerdict,
+  deltaOver,
   errorExampleHref,
   errorExampleLabel,
   formatGameDate,
   hasPartialCoverage,
+  isImproving,
   isProfileStale,
+  measurableComparisons,
   openingsFor,
   peakGap,
   peakLabel,
@@ -44,8 +48,6 @@ const COLOR_LABEL: Record<Color, string> = {
   white: "As White",
   black: "As Black",
 };
-// The bare side, for inline prose where "As White 52%" would not read.
-const SIDE_LABEL: Record<Color, string> = { white: "White", black: "Black" };
 
 /** One (color, chosen|faced) partition's rows — a plain table, no
  *  sorting or paging: the list is already small and ranked by the
@@ -70,6 +72,10 @@ function OpeningRows({
             <th>Opening</th>
             <th>{movesHeader}</th>
             <th>Score</th>
+            {/* Score alone cannot tell a system won on even positions
+                from one survived out of the book — 48% at 0.32 pawns a
+                move is a different problem from 48% at 0.21. */}
+            <th>Opening loss</th>
           </tr>
         </thead>
         <tbody>
@@ -78,6 +84,11 @@ function OpeningRows({
               <td>{row.name}</td>
               <td>{row.moves}</td>
               <td>{Math.round(row.score * 100)}%</td>
+              <td>
+                {row.opening_acpl === null || row.opening_acpl === undefined
+                  ? "—"
+                  : `${formatPawns(row.opening_acpl)} pawns`}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -107,15 +118,18 @@ function milestoneRows(profile: PlayerProfile): Milestone[] {
   const rows: Milestone[] = [];
   const win = profile.best_win;
   if (win) {
+    // Gap first: the gap is the achievement. chess.com pairs by rating,
+    // so "beat a 1559" only says the student was once rated about that
+    // themselves (docs/06-coach.md, "Trajectory").
     rows.push({
-      label: "Best win",
+      label: "Biggest upset",
       value: (
         <>
           <Link to={`/games/${win.game_id}`}>
             beat {win.opponent} ({win.opponent_rating})
-          </Link>{" "}
-          on {formatGameDate(win.end_time)}, rated {win.player_rating} at the
-          time
+          </Link>
+          , {win.opponent_rating - win.player_rating} points above them, on{" "}
+          {formatGameDate(win.end_time)} while rated {win.player_rating}
         </>
       ),
     });
@@ -129,31 +143,13 @@ function milestoneRows(profile: PlayerProfile): Milestone[] {
         streaks.longest_loss
       } losses`,
     });
-    // Tilt, stated as a comparison — a 39% score is only bad against a
-    // better overall one. Omitted when no game in scope was played
-    // straight after a loss: that is an absent sample, and 0% would
-    // read as a catastrophic one.
-    const afterLoss = scorePercent(streaks.after_loss);
-    const overall = scorePercent(profile.record);
-    if (afterLoss !== null) {
-      rows.push({
-        label: "After a loss",
-        value: `${afterLoss} over ${streaks.after_loss.games} game${
-          streaks.after_loss.games === 1 ? "" : "s"
-        } played straight after one${overall === null ? "" : ` · ${overall} overall`}`,
-      });
-    }
   }
 
-  const colorParts = COLORS.map((color) => {
-    const record = profile.color_records[color];
-    return record === undefined || record.games === 0
-      ? null
-      : scored(SIDE_LABEL[color], record);
-  }).filter((part) => part !== null);
-  if (colorParts.length > 0) {
-    rows.push({ label: "By color", value: colorParts.join(" · ") });
-  }
+  // The after-a-loss and by-color rows are deliberately absent: the
+  // Splits table below states both against a *matched* baseline and
+  // with a verdict. Showing the raw gap here too would put the number
+  // above the judgement of it (docs/06-coach.md, "Reading a
+  // comparison") — which is how "48% after a loss" became a finding.
 
   const opponents = profile.opponents;
   if (opponents) {
@@ -222,6 +218,9 @@ export default function ProfileCard({
   const narrativeText = profile.narrative ?? null;
   const stale = isProfileStale(profile, narrative, narrativeGamesNow);
   const milestones = milestoneRows(profile);
+  const trajectory = profile.trajectory ?? null;
+  const improving = isImproving(trajectory);
+  const splits = measurableComparisons(profile.comparisons);
 
   return (
     <section className="panel profile-card">
@@ -239,19 +238,75 @@ export default function ProfileCard({
                 student has ever been is only coaching signal next to
                 when they were there and how far below it they sit now
                 (docs/06-coach.md, "Milestones"). */}
+            {/* The peak gap only reads as a shortfall for a student
+                who is not improving. "95 below peak" beside a
+                trajectory saying "+443 over the year" is the misread
+                the whole rework exists to stop (docs/06-coach.md,
+                "Trajectory"). */}
             <div className="tile-label">
               peak {peakLabel(entry)}
-              {peakGap(entry) < 0 ? ` (${peakGap(entry)})` : ""}
+              {peakGap(entry) < 0 && !improving ? ` (${peakGap(entry)})` : ""}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Direction, over the whole archive rather than the level
+          window every other figure here covers — a coach's first
+          question, and the one thing a level-scoped window cannot
+          answer (docs/06-coach.md, "Trajectory"). */}
+      {trajectory !== null && (
+        <>
+          <h3>Trajectory</h3>
+          <p className="agent-note">
+            Over all {trajectory.games} games in this time control, not the
+            window above.
+          </p>
+          <p>
+            {[365, 180, 90, 30]
+              .map((days) => {
+                const d = deltaOver(trajectory, days);
+                return d === null
+                  ? null
+                  : `${d.delta >= 0 ? "+" : ""}${d.delta} over ${days} days`;
+              })
+              .filter((part) => part !== null)
+              .join(" · ")}
+          </p>
+          {trajectory.drawdown !== null &&
+            trajectory.drawdown !== undefined && (
+              <p className="agent-note">
+                Largest setback:{" "}
+                {trajectory.drawdown.trough - trajectory.drawdown.peak} points,{" "}
+                {trajectory.drawdown.peak} on{" "}
+                {formatGameDate(trajectory.drawdown.peak_at)} down to{" "}
+                {trajectory.drawdown.trough} on{" "}
+                {formatGameDate(trajectory.drawdown.trough_at)} ·{" "}
+                {scorePercent(trajectory.drawdown.record) ?? "—"} through the
+                fall ·{" "}
+                {trajectory.drawdown.recovered
+                  ? "recovered since"
+                  : `${scorePercent(trajectory.drawdown.since_record) ?? "—"} since`}
+              </p>
+            )}
+        </>
+      )}
 
       <p>
         Overall quality: {formatPawns(profile.overall_acpl)} pawns average loss
         per move · {Math.round(blunderShare(profile) * 100)}% of moves are
         blunders.
       </p>
+
+      {/* The window holds the student's level roughly constant. When it
+          could not, say so rather than leaving a reader to infer it. */}
+      {profile.window_spans_level_change && (
+        <p className="agent-note" role="note">
+          These figures span a change in your level — there were too few games
+          at your current one to describe it alone, so the rates below average
+          across more than one player.
+        </p>
+      )}
 
       {/* The two denominators, stated (docs/06-coach.md, "Volume and
           quality"). Ratings and records above come from every game;
@@ -325,6 +380,48 @@ export default function ProfileCard({
                   <tr key={row.label}>
                     <th scope="row">{row.label}</th>
                     <td>{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Two groups of the student's own games, compared. The verdict
+          is shown and the arithmetic is not: a sigma the reader cannot
+          calibrate invites exactly the false confidence this guard
+          removes (docs/06-coach.md, "Reading a comparison"). */}
+      {splits.length > 0 && (
+        <>
+          <h3>Splits</h3>
+          <p className="agent-note">
+            A split “within noise” is a difference this many games cannot tell
+            apart from chance — not a tendency.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Split</th>
+                  <th>This group</th>
+                  <th>The rest</th>
+                  <th>Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                {splits.map((split) => (
+                  <tr key={split.label}>
+                    <td>{split.label}</td>
+                    <td>
+                      {scorePercent(split.left) ?? "—"} ({split.left.games}){" "}
+                      {split.left_label}
+                    </td>
+                    <td>
+                      {scorePercent(split.right) ?? "—"} ({split.right.games}){" "}
+                      {split.right_label}
+                    </td>
+                    <td>{comparisonVerdict(split)}</td>
                   </tr>
                 ))}
               </tbody>

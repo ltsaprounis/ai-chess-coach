@@ -54,6 +54,14 @@ function profile(partial: Partial<PlayerProfile> = {}): PlayerProfile {
     terminations: [],
     openings: [],
     error_patterns: [],
+    // Defaulted on the backend so snapshots stored under an older shape
+    // still parse; stated here because the generated type keeps them
+    // optional and the fixture is the card's whole contract.
+    comparisons: [],
+    trajectory: null,
+    window_spans_level_change: false,
+    analyzed_window_start: null,
+    analyzed_window_end: null,
     narrative: null,
     ...partial,
   };
@@ -161,6 +169,108 @@ describe("ProfileCard", () => {
     expect(html).toContain("read on alice");
     expect(html).toContain("Alice hangs pieces under pressure in the endgame.");
     expect(html).toContain("Agent coach-a");
+  });
+
+  describe("trajectory and splits", () => {
+    const trajectory = {
+      rating_now: 1479,
+      deltas: [
+        { days: 30, rating_then: 1370, delta: 109, games: 190 },
+        { days: 90, rating_then: 1494, delta: -15, games: 511 },
+        { days: 365, rating_then: 1036, delta: 443, games: 1378 },
+      ],
+      rating_max: 1574,
+      rating_max_at: 1_780_000_000,
+      rating_min: 173,
+      rating_min_at: 1_700_000_000,
+      games: 1925,
+      window_start: 1_700_000_000,
+      window_end: 1_790_000_000,
+      drawdown: {
+        peak: 1574,
+        peak_at: 1_780_000_000,
+        trough: 1329,
+        trough_at: 1_782_000_000,
+        record: { games: 142, wins: 50, losses: 85, draws: 7 },
+        since_record: { games: 263, wins: 130, losses: 120, draws: 13 },
+        recovered: false,
+      },
+    };
+
+    it("shows direction over the whole archive, not the level window", () => {
+      const html = render({ profile: profile({ trajectory }) });
+      expect(html).toContain("+443 over 365 days");
+      expect(html).toContain("-15 over 90 days");
+      expect(html).toContain("Over all 1925 games in this time control");
+      expect(html).toContain("Largest setback: -245 points");
+    });
+
+    it("suppresses the peak gap while the student is improving", () => {
+      // "95 below peak" beside "+443 over the year" is the misread the
+      // whole rework exists to stop (docs/06-coach.md, "Trajectory").
+      const improving = render({ profile: profile({ trajectory }) });
+      expect(improving).not.toContain("(-17)");
+
+      const falling = render({
+        profile: profile({
+          trajectory: {
+            ...trajectory,
+            deltas: [{ days: 365, rating_then: 1600, delta: -121, games: 900 }],
+          },
+        }),
+      });
+      expect(falling).toContain("(-17)"); // 1523 against a 1540 peak
+    });
+
+    it("states each split's verdict and never its arithmetic", () => {
+      const html = render({
+        profile: profile({
+          comparisons: [
+            {
+              label: "Tilt",
+              left_label: "within 2 hours of a loss",
+              left: { games: 380, wins: 173, losses: 186, draws: 21 },
+              right_label: "every other game",
+              right: { games: 778, wins: 391, losses: 343, draws: 44 },
+              gap: -4.8,
+              resolution: 6.1,
+              significant: false,
+            },
+          ],
+        }),
+      });
+      expect(html).toContain("Tilt");
+      expect(html).toContain("within noise");
+      expect(html).not.toContain("sigma");
+      expect(html).not.toContain("6.1");
+    });
+
+    it("drops a split too thin to measure rather than labelling it", () => {
+      const html = render({
+        profile: profile({
+          comparisons: [
+            {
+              label: "Tilt",
+              left_label: "within 2 hours of a loss",
+              left: { games: 1, wins: 0, losses: 1, draws: 0 },
+              right_label: "every other game",
+              right: { games: 41, wins: 20, losses: 14, draws: 7 },
+              gap: -50,
+              resolution: 0,
+              significant: false,
+            },
+          ],
+        }),
+      });
+      expect(html).not.toContain("Splits");
+    });
+
+    it("says so when the window had to span a change in level", () => {
+      const html = render({
+        profile: profile({ window_spans_level_change: true }),
+      });
+      expect(html).toContain("span a change in your level");
+    });
   });
 
   describe("staleness hint", () => {
@@ -423,32 +533,25 @@ describe("ProfileCard", () => {
       });
       expect(html).toContain('href="/games/g-best"');
       expect(html).toContain("beat marko77 (1750)");
-      expect(html).toContain("rated 1500 at the time");
+      // Gap first: the gap is the achievement, where the opponent's
+      // rating alone restates the student's own peak.
+      expect(html).toContain("250 points above them");
+      expect(html).toContain("while rated 1500");
     });
 
-    it("reads the after-a-loss score against the overall one", () => {
+    it("leaves the after-a-loss split to the verdicted Splits table", () => {
+      // The raw gap is not shown beside the milestones any more: the
+      // Splits table states it against a matched baseline and with a
+      // verdict, and showing both puts the number above the judgement
+      // of it (docs/06-coach.md, "Reading a comparison").
       const html = render({ profile: profile({ streaks }) });
       expect(html).toContain("3-game losing run");
       expect(html).toContain("longest 6 wins, 4 losses");
-      // 3.5/10 after a loss against 23.5/42 overall.
-      expect(html).toContain("35% over 10 games");
-      expect(html).toContain("56% overall");
-    });
-
-    it("omits the after-a-loss row with no such games, rather than showing 0%", () => {
-      const html = render({
-        profile: profile({
-          streaks: {
-            ...streaks,
-            after_loss: { games: 0, wins: 0, losses: 0, draws: 0 },
-          },
-        }),
-      });
-      expect(html).toContain("3-game losing run");
       expect(html).not.toContain("After a loss");
+      expect(html).not.toContain("56% overall");
     });
 
-    it("splits the score by side and states how losses end", () => {
+    it("states how losses end, leaving the color split to Splits", () => {
       const html = render({
         profile: profile({
           terminations: [
@@ -457,8 +560,7 @@ describe("ProfileCard", () => {
           ],
         }),
       });
-      expect(html).toContain("White 59% (22)"); // (12 + 2/2) of 22
-      expect(html).toContain("Black 53% (20)");
+      expect(html).not.toContain("White 59% (22)");
       expect(html).toContain("timeout 60%");
       expect(html).toContain("resigned 40%");
     });

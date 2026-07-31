@@ -11,6 +11,53 @@ type ProfileTimeClass = PlayerProfile["time_classes"][number];
 type ProfileTermination = PlayerProfile["terminations"][number];
 type Record_ = ProfileTimeClass["record"];
 type Streaks = NonNullable<PlayerProfile["streaks"]>;
+export type RatingTrajectory = NonNullable<PlayerProfile["trajectory"]>;
+export type Drawdown = NonNullable<RatingTrajectory["drawdown"]>;
+export type ProfileComparison = PlayerProfile["comparisons"][number];
+
+/** True unless both the 90- and 365-day deltas are ≤ 0 — the backend's
+ *  `RatingTrajectory.improving`, which pydantic does not serialize
+ *  because it is a property.
+ *
+ *  Mirrored rather than imported because the card must not contradict
+ *  the prompt: one saying "up 443 points over the year" while the tile
+ *  beside it labels the same student "95 below peak" is the misread
+ *  this whole rule exists to stop. A student with neither delta yet
+ *  measured counts as improving, so the gap stays suppressed rather
+ *  than asserted on no evidence. */
+export function isImproving(trajectory: RatingTrajectory | null): boolean {
+  if (trajectory === null) return false;
+  const long = trajectory.deltas.filter((d) => d.days === 90 || d.days === 365);
+  return long.length === 0 || long.some((d) => d.delta > 0);
+}
+
+/** The delta for one trailing span, or null when the archive is too
+ *  short to cover it — "up 443 over the last year" on an eight-month
+ *  archive is a claim about a year that does not exist. */
+export function deltaOver(
+  trajectory: RatingTrajectory,
+  days: number,
+): RatingTrajectory["deltas"][number] | null {
+  return trajectory.deltas.find((d) => d.days === days) ?? null;
+}
+
+/** The verdict a comparison renders, and nothing else: no sigmas, no
+ *  p-values, no arithmetic. A number the reader cannot calibrate
+ *  invites exactly the false confidence the guard removes
+ *  (docs/06-coach.md, "Reading a comparison"). Unmeasurable splits are
+ *  filtered out by `measurableComparisons` rather than labelled. */
+export function comparisonVerdict(c: ProfileComparison): string {
+  return c.significant ? "a real difference" : "within noise";
+}
+
+/** Only the splits that could actually be measured. An unmeasurable one
+ *  says nothing in either direction, and a row reading "n/a — too few
+ *  games" spends space on the absence of a finding. */
+export function measurableComparisons(
+  comparisons: readonly ProfileComparison[],
+): ProfileComparison[] {
+  return comparisons.filter((c) => c.left.games > 1 && c.right.games > 1);
+}
 
 /**
  * True once the stored narrative's own snapshot (`games_covered` at

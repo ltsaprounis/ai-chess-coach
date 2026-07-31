@@ -352,11 +352,10 @@ export interface paths {
          * Regenerate Player Profile
          * @description Regenerate the narrative (user-triggered -- LLM calls cost money;
          *     GET never generates): fresh facts -> `render_profile_prompt` -> the
-         *     chosen agent's `complete` with no engine analyst (docs/06-coach.md,
-         *     "Player profile": the narrative summarizes aggregates and asserts no
-         *     concrete line, so there is nothing for an engine to verify) ->
-         *     `save_player_profile`. Responds with the same shape as `GET`. 409 when
-         *     there are no analyzed games to describe.
+         *     chosen agent's `complete` with the read-only chat toolkit
+         *     (docs/06-coach.md, "Narrative") -> `save_player_profile`. Responds
+         *     with the same shape as `GET`. 409 when there are no analyzed games
+         *     to describe.
          *
          *     Generated over the time control's **full** history, never a window:
          *     the narrative is the durable artifact other prompts embed, and one
@@ -745,6 +744,32 @@ export interface components {
             games_analyzed: number;
         };
         /**
+         * Comparison
+         * @description Two disjoint buckets of the same games, with a verdict
+         *     (docs/06-coach.md, "Reading a comparison").
+         *
+         *     `significant` is decided over the profile's whole comparison family
+         *     by Benjamini-Hochberg, never per row, which is the entire point: a
+         *     profile makes up to fourteen of these, and judging each on its own
+         *     manufactures roughly one spurious tendency every other student.
+         */
+        Comparison: {
+            /** Label */
+            label: string;
+            /** Left Label */
+            left_label: string;
+            left: components["schemas"]["Record"];
+            /** Right Label */
+            right_label: string;
+            right: components["schemas"]["Record"];
+            /** Gap */
+            gap: number;
+            /** Resolution */
+            resolution: number;
+            /** Significant */
+            significant: boolean;
+        };
+        /**
          * CriticalPosition
          * @description A turning point the student can actually find and act on.
          *
@@ -796,6 +821,31 @@ export interface components {
             eval_after_cp: number | null;
             /** Eval After Mate */
             eval_after_mate: number | null;
+        };
+        /**
+         * Drawdown
+         * @description The largest peak-to-trough fall in the archive, with its
+         *     recovery (docs/06-coach.md, "Trajectory").
+         *
+         *     A window is a stationarity assumption and a drawdown is the
+         *     opposite, so this is reported as its own fact rather than left for
+         *     whichever window happens to contain it. `record` covers the fall
+         *     itself; `since_record` covers everything after the trough, which is
+         *     what makes "clawed back" or "still down there" sayable.
+         */
+        Drawdown: {
+            /** Peak */
+            peak: number;
+            /** Peak At */
+            peak_at: number;
+            /** Trough */
+            trough: number;
+            /** Trough At */
+            trough_at: number;
+            record: components["schemas"]["Record"];
+            since_record: components["schemas"]["Record"];
+            /** Recovered */
+            recovered: boolean;
         };
         /**
          * ErrorPattern
@@ -997,6 +1047,8 @@ export interface components {
             games: number;
             /** Rating End */
             rating_end: number | null;
+            /** Rating Median */
+            rating_median?: number | null;
             /** Acpl */
             acpl: number | null;
             /** Blunder Rate */
@@ -1250,6 +1302,21 @@ export interface components {
             openings: components["schemas"]["ProfileOpening"][];
             /** Error Patterns */
             error_patterns: components["schemas"]["ErrorPattern"][];
+            /** Analyzed Window Start */
+            analyzed_window_start?: number | null;
+            /** Analyzed Window End */
+            analyzed_window_end?: number | null;
+            trajectory?: components["schemas"]["RatingTrajectory"] | null;
+            /**
+             * Window Spans Level Change
+             * @default false
+             */
+            window_spans_level_change: boolean;
+            /**
+             * Comparisons
+             * @default []
+             */
+            comparisons: components["schemas"]["Comparison"][];
             /** Narrative */
             narrative?: string | null;
         };
@@ -1287,6 +1354,10 @@ export interface components {
             window_start: number | null;
             /** Window End */
             window_end: number | null;
+            /** Analyzed Window Start */
+            analyzed_window_start?: number | null;
+            /** Analyzed Window End */
+            analyzed_window_end?: number | null;
             /** Time Class */
             time_class: ("bullet" | "blitz" | "rapid" | "daily") | null;
             /** Requested Since */
@@ -1399,6 +1470,10 @@ export interface components {
             score: number;
             /** Faced */
             faced: boolean;
+            /** Opening Acpl */
+            opening_acpl?: number | null;
+            /** Avg Cp Loss */
+            avg_cp_loss?: number | null;
         };
         /** ProfileResponse */
         ProfileResponse: {
@@ -1406,6 +1481,59 @@ export interface components {
             narrative?: components["schemas"]["ProfileNarrative"] | null;
             /** Narrative Games Now */
             narrative_games_now?: number | null;
+        };
+        /**
+         * RatingDelta
+         * @description Rating movement over one trailing span (docs/06-coach.md,
+         *     "Trajectory").
+         *
+         *     `games` rides along because a delta over three games and a delta
+         *     over three hundred are different claims, and the renderers say so.
+         */
+        RatingDelta: {
+            /** Days */
+            days: number;
+            /** Rating Then */
+            rating_then: number;
+            /** Delta */
+            delta: number;
+            /** Games */
+            games: number;
+        };
+        /**
+         * RatingTrajectory
+         * @description Where the student is heading, over the **full** archive
+         *     (docs/06-coach.md, "Trajectory") — never the profile window, whose
+         *     whole job is to hold the level roughly constant.
+         *
+         *     A coach's first question is the direction, and averages cannot
+         *     answer it: on a student who has gone 185 to 1479 the archive mean
+         *     describes nobody, while "up 443 points in a year" describes them
+         *     exactly.
+         */
+        RatingTrajectory: {
+            /** Rating Now */
+            rating_now: number;
+            /**
+             * Deltas
+             * @default []
+             */
+            deltas: components["schemas"]["RatingDelta"][];
+            /** Rating Max */
+            rating_max: number;
+            /** Rating Max At */
+            rating_max_at: number;
+            /** Rating Min */
+            rating_min: number;
+            /** Rating Min At */
+            rating_min_at: number;
+            /** Games */
+            games: number;
+            /** Window Start */
+            window_start?: number | null;
+            /** Window End */
+            window_end?: number | null;
+            drawdown?: components["schemas"]["Drawdown"] | null;
         };
         /**
          * Record
