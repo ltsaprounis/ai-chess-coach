@@ -46,7 +46,8 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    or blunder. An unanalyzed game shows an "Analyze
    this game" button posting `/analyze` for that single game and
    polls `GET /games/{id}` until the results land; an analyzed game
-   shows a summary strip (overall ACPL, blunder and mistake counts,
+   shows a summary strip (average loss in pawns per move, blunder
+   and mistake counts,
    engine depth). Live-engine toggle: while on, each shown position
    streams `GET /eval` (SSE) into a candidate-lines panel (the
    server decides how many lines; the UI renders whatever the
@@ -71,11 +72,12 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    is created on first send. Replies render as markdown; their
    game links open in new tabs like every other advice anchor.
 4. **Dashboard** — the player's stats hub: summary tiles (record,
-   win rate by color, current rating per time class, ACPL, blunder
+   win rate by color, current rating per time class, average loss,
+   blunder
    rate), rating-over-time and monthly-activity charts from
-   `GET /players/{u}/games` (paged fetch), ACPL-by-phase and
+   `GET /players/{u}/games` (paged fetch), avg-loss-by-phase and
    judgment charts plus the termination breakdown and the monthly
-   ACPL/blunder-rate trend from `GET /players/{u}/report`, and the
+   avg-loss/blunder-rate trend from `GET /players/{u}/report`, and the
    sortable repertoire table from `GET /players/{u}/openings`
    (collapsed client-side into opening families with a min-games
    threshold, showing analyzed coverage — see `openings.ts`); a family
@@ -89,7 +91,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    the lines opponents picked against them — mirroring the coach
    prompt. The system (their own first moves) and the line as played
    are shown as columns: without them the tables would list openings
-   the opponent chose as if they were the player's own. The two ACPL
+   the opponent chose as if they were the player's own. The two loss
    columns are labelled for what they measure — opening-phase and
    whole-game — since only the first is opening advice.
    `groupByFamily` partitions rows by `faced` *before* rolling up,
@@ -112,7 +114,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    drill-through shows exactly the games the row counted. Legacy
    links still work: a `system` param falls back to the exact
    system match, a bare `family` to the name-root match — which
-   respects `color` when present. The ACPL-by-phase chart shows the
+   respects `color` when present. The avg-loss-by-phase chart shows the
    move count behind each bar and renders "no endgame moves" where the
    phase has none, rather than a zero bar that reads as flawless play.
    Two highlight sections — **Brilliant moves** and **Blunders** —
@@ -121,8 +123,8 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    citation identity (date, opponent, color, the move as
    `26...Nb6`-style SAN, result) plus the number that matters: the
    player-POV eval after the move for brilliancies (folded from the
-   white-POV fields by `color`, mates rendered as `#N`), centipawn
-   loss for blunders. Every row links to `/games/{id}?ply={ply}` —
+   white-POV fields by `color`, mates rendered as `#N`), the loss in
+   pawns for blunders. Every row links to `/games/{id}?ply={ply}` —
    the Game page's ply deep link — in a new tab (`target="_blank"`,
    like the Coach page's advice anchors), so the student lands on
    the exact position and the dashboard keeps its scroll and pager
@@ -197,7 +199,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 
    It shows the free facts `build_profile` distills — rating and
    games per time class, each tile carrying the **dated peak** and
-   how far below it the current rating sits, overall ACPL in pawns
+   how far below it the current rating sits, overall average loss
    plus blunder share,
    the **recent-form windows** (last 30/90 days against the whole
    span, rendered only when there is more than one row to compare),
@@ -247,7 +249,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    filters, with no Generate action since the POST would 409.
 
    Pure formatting/partitioning helpers (`isProfileStale`,
-   `scopeLabel`, `hasPartialCoverage`, `formatPawns`, `blunderShare`,
+   `scopeLabel`, `hasPartialCoverage`, `blunderShare`,
    `openingsFor`, `scorePercent`, `formatGameDate`, `peakLabel`,
    `peakGap`, `streakLabel`, `terminationShares`,
    `errorExampleLabel`/`errorExampleHref`) live in
@@ -331,6 +333,22 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 - Colors are CSS custom properties defined once in `index.css`
   (light + dark via `prefers-color-scheme`); the SVG charts read the
   same tokens through `components/chartTheme.ts`.
+- **Units: every loss figure the user sees is in pawns**, never
+  centipawns and never labelled "ACPL" — one scale with one name, the
+  same rule the backend follows and for the same reasons
+  (docs/06-coach.md, "Units": the audience is chess.com players, the
+  eval bar is pawns, and the coach's prose sits on these same
+  screens). The API speaks centipawns; `web/src/units.ts` is the only
+  place that converts, and it converts to a *string* — the division
+  itself is not exported, so no pawn-scale number is ever in flight
+  for a second consumer to divide again. `formatPawns` (aggregates,
+  two decimals) and `formatPawnLoss` (one move, one decimal) mirror
+  the backend's `_pawns_or_na` and `format_cp_loss` exactly, decimals
+  included, so one figure reads the same in a table cell as in the
+  advice paragraph under it. Chart *values* stay in centipawns —
+  heights are ratios, so the scale cancels — and both chart
+  components take a `formatValue` applied to the axis ticks and the
+  tooltip alike.
 - `chess.js` stays a frontend-only dependency for board replay; the
   backend uses python-chess independently.
 - Dev: Vite proxies `/api` to the FastAPI port; prod: FastAPI serves

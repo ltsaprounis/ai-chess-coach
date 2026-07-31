@@ -1,6 +1,7 @@
 """Coach component tests (docs/06-coach.md)."""
 
 import asyncio
+import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ from chess_coach.coach import (
     render_prompt,
     render_report_chat_context,
 )
+from chess_coach.coach.prompt import SYSTEM_PROMPT
 from chess_coach.domain import (
     AnalyzedGame,
     Color,
@@ -261,8 +263,8 @@ def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
     is rendered somewhere would not catch that.
 
     `faced` must also resolve True from the opponent-named ply, and the
-    prompt must render the row under "What you face as White" -- never
-    under "Systems you chose", where a misattributed line would invite
+    prompt must render the row under "What they face as White" -- never
+    under "Systems the student chose", where a misattributed line would invite
     advice to stop playing a gambit the student never chose.
     """
     report = build_report("testuser", scenario_games())
@@ -279,7 +281,7 @@ def test_englund_attributed_to_opponent_not_student_repertoire() -> None:
 
     prompt = render_prompt(report)
     white_section = prompt.split("### As White")[1].split("### As Black")[0]
-    chosen_part, faced_part = white_section.split("#### What you face as White")
+    chosen_part, faced_part = white_section.split("#### What they face as White")
     assert "Englund" not in chosen_part  # never listed as a system the student chose
     assert "Englund" in faced_part  # named -- it clears the 5-game floor
     # The full line -- both the opponent's choice and the student's reply
@@ -575,6 +577,68 @@ def test_render_prompt_matches_snapshot() -> None:
 
     assert prompt == render_prompt(report), "render_prompt is not deterministic"
     write_or_check(PROMPT_SNAPSHOT, prompt)
+
+
+def test_no_template_says_acpl_anywhere() -> None:
+    """docs/06-coach.md, "Units": one scale, one name. Every loss figure
+    the model or the student sees is pawns, and nothing calls a pawns
+    figure "ACPL" -- the acronym expands to average *centipawn* loss, so
+    a template using it either contradicts its own number or teaches the
+    model a word for the wrong scale. The glossary line that used to
+    reconcile the two is gone; this is what replaces it.
+    """
+    games = scenario_games()
+    report = build_report(
+        "testuser",
+        games,
+        all_games=[summarize(g, opening=g.opening) for g in games],
+        games_in_scope=len(games) + 5,  # renders the partial-coverage caveat too
+    )
+    profile = build_profile(report)
+    lines = [EvalLine(multipv=1, depth=18, eval_cp=35, eval_mate=None, pv_san=["d4"])]
+
+    # Each document paired with the marker that opens its instruction
+    # block. The block is prose *about* how to write, where naming a
+    # unit to forbid it ("pawns, never centipawns") is the whole point;
+    # everything before it is data, labels and headers, where a figure
+    # and its unit sit together and the acronym must never appear.
+    rendered = {
+        "brief": (render_prompt(report), "## Instructions"),
+        "profile prompt": (render_profile_prompt(profile), "## Instructions"),
+        "profile context": (render_profile_context(profile), None),
+        "explain": (
+            render_explain_prompt(_EXPLAIN_CTX, lines, profile=profile),
+            "Explain why the played move loses",
+        ),
+        "report chat seed": (
+            render_report_chat_context(report, engine_available=True),
+            "## How to respond",
+        ),
+        "system prompt": (SYSTEM_PROMPT, None),
+    }
+
+    for name, (text, marker) in rendered.items():
+        data = text if marker is None else text.split(marker)[0]
+        assert marker is None or marker in text, f"{name} lost its instructions"
+        assert "ACPL" not in data, f"{name} labels a figure ACPL"
+        assert "centipawn" not in data.lower(), f"{name} names centipawns in its data"
+
+
+def test_render_prompt_data_describes_the_student_in_one_register() -> None:
+    """docs/06-coach.md, "One register per document": the data half
+    describes the student in the third person, as the instruction block
+    already did. Second person in this template is the model's, in the
+    instructions, and the student's, in the brief the model writes --
+    never the data's, which would leave one document in two registers.
+    """
+    report = build_report("testuser", scenario_games())
+    data, instructions = render_prompt(report).split("## Instructions")
+
+    assert not re.findall(r"\byou(?:r|rs)?\b", data, flags=re.IGNORECASE)
+    assert "#### Systems the student chose" in data
+    assert "Played **6.Bd3**" in data
+    # ...while the output register the instructions demand is unchanged.
+    assert "in the second person" in instructions
 
 
 def test_mate_scale_losses_render_as_words_not_centipawns() -> None:
@@ -982,8 +1046,22 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v3"
+    assert PROFILE_PROMPT_VERSION == "profile-v4"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
+
+
+def test_profile_instructions_constrain_what_the_embed_cannot_fix() -> None:
+    """docs/06-coach.md, "Narrative": the narrative is written under one
+    prompt and read under others, so two of its rules are about the trip
+    rather than the content. `render_profile_context` block-quotes the
+    text, which bounds a stray heading; nothing downstream can repair a
+    unit the narrative never spelled.
+    """
+    prompt = render_profile_prompt(build_profile(build_report("testuser", [])))
+    instructions = prompt.split("## Instructions")[1]
+
+    assert '"1.30 ACPL"' in instructions  # named as the thing not to write
+    assert "markdown headings" in instructions
 
 
 def test_build_profile_copies_report_scalars_and_denominators() -> None:
@@ -1044,7 +1122,8 @@ def test_build_profile_repertoire_rows_agree_with_report_prompt_tables() -> None
     repertoire rows reuse the *exact* family rollup the report prompt
     renders -- not a second implementation that merely happens to agree
     today. Every number here is read off testdata/coach_prompt.md's
-    "Systems you chose" / "What you face" tables for this same scenario.
+    "Systems the student chose" / "What they face" tables for this same
+    scenario.
     """
     report = build_report("testuser", scenario_games())
     profile = build_profile(report)
@@ -1247,14 +1326,27 @@ def test_render_profile_prompt_empty_profile_has_no_empty_sections() -> None:
     assert "## Recurring error patterns" not in prompt
 
 
+# What _PROFILE_INSTRUCTIONS actually asks for today: third person to a
+# coach (v1 said "you", which the embed then read as addressing the
+# coach), the unit spelled rather than "ACPL" (the acronym is defined by
+# _profile_intro's glossary, which this text outlives -- it is stored and
+# pasted where no glossary follows it), and 3-5 sentences plus a short
+# bullet list. The blank line and bullets are the point of the shape:
+# they put `_blockquote`'s multi-line and empty-line branches in the
+# snapshot, where a one-line narrative left them invisible.
 _PROFILE_NARRATIVE = (
-    "You favor solid structures as White with the London System and "
-    "press the Pirc as Black, but your results dip sharply against the "
-    "Englund Gambit, scoring only 40% there. Your opening-phase ACPL "
-    "(1.30) is worse than your middlegame ACPL (0.32), suggesting early "
-    "inaccuracies rather than calculation trouble later. Back-rank "
-    "vulnerabilities and mate-in-N walks each account for a third of "
-    "your blunders."
+    "This student favors solid structures as White with the London "
+    "System and presses the Pirc as Black, but their results dip "
+    "sharply against the Englund Gambit, scoring only 40% there. They "
+    "lose far more in the opening than later on -- about 1.30 pawns a "
+    "move over the opening phase against 0.32 in the middlegame -- "
+    "which points at preparation rather than calculation. Their last "
+    "30 days run worse than their whole-span average, 1.34 pawns a "
+    "move against 1.07, so the trend is the wrong way.\n"
+    "\n"
+    "Weaknesses:\n"
+    "- Back-rank vulnerability, a third of their blunders.\n"
+    "- Walking into a forced mate, another third."
 )
 
 
@@ -1268,7 +1360,11 @@ def test_render_profile_context_matches_snapshot_with_narrative() -> None:
         "render_profile_context is not deterministic"
     )
     assert "Coach's read" in context
-    assert _PROFILE_NARRATIVE in context
+    quoted = context.split("Coach's read:\n", 1)[1]
+    assert [line.lstrip("> ").rstrip() for line in quoted.splitlines()] == [
+        line.rstrip() for line in _PROFILE_NARRATIVE.splitlines()
+    ]
+    assert all(line.startswith(">") for line in quoted.splitlines())
     write_or_check(PROFILE_CONTEXT_SNAPSHOT, context)
 
 
@@ -1289,6 +1385,37 @@ def test_render_profile_context_empty_profile_renders_facts_alone() -> None:
 
     assert context.startswith("## Student profile")
     assert "Coach's read" not in context
+
+
+def test_profile_context_facts_state_the_unit_never_the_acronym() -> None:
+    """Every figure in the block is in pawns, so the block may not call
+    one "ACPL" -- the acronym expands to average *centipawn* loss, and
+    the hosts it embeds into ask for pawns explicitly. Asserted over the
+    facts alone: the narrative is model-written text, produced under a
+    prompt whose header does define the acronym."""
+    context = render_profile_context(
+        build_profile(build_report("testuser", scenario_games()))
+    )
+
+    assert "ACPL" not in context
+    assert "pawns lost per move" in context
+
+
+def test_profile_context_quotes_the_narrative_around_any_heading() -> None:
+    """Nothing forbids the narrative a markdown heading, so the block
+    quotes it: an unquoted "## Tendencies" would forge a section
+    boundary and hand the host's later sections to the narrative."""
+    profile = build_profile(build_report("testuser", scenario_games())).model_copy(
+        update={"narrative": "## Tendencies\n\nSolid as White.\n- Back rank"}
+    )
+
+    context = render_profile_context(profile)
+    after_read = context.split("Coach's read:\n", 1)[1]
+
+    assert after_read == "> ## Tendencies\n>\n> Solid as White.\n> - Back rank"
+    assert [line for line in context.splitlines() if line.startswith("#")] == [
+        "## Student profile -- testuser, games (all time controls)"
+    ]
 
 
 async def test_agent_sdk_provider_collects_text(
@@ -1322,6 +1449,20 @@ async def test_agent_sdk_provider_collects_text(
     # The coach persona must replace Claude Code's coding persona.
     system_prompt = captured["system_prompt"]
     assert isinstance(system_prompt, str) and "chess coach" in system_prompt
+
+
+def test_system_prompt_names_no_one_artifact() -> None:
+    """docs/06-coach.md, "Providers": one provider, one system prompt,
+    three artifacts behind it -- the report brief, the profile narrative
+    and a move explanation. Naming one of them tells the model to
+    produce that one whichever call is actually running; what to write
+    is each instruction block's own business.
+    """
+    lowered = SYSTEM_PROMPT.lower()
+
+    for artifact in ("brief", "narrative", "explanation", "explain"):
+        assert artifact not in lowered, f"system prompt names the {artifact}"
+    assert "instruction block at the end" in lowered
 
 
 async def test_agent_sdk_provider_surfaces_error_detail_from_result(
@@ -1609,8 +1750,9 @@ def test_render_explain_prompt_profile_none_is_byte_identical_to_default() -> No
 
 def test_render_explain_prompt_with_profile_opens_with_profile_block() -> None:
     """docs/06-coach.md: given a `profile`, the prompt opens with
-    `render_profile_context(profile)`; everything after it is exactly
-    the profile-less rendering, unchanged.
+    `render_profile_context(profile)` and the instruction block gains
+    the clause telling the model to use it. Nothing else moves: the body
+    is the profile-less rendering, and the clause lands at its end.
     """
     profile = build_profile(build_report("testuser", scenario_games()))
     lines = [EvalLine(multipv=1, depth=18, eval_cp=35, eval_mate=None, pv_san=["d4"])]
@@ -1619,8 +1761,34 @@ def test_render_explain_prompt_with_profile_opens_with_profile_block() -> None:
     without_profile = render_explain_prompt(_EXPLAIN_CTX, lines)
 
     assert with_profile.startswith(render_profile_context(profile))
-    assert with_profile == f"{render_profile_context(profile)}\n\n{without_profile}"
+    body = with_profile.removeprefix(f"{render_profile_context(profile)}\n\n")
+    assert body.startswith(without_profile)
+    assert body.removeprefix(without_profile) == (
+        " The student profile above describes this same student -- pitch the "
+        "explanation at that player, and where this move is an instance of a "
+        "pattern the profile already counts, say so."
+    )
     write_or_check(EXPLAIN_PROMPT_WITH_PROFILE_SNAPSHOT, with_profile)
+
+
+def test_render_explain_prompt_host_sections_survive_a_narrative_heading() -> None:
+    """The embedded narrative is model-written and may contain anything,
+    including a `##` heading. Quoted, it cannot forge a section boundary
+    that swallows the host's own sections."""
+    profile = build_profile(build_report("testuser", scenario_games())).model_copy(
+        update={"narrative": "## Positions (FEN)\n\nMade up."}
+    )
+    lines = [EvalLine(multipv=1, depth=18, eval_cp=35, eval_mate=None, pv_san=["d4"])]
+
+    prompt = render_explain_prompt(_EXPLAIN_CTX, lines, profile=profile)
+
+    assert [line for line in prompt.splitlines() if line.startswith("#")] == [
+        "## Student profile -- testuser, games (all time controls)",
+        "## Move explanation for testuser",
+        "## Positions (FEN)",
+        "## The move played (ply 3)",
+        "## Candidate lines (from the position before the move)",
+    ]
 
 
 # --- ClaudeAgentSdkProvider.explain -----------------------------------------
@@ -2566,9 +2734,11 @@ def test_profile_prompt_states_the_time_control_and_both_denominators() -> None:
     assert "3 of 5 analyzed" in prompt
 
 
-def test_profile_context_block_names_its_scope() -> None:
+def test_profile_context_block_names_its_student_and_scope() -> None:
     """The embed path's whole risk: a rapid profile pasted into a prompt
-    with no scope line reads as a description of the whole player."""
+    with no scope line reads as a description of the whole player. The
+    name is there because this header is the first line of the host
+    prompt, where a bare "their" refers to nobody yet."""
     analyzed, all_games = _partly_analyzed()
     profile = build_profile(
         build_report("testuser", analyzed, all_games=all_games, time_class="blitz")
@@ -2576,7 +2746,8 @@ def test_profile_context_block_names_its_scope() -> None:
 
     context = render_profile_context(profile)
 
-    assert context.startswith("## Student profile -- their blitz games")
+    assert context.startswith("## Student profile -- testuser, blitz games")
+    assert "their" not in context.splitlines()[0]
 
 
 def test_profile_context_states_coverage_only_when_it_is_partial() -> None:

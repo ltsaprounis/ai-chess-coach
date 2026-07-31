@@ -8,6 +8,7 @@
 // (a different, unrelated aggregation over `OpeningStats`).
 
 import { type Color, type RepertoireNode, score } from "./api.ts";
+import { formatPawns } from "./units.ts";
 
 /**
  * Whether the arriving move at `ply` was the player's own, given the
@@ -231,11 +232,13 @@ export function formatAvgEval(cp: number | null): string {
   return pawns > 0 ? `+${magnitude}` : `-${magnitude}`;
 }
 
-/** Avg cp lost by the arriving mover, to one decimal, or "—" when
- *  nothing analyzed reaches the node. Always a magnitude (a cost), so
- *  unlike `formatAvgEval` it carries no sign. */
+/** Avg loss by the arriving mover in **pawns**, or "—" when nothing
+ *  analyzed reaches the node. Always a magnitude (a cost), so unlike
+ *  `formatAvgEval` it carries no sign — but the same scale as it: the
+ *  two sit in adjacent columns, and this one rendered raw centipawns
+ *  beside the other's pawns until the units pass. */
 export function formatAvgLoss(loss: number | null): string {
-  return loss === null ? "—" : loss.toFixed(1);
+  return loss === null ? "—" : formatPawns(loss);
 }
 
 /** One SAN move, PGN move-text style: White's move gets the move

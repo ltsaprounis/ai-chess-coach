@@ -122,7 +122,7 @@ class MoveEval(BaseModel):
     eval_cp: int | None
     eval_mate: int | None
     best_move: str
-    cp_loss: int
+    cp_loss: int  # centipawns given up by this one move
     judgment: Judgment
 
 
@@ -144,7 +144,7 @@ class GameAnalysis(BaseModel):
     game_id: str
     depth: int
     evals: list[MoveEval]
-    overall_acpl: float  # mean cp loss of the player's moves
+    overall_acpl: float  # centipawns per player move
     acpl_by_phase: dict[Phase, float]
     judgment_counts: dict[Judgment, int]
 
@@ -208,6 +208,10 @@ class OpeningStats(BaseModel):
     # the first is opening advice. Both are None until games are
     # analyzed, and both are move-weighted, never a mean of per-game
     # means.
+    # Both in CENTIPAWNS per player move, like every other loss
+    # aggregate on this module -- renderers divide by 100 at the point
+    # they turn one into text and nowhere earlier (docs/06-coach.md,
+    # "Units").
     opening_acpl: float | None = None  # opening-phase moves only
     avg_cp_loss: float | None = None  # whole game, all phases
     # The denominators behind those two columns. Consumers roll these
@@ -237,7 +241,7 @@ class PhaseStats(BaseModel):
     """
 
     moves: int
-    acpl: float | None
+    acpl: float | None  # centipawns per player move
     judgment_counts: dict[Judgment, int]
 
 
@@ -272,7 +276,7 @@ class MonthStats(BaseModel):
     month: str  # "2026-07"
     games: int
     rating_end: int | None  # last rating seen that month
-    acpl: float | None
+    acpl: float | None  # centipawns per player move
     blunder_rate: float | None  # blunders ÷ player moves
 
 
@@ -302,7 +306,9 @@ class PeriodStats(BaseModel):
     record: Record
     analyzed_games: int  # how many carry analysis — the quality sample
     player_moves: int  # denominator for acpl and blunder_rate
-    acpl: float | None  # None when the window has no analyzed moves
+    # Centipawns per player move; None when the window has no
+    # analyzed moves.
+    acpl: float | None
     blunder_rate: float | None  # blunders ÷ player_moves
     rating_end: int | None  # last rating seen in the window
 
@@ -421,7 +427,7 @@ class CriticalPosition(BaseModel):
     leading_up: list[str]  # the SAN plies into this position
     played: str
     best: str  # SAN when it parses in this position, else raw UCI
-    cp_loss: int
+    cp_loss: int  # centipawns given up by this one move
     eval_before_cp: int | None
     eval_before_mate: int | None
     eval_after_cp: int | None
@@ -468,7 +474,7 @@ class PlayerReport(BaseModel):
     requested_until: int | None = None
     games_in_scope: int | None = None
     record: Record
-    overall_acpl: float  # total loss ÷ player_moves
+    overall_acpl: float  # centipawns per player move
     phases: dict[Phase, PhaseStats]
     judgment_counts: dict[Judgment, int]
     time_classes: list[TimeClassStats]
@@ -537,7 +543,7 @@ class PlayerProfile(BaseModel):
     window_start: int | None  # covered span, as in PlayerReport
     window_end: int | None
     player_moves: int  # denominator for judgment_counts
-    overall_acpl: float
+    overall_acpl: float  # centipawns per player move
     judgment_counts: dict[Judgment, int]
     phases: dict[Phase, PhaseStats]
     time_classes: list[TimeClassStats]

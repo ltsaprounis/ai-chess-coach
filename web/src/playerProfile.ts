@@ -53,12 +53,6 @@ export function hasPartialCoverage(
   return profile.games_in_scope > profile.games_covered;
 }
 
-/** Centipawns to pawns, two decimals, no sign — every value this
- *  formats (ACPL) is a magnitude, never a signed eval. */
-export function formatPawns(centipawns: number): string {
-  return (centipawns / 100).toFixed(2);
-}
-
 /** Blunders as a share of the player's own moves, 0-1 — 0 with no
  *  recorded moves rather than dividing by zero (docs/06-coach.md,
  *  "Judgment counts carry their denominator"). */

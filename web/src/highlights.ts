@@ -3,6 +3,7 @@
 // highlights.test.ts.
 
 import type { HighlightMove } from "./api.ts";
+import { formatPawnLoss } from "./units.ts";
 
 /** The `HighlightMove` fields the move-label formatter needs. */
 export type HighlightMoveLabel = Pick<
@@ -64,9 +65,12 @@ export function formatPlayerEval(pov: PlayerPovEval): string {
   return pawns > 0 ? `+${magnitude}` : `-${magnitude}`;
 }
 
-/** The blunder table's number column: how much the move lost, always
- *  shown as a loss regardless of color (unlike the brilliancies'
- *  player-POV eval, `cp_loss` is already color-agnostic). */
-export function formatCpLoss(cpLoss: number): string {
-  return `-${cpLoss}`;
+/** The blunder table's number column: how much the move lost in
+ *  **pawns**, always shown as a loss regardless of color (unlike the
+ *  brilliancies' player-POV eval, `cp_loss` is already color-agnostic).
+ *  One decimal, not `formatPlayerEval`'s two: this is the same figure
+ *  the coach's explanation of the move calls "about 3.1 pawns", and it
+ *  sits one click away from that sentence. */
+export function formatMoveLoss(cpLoss: number): string {
+  return `-${formatPawnLoss(cpLoss)}`;
 }

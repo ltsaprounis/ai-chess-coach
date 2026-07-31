@@ -273,8 +273,11 @@ describe("formatScore / formatAvgEval / formatAvgLoss", () => {
   });
 
   it("formats an avg loss as an unsigned magnitude, or an em dash when null", () => {
-    expect(formatAvgLoss(12.34)).toBe("12.3");
+    expect(formatAvgLoss(12.34)).toBe("0.12");
     expect(formatAvgLoss(null)).toBe("—");
+    // Same scale as formatAvgEval, which sits in the next column over.
+    expect(formatAvgLoss(250)).toBe("2.50");
+    expect(formatAvgEval(250)).toBe("+2.50");
   });
 });
 

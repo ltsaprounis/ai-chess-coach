@@ -114,8 +114,9 @@ _GET_GAME_TOOL_DESCRIPTION = (
 _GET_OPENING_STATS_TOOL_DESCRIPTION = (
     "Return the student's repertoire: one row per opening per color, "
     "each with the student's own move order, the full line as played, "
-    "whether the name is the opponent's choice, the record, and ACPL in "
-    "pawns for the opening phase and for the whole game."
+    "whether the name is the opponent's choice, the record, and the "
+    "average loss in pawns per move for the opening phase and for the "
+    "whole game."
 )
 
 _RESULT_VALUES = frozenset({"win", "loss", "draw"})
@@ -998,6 +999,12 @@ def _format_date(epoch: int) -> str:
 
 
 def _pawns(value: float | None) -> str:
+    """A centipawn aggregate as bare pawns, the tool-result twin of
+    `prompt.py::_pawns_or_na`. The caller names the unit beside it: a
+    tool result lands mid-conversation with no header to define
+    anything, which is why none of them says "ACPL" (docs/06-coach.md,
+    "Units").
+    """
     return f"{value / 100:.2f}" if value is not None else "n/a"
 
 
@@ -1110,8 +1117,8 @@ def _render_opening_stats(rows: list[OpeningStats]) -> str:
         lines.append(
             f"- {r.color}, {r.name} ({r.eco}, {role}): {r.system} "
             f"[{r.first_moves}], {r.games}g, {score:.0f}%, "
-            f"opening ACPL {_pawns(r.opening_acpl)}, "
-            f"game ACPL {_pawns(r.avg_cp_loss)}"
+            f"opening avg loss {_pawns(r.opening_acpl)}, "
+            f"game avg loss {_pawns(r.avg_cp_loss)} (pawns per move)"
         )
     return "\n".join(lines)
 

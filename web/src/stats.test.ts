@@ -182,6 +182,10 @@ describe("splitPhases", () => {
       "opening",
       "middlegame",
     ]);
+    // Bars keep the API's centipawns — the chart converts for the axis
+    // and the tooltip (units.ts). Converting here as well would change
+    // no bar height and would double-divide whatever formats it.
+    expect(phaseData.map((bar) => bar.value)).toEqual([22.5, 61.2]);
   });
 
   it("still renders a real zero ACPL phase as a bar — null and 0 are not the same", () => {

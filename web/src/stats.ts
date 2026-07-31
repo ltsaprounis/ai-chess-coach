@@ -159,13 +159,19 @@ export function monthlyActivity(games: readonly StatGame[]): MonthActivity[] {
 export const PHASES = ["opening", "middlegame", "endgame"] as const;
 
 /**
- * Splits a report's per-phase ACPL into chartable bars and the phases
- * with no player moves at all. `PhaseStats.acpl` is `null` — never
- * `0.0` — when `moves` is zero, and the two must never be conflated:
- * a phase the player genuinely played error-free (moves > 0, acpl 0)
- * still gets a real bar, while a phase never reached gets an explicit
- * "no moves" state instead of a bar indistinguishable from flawless
- * play. `?? 0` on `acpl` would silently reintroduce that bug.
+ * Splits a report's per-phase average loss into chartable bars and the
+ * phases with no player moves at all. `PhaseStats.acpl` is `null` —
+ * never `0.0` — when `moves` is zero, and the two must never be
+ * conflated: a phase the player genuinely played error-free (moves > 0,
+ * acpl 0) still gets a real bar, while a phase never reached gets an
+ * explicit "no moves" state instead of a bar indistinguishable from
+ * flawless play. `?? 0` on `acpl` would silently reintroduce that bug.
+ *
+ * Bar values stay in the API's **centipawns**; the chart converts them
+ * to pawns when it draws the axis and the tooltip (units.ts). Bar
+ * heights are a ratio, so the scale cancels — converting here would
+ * change nothing visible and would leave a pawn-scale number in flight
+ * for something downstream to divide by a hundred a second time.
  */
 export function splitPhases(phases: PlayerReport["phases"]): {
   phaseData: BarDatum[];

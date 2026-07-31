@@ -12,7 +12,7 @@ as a readable diff of `testdata/coach_prompt.md`:
   the prompt has to get the attribution right rather than dodge it by
   burying the line in the long tail. It is `faced` (named by the
   opponent's own move) and above the floor, so it must appear under
-  "What you face as White" and nowhere in "Systems you chose"
+  "What they face as White" and nowhere in "Systems the student chose"
   (docs/archive/fixes-2026-07/03-faced-openings.md).
 - the **London** and the **Pirc** are the student's own systems --
   `faced` is False for both -- the Pirc split across two lichess names

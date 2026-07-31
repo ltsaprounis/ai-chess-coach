@@ -14,7 +14,7 @@ import RepertoireTable from "../components/RepertoireTable.tsx";
 import StatsFilters from "../components/StatsFilters.tsx";
 import {
   foldToPlayerPov,
-  formatCpLoss,
+  formatMoveLoss,
   formatPlayerEval,
   moveLabel,
 } from "../highlights.ts";
@@ -30,6 +30,7 @@ import {
   tally,
   tallyByColor,
 } from "../stats.ts";
+import { formatPawns, LOSS_AXIS_STEP } from "../units.ts";
 import { useStatsFilters } from "../useStatsFilters.ts";
 
 const JUDGMENTS = ["best", "good", "inaccuracy", "mistake", "blunder"] as const;
@@ -75,7 +76,7 @@ function Tile({ value, label }: { value: string | number; label: string }) {
 
 /** Shared table markup for both highlight sections — they differ only
  *  in which "number that matters" column they show (player-POV eval
- *  after for brilliancies, cp lost for blunders). Every row deep-links
+ *  after for brilliancies, pawns lost for blunders). Every row deep-links
  *  to the Game page at its ply (docs/08-frontend.md's Game section) in
  *  a new tab, so working through a list of moves never loses the
  *  dashboard's scroll and pager state. */
@@ -384,8 +385,8 @@ export default function Dashboard() {
           {analyzed !== null && (
             <>
               <Tile
-                value={analyzed.overall_acpl}
-                label={`avg centipawn loss (${analyzed.games_analyzed} analyzed)`}
+                value={formatPawns(analyzed.overall_acpl)}
+                label={`avg pawns lost per move (${analyzed.games_analyzed} analyzed)`}
               />
               <Tile
                 value={perGame(analyzed.judgment_counts.blunder)}
@@ -423,10 +424,12 @@ export default function Dashboard() {
           {analyzed !== null ? (
             <div className="chart-row">
               <div>
-                <h3>ACPL by phase</h3>
+                <h3>Avg loss by phase (pawns)</h3>
                 <BarChart
                   data={phaseData}
-                  label="average centipawn loss by phase"
+                  label="average pawns lost per move by phase"
+                  minStep={LOSS_AXIS_STEP}
+                  formatValue={formatPawns}
                 />
                 {emptyPhases.length > 0 && (
                   <p className="panel-empty">
@@ -445,7 +448,7 @@ export default function Dashboard() {
             <p>
               No engine analysis yet —{" "}
               <Link to={`/players/${username}/games`}>analyze some games</Link>{" "}
-              to see ACPL and judgment breakdowns.
+              to see the average-loss and judgment breakdowns.
             </p>
           )}
         </section>
@@ -455,15 +458,16 @@ export default function Dashboard() {
         <section>
           <h2>Trend</h2>
           <p>
-            ACPL and blunder rate by month — the rating chart already shows
-            form.
+            Average loss and blunder rate by month — the rating chart already
+            shows form.
           </p>
           <div className="chart-row">
             <div>
-              <h3>ACPL by month</h3>
+              <h3>Avg loss by month (pawns)</h3>
               <MonthlyMetricChart
                 data={monthlyAcpl}
-                label="average centipawn loss by month"
+                label="average pawns lost per move by month"
+                formatValue={formatPawns}
               />
             </div>
             <div>
@@ -552,9 +556,9 @@ export default function Dashboard() {
           repertoire. In the "chose" tables the system column is your own first
           moves; in the "face" tables it's your commonest reply to their line.
           The secondary line beneath it is the most common continuation, both
-          sides answering. Opening ACPL covers the opening phase only;
-          whole-game ACPL covers the full game and is not opening advice on its
-          own.
+          sides answering. Opening avg loss covers the opening phase only;
+          whole-game avg loss covers the full game and is not opening advice on
+          its own. Both are in pawns per move.
         </p>
         <div className="filters">
           <label>
@@ -649,8 +653,8 @@ export default function Dashboard() {
             <>
               <HighlightsTable
                 moves={shownBlunders}
-                numberHeader="CP lost"
-                numberValue={(move) => formatCpLoss(move.cp_loss)}
+                numberHeader="Pawns lost"
+                numberValue={(move) => formatMoveLoss(move.cp_loss)}
               />
               <Pagination
                 page={currentBlunderPage}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   foldToPlayerPov,
-  formatCpLoss,
+  formatMoveLoss,
   formatPlayerEval,
   moveLabel,
 } from "./highlights";
@@ -88,12 +88,20 @@ describe("formatPlayerEval", () => {
   });
 });
 
-describe("formatCpLoss", () => {
-  it("renders cp_loss as a negative number", () => {
-    expect(formatCpLoss(340)).toBe("-340");
+describe("formatMoveLoss", () => {
+  it("renders cp_loss as a negative figure in pawns", () => {
+    // The same move's explanation says "about 3.4 pawns"
+    // (coach/prompt.py::format_cp_loss) — one scale, one page.
+    expect(formatMoveLoss(340)).toBe("-3.4");
   });
 
-  it("renders zero as -0, since a real blunder always has positive loss", () => {
-    expect(formatCpLoss(0)).toBe("-0");
+  it("renders zero as -0.0, since a real blunder always has positive loss", () => {
+    expect(formatMoveLoss(0)).toBe("-0.0");
+  });
+
+  it("reads on the same scale as the brilliancies column beside it", () => {
+    // formatPlayerEval renders +2.50 for 250cp; a blunder table showing
+    // -250 next to it was the defect this pass closed.
+    expect(formatMoveLoss(250)).toBe("-2.5");
   });
 });

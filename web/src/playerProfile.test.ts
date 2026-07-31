@@ -4,7 +4,6 @@ import {
   blunderShare,
   errorExampleHref,
   errorExampleLabel,
-  formatPawns,
   hasPartialCoverage,
   isProfileStale,
   openingsFor,
@@ -76,17 +75,6 @@ describe("hasPartialCoverage", () => {
     expect(hasPartialCoverage({ games_covered: 40, games_in_scope: 40 })).toBe(
       false,
     );
-  });
-});
-
-describe("formatPawns", () => {
-  it("converts centipawns to pawns with two decimals", () => {
-    expect(formatPawns(35)).toBe("0.35");
-    expect(formatPawns(142)).toBe("1.42");
-  });
-
-  it("renders zero as 0.00", () => {
-    expect(formatPawns(0)).toBe("0.00");
   });
 });
 

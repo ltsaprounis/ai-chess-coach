@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { score } from "../api.ts";
 import type { OpeningFamily } from "../openings.ts";
+import { formatPawns } from "../units.ts";
 import { compareValues, useTableSort } from "../useTableSort.ts";
 import SortableTh from "./SortableTh.tsx";
 
@@ -54,7 +55,7 @@ type Props = {
 /**
  * One color-and-partition's repertoire — system played (or, in a
  * faced table, the opponent's line and the player's commonest reply
- * to it), W-L-D and both ACPL figures. The system is its own column
+ * to it), W-L-D and both average-loss figures. The system is its own column
  * and the line is shown as secondary text beneath it
  * (docs/08-frontend.md): an opening name alone cannot show who chose
  * what, but a move sequence can.
@@ -134,14 +135,14 @@ export default function RepertoireTable({
                 />
                 <SortableTh
                   column="openingAcpl"
-                  label="Opening ACPL"
+                  label="Opening avg (pawns)"
                   sortKey={rep.sortKey}
                   sortDir={rep.sortDir}
                   onSort={rep.onSort}
                 />
                 <SortableTh
                   column="gameAcpl"
-                  label="Whole-game ACPL"
+                  label="Whole-game avg (pawns)"
                   sortKey={rep.sortKey}
                   sortDir={rep.sortDir}
                   onSort={rep.onSort}
@@ -185,8 +186,16 @@ export default function RepertoireTable({
                     {family.wins}-{family.losses}-{family.draws}
                   </td>
                   <td>{Math.round(score(family) * 100)}%</td>
-                  <td>{family.openingAcpl ?? "—"}</td>
-                  <td>{family.avgCpLoss ?? "—"}</td>
+                  <td>
+                    {family.openingAcpl === null
+                      ? "—"
+                      : formatPawns(family.openingAcpl)}
+                  </td>
+                  <td>
+                    {family.avgCpLoss === null
+                      ? "—"
+                      : formatPawns(family.avgCpLoss)}
+                  </td>
                 </tr>
               ))}
             </tbody>
