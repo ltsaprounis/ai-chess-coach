@@ -1,11 +1,13 @@
 # Local LLM provider — offline coaching, no subscription
 
-Status: researched 2026-07-31, not built; the build plan at the end
-is decided but unstarted. This is a design record and a research
-report, not a contract. Third-party figures ("Hardware and latency",
-the model tables) are labelled as such; the uv, wheel-integrity and
-build-time results under "Two shapes" were measured in this repo on
-2026-07-31 and say so.
+Status: researched 2026-07-31; **Step 0 of the build plan has been
+run** — see
+[spike-reports/local-llm-provider.md](../spike-reports/local-llm-provider.md)
+— and Steps 1+ remain unstarted. This is a design record and a
+research report, not a contract. Third-party figures ("Hardware and
+latency", the model tables) are labelled as such; the uv,
+wheel-integrity and build-time results under "Two shapes" were
+measured in this repo on 2026-07-31 and say so.
 
 The ask: run the coach against a model on the user's own machine, so
 the app works offline and needs no Claude Code or Copilot login.
@@ -612,12 +614,12 @@ build plan's Step 0 spike and gate everything after it; 2 and 4 can
 wait for the steps that depend on them (Ollama documentation, and
 the tool loop respectively).
 
-1. **What does a real report prompt actually tokenize to?** The 3k
-   estimate comes from fixtures; a 1,200-game archive will be
-   larger, and this number decides whether base-M machines need the
-   prompt staged into passes. Render for a heavy user, tokenize via
-   `llama-server`'s `/tokenize`. Twenty minutes, and it dominates
-   the latency picture.
+1. ~~**What does a real report prompt actually tokenize to?**~~
+   **Answered** by the Step 0 spike
+   ([report](../spike-reports/local-llm-provider.md)): measured
+   against an 8,167-game archive at the widest scope, and several
+   times the fixture-derived 3k estimate, though still well inside a
+   32k context. Not staged into passes.
 2. **Does Ollama's 4k default truncate silently in practice, or
    error?** Send the real prompt to a default `ollama serve` and
    compare `prompt_eval_count` against the true token count.
@@ -728,39 +730,127 @@ Either means stop and shrink the ambition — most likely to "local
 generates profile narratives only" — rather than reaching for a
 bigger model or a longer context.
 
-**Write the results up as
-`docs/spike-reports/local-llm-provider.md`** — prompt tokens,
-timings, and the Phase B hit rate, against the conventions in
-[spike-reports/README.md](../spike-reports/README.md). They are the
-numbers the rest of this plan is missing: every latency figure under
-"Hardware and latency" is someone else's hardware until they exist.
-This doc then cites that report rather than restating it, so there
-is one place the measurements live.
+**Written up as
+[spike-reports/local-llm-provider.md](../spike-reports/local-llm-provider.md)**
+— prompt tokens, timings and the Phase B hit rates, against the
+conventions in [spike-reports/README.md](../spike-reports/README.md).
+That report is the one place those measurements live; this doc cites
+it rather than restating it. Note the figures under "Hardware and
+latency" below are still someone else's hardware — the spike measured
+*this* app's prompts on a 27B, which that 7B table does not describe
+and materially under-states.
 
 ### After the spike — the branch
 
-Phase B decides what Step 2 looks like, which is why the plan
-genuinely stops here:
+**Run 2026-07-31. Results and all figures:
+[spike-reports/local-llm-provider.md](../spike-reports/local-llm-provider.md).**
+Both kill criteria passed, so the ambition does not shrink — but the
+branch below resolves to its middle option, for a reason the spike
+found at the source level rather than by comparison.
+
+The three options were:
 
 - **Tool calling reliable on P4** → build the loop directly on P4.
-  `llama-server` demotes to a later alternative backend, and the
-  in-process shape carries the whole feature.
-- **Tool calling unreliable on P4** → re-run *Phase B only* against
-  a throwaway `llama-server` with the same model and prompts. That
-  disambiguates the one thing a single-stack spike cannot: whether
-  the fault is the generic `chatml-function-calling` handler or the
-  model and our prompts. If llama-server succeeds where P4 failed,
-  it is the handler — build the loop on P3 (Step 2 below) and keep
-  P4 for the non-agentic path.
-- **Neither works** → the agentic flows are not viable locally.
-  Ship `complete(analyst=None)` only, and say so plainly in the UI
-  rather than shipping a coach that invents variations.
+- **Tool calling unreliable on P4** → disambiguate against a throwaway
+  `llama-server`; if it succeeds where P4 failed, the fault is the
+  handler — build on P3 and keep P4 for the non-agentic path.
+- **Neither works** → ship `complete(analyst=None)` only.
+
+**The numbers select the second: build the loop on P3, keep P4 for the
+non-agentic path.** The split is unusually clean, and it is not the
+split the option anticipated:
+
+- *The model is not the problem.* Every run called `analyze_position`
+  exactly once, with valid JSON and a legal FEN, and every run asked
+  about the follow-up position rather than the one it had already been
+  given. Tool-call quality was the risk this spike existed to measure,
+  and it came back better than assumed.
+- *The library is the problem.* `llama-cpp-python`'s
+  `chatml_function_calling` — the only tool-capable handler that
+  applies to Qwen — has **no `tool` branch in its chat template**, so
+  every tool result is silently discarded before the model sees it.
+  Its Jinja environment also HTML-escapes the model's own replayed
+  tool call.
+
+The fault is provably the handler, not the model or our prompts — which
+is the exact question the disambiguation existed to settle. It was then
+confirmed empirically: **`llama-server` was run on the same model and
+the same pinned prompts, and completed every flow P4 could not.** P3 is
+now a measurement, not an expectation.
+
+**One backend suffices, and it is P3.** `llama-server` carried report,
+explain *and* chat in one process, so Step 3's "add the second backend"
+is no longer required to ship the feature — it demotes to an option.
+The decisive numbers are `explain` at 12/12 (tool called, valid FEN,
+engine lines used, finished) where P4 was 0/20, and a report at roughly
+a third of P4's wall clock with the whole completion budget going to
+the brief instead of most of it to hidden reasoning.
+
+Two P3 details worth carrying into Step 2: **thinking must be turned
+off explicitly** (per-request `chat_template_kwargs={"enable_thinking":
+false}` is measured working; `--reasoning off` and `--reasoning-budget`
+exist and are untried) — left on, P3 is as slow as P4. And **prompt
+caching is on by default**, observed reusing a whole cached seed and
+prefilling only the new tokens.
+
+**P4 is ruled out on cost, not capability**, which is a sharper result
+than the branch expected. Given a provider-side workaround, P4
+completes the entire loop and writes a *correct* explanation. What
+disqualifies it is the bill: an `explain` takes minutes rather than
+the "few seconds" that flow needs, the overwhelming majority of the
+generated tokens are reasoning the user never sees, thinking cannot be
+switched off through this API at all, and a 36 GB machine swaps under
+a sustained session. `llama-server` reaches `enable_thinking`,
+`num_ctx` and prompt caching — and the follow-up confirms it addresses
+every one of those, not merely the handler bug. That is now the
+argument for P3, and it is stronger than the packaging argument this
+doc opened with.
+
+**Chat remains the weak flow, on either backend.** P3 chose sensible
+tools and parsed every argument, but one run in three burned its budget
+in a repeat-call loop — twice on byte-identical arguments — and
+returned nothing. Hardening item 3 (dedupe identical `(tool, args)`
+calls) is therefore not speculative; build it with the chat loop, not
+after.
+
+Two findings reshape the steps rather than the branch:
+
+- **Step 1 is reinforced, and its cost is now known.** The non-agentic
+  path needs none of the broken plumbing, and Phase A shows it
+  produces a usable brief. But a report takes **minutes, not the ~20 s
+  the borrowed "Hardware and latency" table implies** for this model
+  size — so the progress-bar UX matters more than that section
+  suggests, and the table stays third-party. Step 1 should also budget
+  `max_tokens` generously and split the visible answer on the
+  **closing** `</think>`: the opening tag never appears in the stream,
+  and a budget that runs out before the close yields nothing but
+  undelimited reasoning.
+- **The faithfulness verifier moves up.** Phase A transcribed every
+  supplied statistic correctly and invented the tactics around them,
+  including one self-contradictory claim. The python-chess verifier
+  listed last under "Then" is the mitigation that would have caught it,
+  and it is worth building before the tool loop rather than after.
 
 **Start at the ceiling, not at the target.** Qwen3.6-27B on 36 GB is
 the best case; if it cannot do this, a 9B on a base M4 certainly
 cannot. If it can, walk *down* — 9B, then 4B — until it breaks.
 Where it breaks is the documented minimum spec, discovered rather
 than guessed.
+
+**The walk-down is deferred, by decision on 2026-07-31.** The spike
+stopped at the ceiling: the failure it hit was library plumbing rather
+than model capability, so walking down would only have re-measured the
+same broken handler. It was not picked up after P3 succeeded either,
+because nothing in the build plan needs it — every step below targets
+the machine the work is being done on, and the walk-down answers a
+question about *other people's* hardware.
+
+So **the minimum spec in the model table above remains a guess** (9B
+for 16 GB, from third-party benchmarks), and must not be quoted as a
+measured figure. The time to run it is before a hardware requirement is
+published — not before Step 1. The spike's harness and pinned prompts
+make that a download and one pass per model
+([report](../spike-reports/local-llm-provider.md)).
 
 ### Step 1 — P4 in-process, non-agentic first
 

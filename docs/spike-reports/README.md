@@ -42,6 +42,11 @@ hardware. A report states:
 
 ## Reports
 
-_None yet. The first is the local LLM provider spike — see
-"Step 0" in
-[local-llm-provider.md](../future-improvements/local-llm-provider.md)._
+- [local-llm-provider.md](local-llm-provider.md) — 2026-07-31,
+  M4 Max / 36 GB. Step 0 of
+  [local-llm-provider.md](../future-improvements/local-llm-provider.md):
+  `llama-cpp-python` + Qwen3.6-27B Q4_K_M against the real report and
+  explain prompts. Both kill criteria pass — the real report prompt is
+  9,503 tokens and the prose holds up — and the model's tool calling is
+  perfect at 60/60 valid calls. The blocker is the library: the only
+  applicable tool handler drops every tool result.
