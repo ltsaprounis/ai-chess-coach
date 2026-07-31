@@ -702,10 +702,14 @@ Either means stop and shrink the ambition — most likely to "local
 generates profile narratives only" — rather than reaching for a
 bigger model or a longer context.
 
-**Log the results in this doc** — prompt tokens, timings, and the
-Phase B hit rate. They are the numbers the rest of the plan is
-missing, and every latency figure under "Hardware and latency" is
-someone else's hardware until they exist.
+**Write the results up as
+`docs/spike-reports/local-llm-provider.md`** — prompt tokens,
+timings, and the Phase B hit rate, against the conventions in
+[spike-reports/README.md](../spike-reports/README.md). They are the
+numbers the rest of this plan is missing: every latency figure under
+"Hardware and latency" is someone else's hardware until they exist.
+This doc then cites that report rather than restating it, so there
+is one place the measurements live.
 
 ### After the spike — the branch
 

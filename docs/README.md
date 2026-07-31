@@ -10,13 +10,19 @@ API layer is the only module that composes them, and everything else
 communicates through the shared domain types and plain function
 interfaces.
 
-Three directories hold work that is not a component:
+Four directories hold work that is not a component:
 
 - [future-improvements/](future-improvements/) — designs evaluated
   but not built, each with its reasoning: deliberately deferred, or
   planned and not yet scheduled. A doc leaves here by being built
   (its contracts migrate into the component docs) or by being
   rejected outright.
+- [spike-reports/](spike-reports/README.md) — measurements from
+  time-boxed experiments, one file per spike, run when a design is
+  gated on a number nobody has. The design states the question and
+  the stopping rule; the report answers it and is then cited rather
+  than restated. Results that were never written down did not
+  happen.
 - [archive/](archive/README.md) — reviews, scans and fix iterations
   that are closed out, kept for their measurements and reasoning.
   Nothing here describes current plans; anything they left open was
