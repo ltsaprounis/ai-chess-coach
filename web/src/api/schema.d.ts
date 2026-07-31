@@ -1481,6 +1481,11 @@ export interface components {
             narrative?: components["schemas"]["ProfileNarrative"] | null;
             /** Narrative Games Now */
             narrative_games_now?: number | null;
+            /**
+             * Prompt Version
+             * @default profile-v5
+             */
+            prompt_version: string;
         };
         /**
          * RatingDelta

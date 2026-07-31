@@ -948,6 +948,14 @@ class ProfileResponse(BaseModel):
     # stale, since a 30-day facts count can never match a full-history
     # narrative's. None when no narrative is stored.
     narrative_games_now: int | None = None
+    # The prompt version the backend would generate under *now*, against
+    # `narrative.prompt_version` for what the stored text was written
+    # under. Without it a bump flags nothing, which is precisely what
+    # docs/06-coach.md promises it does -- and a narrative written under
+    # an older template can contradict the facts rendered beside it
+    # ("drift downward from a high" under a trajectory reading +443 over
+    # the year, which is what profile-v5 was for).
+    prompt_version: str = PROFILE_PROMPT_VERSION
 
 
 def _load_profile_facts(

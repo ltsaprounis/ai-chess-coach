@@ -75,11 +75,26 @@ export function measurableComparisons(
  */
 export function isProfileStale(
   profile: Pick<PlayerProfile, "games_covered">,
-  narrative: Pick<ProfileNarrative, "games_covered"> | null,
+  narrative: Pick<ProfileNarrative, "games_covered" | "prompt_version"> | null,
   narrativeGamesNow: number | null = null,
+  currentPromptVersion: string | null = null,
 ): boolean {
   if (narrative === null) {
     return false;
+  }
+  // Two independent reasons the stored text no longer describes what is
+  // on screen. The games count is the original one. The prompt version
+  // is the other, and without it a bump flags nothing — which is what
+  // docs/06-coach.md says it does. It matters most exactly when the
+  // count has *not* moved: a profile-v4 narrative opening "drift
+  // downward from a high" sits happily under a profile-v5 trajectory
+  // block reading "+443 over 365 days", contradicting it, and no
+  // game-count comparison would ever notice.
+  if (
+    currentPromptVersion !== null &&
+    narrative.prompt_version !== currentPromptVersion
+  ) {
+    return true;
   }
   const now = narrativeGamesNow ?? profile.games_covered;
   return narrative.games_covered !== now;

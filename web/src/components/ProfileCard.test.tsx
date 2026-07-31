@@ -83,6 +83,7 @@ type RenderProps = {
   profile: PlayerProfile;
   narrative?: ProfileNarrative | null;
   narrativeGamesNow?: number | null;
+  currentPromptVersion?: string | null;
   generating?: boolean;
   generateError?: string | null;
 };
@@ -91,6 +92,7 @@ function render({
   profile: p,
   narrative = null,
   narrativeGamesNow = null,
+  currentPromptVersion = null,
   generating = false,
   generateError = null,
 }: RenderProps): string {
@@ -100,6 +102,7 @@ function render({
         profile={p}
         narrative={narrative}
         narrativeGamesNow={narrativeGamesNow}
+        currentPromptVersion={currentPromptVersion}
         agentLabel={(id) => `Agent ${id}`}
         generating={generating}
         generateError={generateError}

@@ -21,21 +21,30 @@ describe("isProfileStale", () => {
   });
 
   it("is false when the narrative's own snapshot matches the fresh count", () => {
-    expect(isProfileStale({ games_covered: 10 }, { games_covered: 10 })).toBe(
-      false,
-    );
+    expect(
+      isProfileStale(
+        { games_covered: 10 },
+        { games_covered: 10, prompt_version: "v1" },
+      ),
+    ).toBe(false);
   });
 
   it("is true once more games have been analyzed since generation", () => {
-    expect(isProfileStale({ games_covered: 15 }, { games_covered: 10 })).toBe(
-      true,
-    );
+    expect(
+      isProfileStale(
+        { games_covered: 15 },
+        { games_covered: 10, prompt_version: "v1" },
+      ),
+    ).toBe(true);
   });
 
   it("is true even when the fresh count is lower (re-sync edge case), not just higher", () => {
-    expect(isProfileStale({ games_covered: 5 }, { games_covered: 10 })).toBe(
-      true,
-    );
+    expect(
+      isProfileStale(
+        { games_covered: 5 },
+        { games_covered: 10, prompt_version: "v1" },
+      ),
+    ).toBe(true);
   });
 
   // The narrative covers its time control's full history while the
@@ -43,14 +52,61 @@ describe("isProfileStale", () => {
   // counts describe different scopes and must not be compared.
   it("compares against the narrative's own scope, not the windowed facts", () => {
     expect(
-      isProfileStale({ games_covered: 12 }, { games_covered: 40 }, 40),
+      isProfileStale(
+        { games_covered: 12 },
+        { games_covered: 40, prompt_version: "v1" },
+        40,
+      ),
     ).toBe(false);
   });
 
   it("is stale when the narrative's own scope has grown, whatever the window shows", () => {
     expect(
-      isProfileStale({ games_covered: 12 }, { games_covered: 40 }, 55),
+      isProfileStale(
+        { games_covered: 12 },
+        { games_covered: 40, prompt_version: "v1" },
+        55,
+      ),
     ).toBe(true);
+  });
+});
+
+describe("isProfileStale on the prompt version", () => {
+  // The reason this exists: on the live archive a profile-v4 narrative
+  // opening "drift downward from a high" rendered with no warning
+  // directly under a profile-v5 trajectory block reading "+443 over 365
+  // days". The counts matched exactly, so no game-count comparison
+  // would ever have noticed.
+  it("is stale when the stored text predates the current template", () => {
+    expect(
+      isProfileStale(
+        { games_covered: 40 },
+        { games_covered: 40, prompt_version: "profile-v4" },
+        40,
+        "profile-v5",
+      ),
+    ).toBe(true);
+  });
+
+  it("is not stale when the versions agree", () => {
+    expect(
+      isProfileStale(
+        { games_covered: 40 },
+        { games_covered: 40, prompt_version: "profile-v5" },
+        40,
+        "profile-v5",
+      ),
+    ).toBe(false);
+  });
+
+  it("ignores the version when the caller does not know the current one", () => {
+    expect(
+      isProfileStale(
+        { games_covered: 40 },
+        { games_covered: 40, prompt_version: "profile-v4" },
+        40,
+      ),
+    ).toBe(false);
   });
 });
 

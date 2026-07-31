@@ -29,9 +29,13 @@ type Props = {
    *  generated yet. */
   narrative: ProfileNarrative | null;
   /** Live analyzed-game count for the *narrative's* scope, which is
-   *  wider than the card's whenever a window filter is applied — the
-   *  staleness hint's only honest basis. */
+   *  wider than the card's whenever a window filter is applied — one of
+   *  the staleness hint's two bases. */
   narrativeGamesNow: number | null;
+  /** The prompt version the backend would generate under now. The other
+   *  basis: a narrative written under an older template can contradict
+   *  the facts rendered above it even when no new game has arrived. */
+  currentPromptVersion: string | null;
   /** Resolves an agent id to its roster label — the same helper the
    *  Coach page already applies to advice (falls back to the raw id
    *  when the roster hasn't loaded or no longer lists it). */
@@ -193,6 +197,7 @@ export default function ProfileCard({
   profile,
   narrative,
   narrativeGamesNow,
+  currentPromptVersion,
   agentLabel,
   generating,
   generateError,
@@ -216,7 +221,16 @@ export default function ProfileCard({
   }
 
   const narrativeText = profile.narrative ?? null;
-  const stale = isProfileStale(profile, narrative, narrativeGamesNow);
+  const stale = isProfileStale(
+    profile,
+    narrative,
+    narrativeGamesNow,
+    currentPromptVersion,
+  );
+  const outdatedTemplate =
+    narrative !== null &&
+    currentPromptVersion !== null &&
+    narrative.prompt_version !== currentPromptVersion;
   const milestones = milestoneRows(profile);
   const trajectory = profile.trajectory ?? null;
   const improving = isImproving(trajectory);
@@ -516,14 +530,23 @@ export default function ProfileCard({
               {generating ? "Regenerating…" : "Regenerate"}
             </button>
           </p>
-          {stale && (
-            <p role="alert">
-              This profile was generated over {narrative.games_covered} analyzed{" "}
-              {scope} game{narrative.games_covered === 1 ? "" : "s"} — you now
-              have {narrativeGamesNow ?? profile.games_covered}. Regenerate for
-              a profile that covers your latest games.
-            </p>
-          )}
+          {stale &&
+            (outdatedTemplate ? (
+              <p role="alert">
+                This read was written under an older profile template, so it can
+                disagree with the figures above — it may call a rating peak a
+                decline where the trajectory shows the student climbing.
+                Regenerate for a read that matches.
+              </p>
+            ) : (
+              <p role="alert">
+                This profile was generated over {narrative.games_covered}{" "}
+                analyzed {scope} game
+                {narrative.games_covered === 1 ? "" : "s"} — you now have{" "}
+                {narrativeGamesNow ?? profile.games_covered}. Regenerate for a
+                profile that covers your latest games.
+              </p>
+            ))}
           {generateError !== null && <p role="alert">{generateError}</p>}
           <article className="advice">
             <Markdown>{narrativeText}</Markdown>
