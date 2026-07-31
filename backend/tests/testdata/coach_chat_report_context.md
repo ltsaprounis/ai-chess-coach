@@ -38,7 +38,7 @@ Overall 1.07 pawns lost per move over 230 moves -- best 58.3% (134), good 29.1% 
 
 ## Milestones
 *(Over every game in scope, analyzed or not -- none of these needs an engine.)*
-- Best win: beat hikaru (1638) on 2026-06-07, rated 1598 at the time (+40)
+- Best win: beat hikaru (1607) on 2026-05-29, rated 1487 at the time (+120)
 - Streaks: last game was a win; longest runs 2 wins, 2 losses
 - By color: White 50% (13g); Black 58% (6g)
 

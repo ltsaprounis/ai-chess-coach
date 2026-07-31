@@ -34,7 +34,7 @@ Overall 1.07 pawns lost per move over 230 moves -- best 58.3% (134), good 29.1% 
 
 ## Milestones and tendencies
 *(All over every game in scope, analyzed or not -- none of these needs an engine.)*
-- Best win: beat a 1638 on 2026-06-07, rated 1598 at the time (+40)
+- Best win: beat a 1607 on 2026-05-29, rated 1487 at the time (+120)
 - Streaks: their last game was a win; longest runs 2 wins, 2 losses
 - By color: White 50% (13g); Black 58% (6g)
 - Opposition: avg rating diff -2; 40% (5g) vs stronger, 62% (8g) vs similar, 50% (6g) vs weaker

@@ -86,8 +86,35 @@ PROMPT_VERSION: str
 # it, carrying through the report's `time_class` (the profile's own
 # scope and storage key) and both denominators. `narrative` stays
 # None here; the API layer attaches the stored narrative when one
-# exists.
-def build_profile(report: PlayerReport) -> PlayerProfile
+# exists. `trajectory` covers the full archive and is therefore
+# supplied by the caller, which is the only party holding the
+# unwindowed months (see "Window").
+def build_profile(report: PlayerReport, *,
+                  trajectory: RatingTrajectory | None = None,
+                  spans_level_change: bool = False) -> PlayerProfile
+
+# The profile window (see "Window"): the epoch second the outcome
+# layer should start at, given every month in the archive, oldest
+# first. None = no cut, the whole archive is one level. The API layer
+# calls this on the *unwindowed* month list, then re-queries with the
+# bound — the rule is a coach semantic, so it lives here rather than
+# in whichever caller happens to need it.
+def profile_window(months: list[MonthStats]) -> int | None
+
+# Full-archive direction, over the same unwindowed months plus the
+# volume rows the deltas and the drawdown are measured on. Pure.
+def build_trajectory(games: list[GameSummary]) -> RatingTrajectory | None
+
+# The profile's comparison family (see "Reading a comparison"):
+# matched buckets in, gaps and BH-adjusted verdicts out. Pure, and
+# takes only `Record`s — a bucket's W/D/L carries both its mean and
+# its exact variance, so no new aggregation is needed.
+def build_comparisons(pairs: list[ComparisonInput]) -> list[Comparison]
+
+WINDOW_DRIFT_POINTS: int   # 200
+WINDOW_MAX_MONTHS: int     # 12
+WINDOW_MIN_GAMES: int      # the sample floor that overrides drift
+COMPARISON_FDR: float      # 0.05, the Benjamini-Hochberg level
 
 # The narrative-generation prompt (snapshot-tested): the facts, plus
 # instructions asking for 3-5 sentences of tendencies and a short
@@ -824,6 +851,97 @@ storage's key for the narrative. It is deliberately the *only* scope
 the narrative carries — see "Narrative" below for why the window is
 not.
 
+**Window.** A profile's outcome rates cover the student's **current
+level**, not their whole archive. On a developing player the two are
+not close: the reference archive runs 185 → 1479 over 1,925 rapid
+games, so "54% overall" averages a beginner beating beginners with a
+1500 at equilibrium and describes neither.
+
+The window is selected on **time, never on rating**. Filtering games
+by a ±rating band is selection on the outcome — games played below
+the current rating are disproportionately the ones that were lost —
+and on the reference archive a ±100 band keeps 699 games at 52.9%
+while deleting 173 at 41.9%, erasing a real 245-point drawdown. The
+rating curve therefore picks one **cut point** and every game after
+it is kept.
+
+`profile_window(months)` walks back in whole months from the most
+recent, extending while `|median(month) − median(newest)| ≤ 200`, and
+stops at the first month that exceeds it. Guard rails, each closing a
+way the bare rule misreads:
+
+- **Minimum sample.** Below `WINDOW_MIN_GAMES` analyzed games the
+  window keeps extending regardless of drift, and the profile carries
+  `window_spans_level_change`, which both renderers state — a student
+  mid-climb gets an honest caveat instead of a 40-game window.
+- **Maximum span** of 12 months, so a settled player does not get a
+  five-year window across a changed opponent pool.
+- **Thin months** below 30 games cannot set the boundary; the median
+  is taken over a trailing 30-game window instead. Otherwise a
+  12-game month decides the scope of the whole profile.
+
+Only the outcome layer is windowed. **Trajectory covers the full
+archive** (below), because a window is a stationarity assumption and
+the thing trajectory exists to report is the opposite.
+
+**Trajectory.** Averages describe a student; direction is what a coach
+asks first. `RatingTrajectory` carries the rating now, the change over
+the last 30/90/180/365 days with the games behind each, both dated
+extremes, and the largest `Drawdown` — peak, trough, the record
+through the fall, and whether it has been recovered. Three rules:
+
+- **A drawdown is a field, not a window artifact.** A collapse from
+  1574 to 1329 in 23 days is exactly what a stationary window either
+  swallows or hides depending on where its edge lands. Reporting it
+  explicitly is the only way it survives either outcome.
+- **The peak gap is not a headline unless the trend agrees.** Renderers
+  suppress it as a lead unless the 90-day *and* 365-day deltas are both
+  ≤ 0. "95 below peak" on a student up 443 on the year is a misread,
+  and it is the one the first live narrative made.
+- **`best_win` is the biggest upset, not the highest-rated opponent.**
+  Because chess.com pairs by rating, "highest-rated opponent beaten"
+  is structurally the student's own peak — 1559 against a 1574 peak in
+  rapid, 1172 against 1162 in blitz — so it restates the ratings table
+  two rows above and, on a tight archive, names a *weaker* opponent.
+  The largest positive rating gap in a win is a different and genuinely
+  earned milestone (+117 in blitz, +169 in bullet). It is `None` when
+  no win in scope beat a higher-rated opponent, which on a
+  rating-matched archive is common and correct.
+
+**Reading a comparison.** Several profile figures are differences
+between two disjoint buckets of the same games — after-a-loss against
+not, White against Black, one opening family against the rest. These
+are noisy, and a prompt that hands a model the difference and calls it
+a coaching problem will get a coin flip narrated as a tendency; the
+first live narrative duly hedged one in as "worth watching".
+
+`Comparison` carries both buckets, the gap in percentage points, the
+resolution, and a verdict. The rules:
+
+- **Matched baselines.** After-a-loss is compared against games *not*
+  after a loss, never against the overall record, which counts the
+  after-loss games on both sides of its own comparison.
+- **The score's own variance.** A game scores 1 / ½ / 0, so the
+  per-game variance is computed from the bucket's W/D/L rather than
+  assumed Bernoulli — `Record` carries everything needed, which is why
+  no new aggregation is required to produce any of this.
+- **Benjamini–Hochberg across the profile's whole family.** A profile
+  makes up to fourteen of these comparisons; at an unadjusted 2σ that
+  is 0.6 expected false positives per profile, so the guard would
+  manufacture roughly one spurious tendency every other student. BH
+  controls the false-discovery rate, which is the right error to
+  control here — a missed tendency costs a bullet, a fabricated one is
+  pasted into every later prompt.
+- **The verdict is rendered, the arithmetic is not.** Both renderers
+  state "within noise" or the plain difference; neither prints sigmas
+  or p-values, which are not this audience's vocabulary.
+
+The SE is closed-form Welch. A session-level block bootstrap over the
+reference archive (4,000 resamples, 239 sittings) puts the dependence
+inflation at 1.02×, so the closed form is used in production and stays
+deterministic; that measurement is the justification, recorded here
+rather than re-run.
+
 **Facts.** `build_profile(report)` distills an already-built
 `PlayerReport` into `domain.PlayerProfile`: rating and record per
 time class with the extremes dated, the most recent months of trend,
@@ -880,26 +998,58 @@ person because a coach reads it, the brief second person because the
 student does. Their data reads the same way in both. The register
 otherwise matches explain: club player, pawns never centipawns.
 
-The instructions also carry the scope and both denominators into the
-text: name the time control, never generalize it to the student's
-whole game, never present the analyzed sample as their whole history,
-and lead with the most recent form window that has a real sample.
+**The instructions say what the text is for, and then get out of the
+way** (`profile-v5`). Until then they ran to twelve bullets
+prescribing shape, and never once said what the narrative was *for* —
+so the model optimized the only thing it had been given, and the
+repertoire, which no bullet named, lost the sentence budget in every
+run. Twelve rules could not make it mention the openings; one
+sentence of purpose does, because a text written to be *useful in
+another session* has to say what the student plays.
 
-**Two rules are about the trip, not the content** (both new in
-`profile-v4`). The narrative is written under one prompt and read
-under others, and each rule closes something that only goes wrong on
-the way: **spell every unit out** — "1.30 pawns a move", never "1.30
-ACPL", per "Units" below — and **no markdown headings**, since the
-text lands *inside* another prompt's sections where a heading of its
-own reads as starting a new one. The second is belt and braces beside
-the block quote the embed applies: quoting bounds whatever arrives,
-the rule stops it arriving.
+So the block now opens with the job — write the context that will be
+pasted in when another coach explains a move or answers a question,
+so write what would change the advice — and keeps only the rules
+nothing else can supply:
 
-Neither was worth a bump alone, and neither had to be: they were
-queued behind the first `PROFILE_PROMPT_VERSION` move and taken with
-it. A bump only flags stored narratives stale in the UI — it never
-re-bills on its own — so the standing rule is to bank cheap durable-
-text rules like these and spend one bump on the lot.
+- **Third person, to a coach.** The register rule above.
+- **No game citations, dates, opponents, links or handles.** They
+  resolve to nothing where this text lands.
+- **No markdown headings**, since it lands *inside* another prompt's
+  sections where a heading of its own reads as starting a new one.
+  Belt and braces beside the block quote the embed applies: quoting
+  bounds whatever arrives, the rule stops it arriving.
+- **Spell every unit out** — "1.30 pawns a move", never "1.30 ACPL",
+  per "Units" below.
+- **A comparison marked "within noise" is not a tendency.**
+
+Everything cut was either a shape constraint the purpose statement
+implies, or an instruction to say something the facts already say.
+Recency is the clearest case: it was a bullet ("lead with the most
+recent window"), and it is now the *window*, which is where it
+belongs. A fact the data enforces needs no rule.
+
+**Generation is agentic** from `profile-v5`. `complete` takes the
+`ChatToolkit` rather than a bare analyst, so the run can read the
+repertoire, pull games and check a position before asserting
+anything — the same mechanics the report brief has had since it
+gained the engine tool, and the reason the brief is the best text
+this system produces. The facts block is the starting point, not the
+limit: it exists so the run does not spend turns re-deriving, badly,
+what aggregation already computed correctly.
+
+One risk comes with the tools and is worth stating where the rule
+lives: **a run that slices the data itself produces comparisons with
+no verdict attached**, which is the multiple-comparisons problem
+outside the BH family that "Reading a comparison" corrects for. The
+instruction covers it for now; the durable fix is to expose the
+comparison itself as a tool, so every difference the model can obtain
+already carries its verdict. Not built — recorded here so the next
+person to widen the toolkit does it in the right direction.
+
+A bump only flags stored narratives stale in the UI — it never
+re-bills on its own — so the standing rule is to bank cheap
+durable-text rules and spend one bump on the lot.
 
 Expensive, therefore stored: the API layer persists the narrative —
 beside the facts snapshot it described, the agent that wrote it, and

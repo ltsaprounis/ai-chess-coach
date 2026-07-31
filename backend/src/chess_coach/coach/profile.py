@@ -7,6 +7,7 @@ any semantic, including the repertoire family rollup, which is shared
 with the report prompt through `chess_coach.coach.repertoire`.
 """
 
+from chess_coach.coach.comparisons import build_comparisons
 from chess_coach.coach.repertoire import (
     REPERTOIRE_SAMPLE_FLOOR,
     FacedFamily,
@@ -16,7 +17,16 @@ from chess_coach.coach.repertoire import (
     rollup_chosen_families,
     rollup_faced_families,
 )
-from chess_coach.domain import Color, PlayerProfile, PlayerReport, ProfileOpening
+from chess_coach.domain import (
+    Color,
+    Comparison,
+    ComparisonInput,
+    PlayerProfile,
+    PlayerReport,
+    ProfileOpening,
+    RatingTrajectory,
+    Record,
+)
 
 # Trend rows kept in the profile -- enough to show direction without
 # blowing render_profile_context's ~250-token budget (docs/06-coach.md).
@@ -31,10 +41,21 @@ _FACED_CAP = 2
 _COLORS: tuple[Color, ...] = ("white", "black")
 
 
-def build_profile(report: PlayerReport) -> PlayerProfile:
+def build_profile(
+    report: PlayerReport,
+    *,
+    trajectory: RatingTrajectory | None = None,
+    spans_level_change: bool = False,
+) -> PlayerProfile:
     """Pure distillation of an already-built report (docs/06-coach.md,
     "Player profile"). `narrative` stays None -- the API layer attaches
     the stored narrative when one exists.
+
+    `trajectory` covers the **full archive** and so cannot be derived
+    here: the report handed in has already been windowed to one level,
+    which is precisely the information trajectory exists to report
+    (docs/06-coach.md, "Trajectory"). The caller holds the unwindowed
+    games and passes it; None simply omits the section.
 
     Total over an empty report: every field here is either a direct copy
     of a report field (already `[]`/`{}`/`None`/`0`/`0.0` for a report
@@ -79,7 +100,98 @@ def build_profile(report: PlayerReport) -> PlayerProfile:
         terminations=report.terminations,
         openings=_profile_openings(report),
         error_patterns=report.error_patterns,
+        analyzed_window_start=report.analyzed_window_start,
+        analyzed_window_end=report.analyzed_window_end,
+        trajectory=trajectory,
+        window_spans_level_change=spans_level_change,
+        comparisons=_profile_comparisons(report),
         narrative=None,
+    )
+
+
+def _profile_comparisons(report: PlayerReport) -> list[Comparison]:
+    """The profile's whole comparison family, judged together
+    (docs/06-coach.md, "Reading a comparison").
+
+    One call for all of them, because Benjamini-Hochberg is a property
+    of the family and not of any row: building these in two places, or
+    judging one on its own, reintroduces exactly the false-discovery
+    rate the guard exists to hold down.
+    """
+    pairs: list[ComparisonInput] = []
+
+    streaks = report.streaks
+    if streaks is not None:
+        # Matched baseline: games *not* after a loss, never the overall
+        # record, which counts the after-loss games on both sides of its
+        # own comparison and so understates the gap it is measuring.
+        pairs.append(
+            ComparisonInput(
+                label="Tilt",
+                left_label="within 2 hours of a loss",
+                left=streaks.after_loss,
+                right_label="every other game",
+                right=_without(report.record, streaks.after_loss),
+            )
+        )
+
+    white = report.color_records.get("white")
+    black = report.color_records.get("black")
+    if white is not None and black is not None:
+        pairs.append(
+            ComparisonInput(
+                label="By color",
+                left_label="as White",
+                left=white,
+                right_label="as Black",
+                right=black,
+            )
+        )
+
+    # Each chosen family against the student's other games with that
+    # color -- their own baseline, not the overall score, since White
+    # and Black score differently for everyone and comparing a defence
+    # against a White system measures nothing.
+    for color in _COLORS:
+        color_record = report.color_records.get(color)
+        if color_record is None:
+            continue
+        chosen = rollup_chosen_families(
+            [o for o in report.openings if o.color == color and not o.faced]
+        )
+        for family in sorted(chosen, key=lambda f: -f.games)[:_CHOSEN_CAP]:
+            if family.games < REPERTOIRE_SAMPLE_FLOOR:
+                continue
+            family_record = Record(
+                games=family.games,
+                wins=family.wins,
+                losses=family.losses,
+                draws=family.draws,
+            )
+            pairs.append(
+                ComparisonInput(
+                    label=f"{family.label} ({color})",
+                    left_label="in this system",
+                    left=family_record,
+                    right_label=f"their other games as {color}",
+                    right=_without(color_record, family_record),
+                )
+            )
+
+    return build_comparisons(pairs)
+
+
+def _without(whole: Record, part: Record) -> Record:
+    """`whole` minus `part`, for the matched baseline of a bucket drawn
+    from it. Clamped at zero: the two come from the same aggregation, so
+    a negative count would be a bug rather than a state to represent,
+    and a comparison against an empty record is simply not measurable.
+    """
+    return Record(
+        games=max(0, whole.games - part.games),
+        wins=max(0, whole.wins - part.wins),
+        losses=max(0, whole.losses - part.losses),
+        draws=max(0, whole.draws - part.draws),
     )
 
 
@@ -121,6 +233,12 @@ def _chosen_opening(color: Color, family: Family) -> ProfileOpening:
         games=family.games,
         score=family_score(family),
         faced=False,
+        # Already move-weighted by the shared rollup; carried through
+        # because score alone cannot distinguish a system that wins on
+        # even positions from one whose openings the student survives
+        # (docs/06-coach.md, "Player profile").
+        opening_acpl=family.opening_acpl,
+        avg_cp_loss=family.avg_cp_loss,
     )
 
 
@@ -132,4 +250,6 @@ def _faced_opening(color: Color, family: FacedFamily) -> ProfileOpening:
         games=family.games,
         score=family_score(family),
         faced=True,
+        opening_acpl=family.opening_acpl,
+        avg_cp_loss=family.avg_cp_loss,
     )

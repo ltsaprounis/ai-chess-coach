@@ -2659,6 +2659,12 @@ def _partly_analyzed() -> tuple[list[AnalyzedGame], list[GameSummary]]:
             time_class="blitz",
             end_time=1_781_000_000 + i,
             player_rating=1500,
+            # Above the player, so these count as upsets -- `best_win`
+            # is the biggest upset, not the highest-rated opponent
+            # (docs/06-coach.md, "Trajectory"). The fixture's point is
+            # that an unanalyzed win still reaches the milestones; it
+            # needs a win that qualifies as one.
+            opponent_rating=1560 + i,
         )
         for i in range(2)
     ]
