@@ -296,6 +296,14 @@ class ClaudeAgentSdkProvider:
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             chunks.append(block.text)
+                        elif isinstance(block, ToolUseBlock):
+                            # Text written before a tool call is the model
+                            # narrating its plan ("I'll verify the turning
+                            # points first"), not the finished piece
+                            # (docs/06-coach.md, "Providers"). Keeping it
+                            # concatenated a preamble onto the front of
+                            # every agentic brief.
+                            chunks.clear()
                 elif isinstance(message, ResultMessage):
                     fallback = message.result
                     if message.is_error:
@@ -442,6 +450,13 @@ class ClaudeAgentSdkProvider:
                                     yield ChatEvent(type="text", text=block.text)
                             elif isinstance(block, ToolUseBlock):
                                 produced_any = True
+                                # As in complete(): narration before a tool
+                                # call is not the reply. It has already been
+                                # streamed as its own text event, so the
+                                # student still watches the coach work --
+                                # only the `done` text the API persists and
+                                # replays drops it.
+                                chunks.clear()
                                 yield ChatEvent(
                                     type="tool", text=_chat_tool_summary(block)
                                 )
@@ -622,6 +637,13 @@ class CopilotSdkProvider:
                 args = cast("dict[str, Any]", invocation.arguments or {})
                 fen = str(args.get("fen", ""))
                 status = budget.record_call()
+                if status != "cutoff":
+                    # Narration before a tool call is not the brief, exactly
+                    # as in ClaudeAgentSdkProvider.complete(). Cutoff is
+                    # excluded because it tears the run down: no further
+                    # text is coming, so clearing there could only destroy
+                    # the last thing left to return.
+                    chunks.clear()
                 if status == "grace":
                     # One grace round: nudge the model to wrap up instead of
                     # cutting it off the instant it goes over budget.
@@ -851,7 +873,9 @@ class CopilotSdkProvider:
                 case _:  # every other session-event type is irrelevant here
                     pass
 
-        tools, available_tools = _build_copilot_chat_tools(toolkit, queue, budget)
+        tools, available_tools = _build_copilot_chat_tools(
+            toolkit, queue, budget, chunks.clear
+        )
         session_id: str | None = None
 
         try:
@@ -1195,14 +1219,27 @@ async def _guarded_chat_tool_call(
     budget: _ToolCallBudget,
     progress_text: str,
     call: Callable[[], Awaitable[str]],
+    on_call: Callable[[], None],
 ) -> ToolResult:
     """Shared per-call plumbing for CopilotSdkProvider.chat's four tools:
     budget check, then either the wrap-up steer or a progress event
     followed by the real call. Generalizes explain()'s single-tool budget
     handling (_ToolCallBudget) across chat's four tools sharing one
     budget.
+
+    `on_call` drops the text narrated before this call, the same rule the
+    other three providers' paths apply inline (docs/06-coach.md,
+    "Providers"). It runs here rather than where the caller drains the
+    queue because `chunks` is appended at *enqueue* time: by the time a
+    consumer dequeued this tool event, text belonging after it could
+    already have arrived.
     """
     status = budget.record_call()
+    if status != "cutoff":
+        # Cutoff excluded for the same reason as complete()'s: it tears
+        # the run down, so no further text is coming and clearing could
+        # only destroy the last thing left to return.
+        on_call()
     if status == "grace":
         return ToolResult(
             text_result_for_llm=_CHAT_BUDGET_EXHAUSTED, result_type="success"
@@ -1221,6 +1258,7 @@ def _build_copilot_chat_tools(
     toolkit: ChatToolkit,
     queue: asyncio.Queue[ChatEvent | Exception | None],
     budget: _ToolCallBudget,
+    on_tool_call: Callable[[], None],
 ) -> tuple[list[Tool], ToolSet]:
     tools: list[Tool] = []
     names: list[str] = []
@@ -1237,7 +1275,7 @@ def _build_copilot_chat_tools(
                 return _render_lines(lines)
 
             return await _guarded_chat_tool_call(
-                queue, budget, _analyze_summary(fen), do_call
+                queue, budget, _analyze_summary(fen), do_call, on_tool_call
             )
 
         tools.append(
@@ -1254,7 +1292,11 @@ def _build_copilot_chat_tools(
     async def handle_find_games(invocation: ToolInvocation) -> ToolResult:
         args = cast("dict[str, Any]", invocation.arguments or {})
         return await _guarded_chat_tool_call(
-            queue, budget, "looking up games", lambda: _call_find_games(toolkit, args)
+            queue,
+            budget,
+            "looking up games",
+            lambda: _call_find_games(toolkit, args),
+            on_tool_call,
         )
 
     tools.append(
@@ -1276,6 +1318,7 @@ def _build_copilot_chat_tools(
             budget,
             f"looking up game {game_id}" if game_id else "looking up a game",
             lambda: _call_get_game(toolkit, args),
+            on_tool_call,
         )
 
     tools.append(
@@ -1295,6 +1338,7 @@ def _build_copilot_chat_tools(
             budget,
             "looking up the repertoire",
             lambda: _call_opening_stats(toolkit),
+            on_tool_call,
         )
 
     tools.append(

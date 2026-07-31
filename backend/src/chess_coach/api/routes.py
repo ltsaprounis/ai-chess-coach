@@ -657,6 +657,16 @@ async def explain_move(
                 async for event in events:
                     if event.type == "text":
                         chunks.append(event.text)
+                    elif event.type == "tool":
+                        # Text written before an engine call is the model
+                        # narrating its plan, not the explanation
+                        # (docs/06-coach.md, "Providers"). It still streams
+                        # to the panel below, so the student watches the
+                        # work; only what gets cached drops it. Safe to do
+                        # on dequeue here, unlike the Copilot chat path:
+                        # this loop is the sole consumer of a sequential
+                        # generator, so no later text can have arrived yet.
+                        chunks.clear()
                     yield {"event": event.type, "data": event.model_dump_json()}
         except CoachProviderError as exc:
             # Too late for an HTTPException: events are already on the

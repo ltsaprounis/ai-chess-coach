@@ -1059,6 +1059,26 @@ own persona (`CHAT_SYSTEM_PROMPT`): its instructions arrive in the
 seed, not in a block at the end, and the turns after the first are a
 conversation rather than a request for a finished piece.
 
+**The answer is what the model writes last.** Every agentic path —
+the report brief, chat, and the explain stream the API layer caches —
+collects assistant text as it arrives, and a model about to call a
+tool narrates first ("I'll verify the turning points before
+writing"). Left in, that narration was concatenated onto the front of
+the finished piece, without even a separator, on every run that used
+a tool. So **a tool call discards the text collected before it**:
+what the model writes after its last tool call is the answer, and an
+empty result falls through to the run's own final message exactly as
+before. Streaming is unaffected — the narration still reaches the UI
+as its own event, so the student watches the coach work; only the
+accumulated string, the one that gets cached and replayed into later
+prompts, drops it. Two details are not incidental. The Copilot
+providers clear on every call *except* a budget `cutoff`, which is
+salvaging a runaway run rather than returning a clean answer and
+keeps whatever text exists. And Copilot's chat clears inside the tool
+handler rather than where the caller drains the event queue, because
+text is accumulated at enqueue time: by the time a consumer dequeued
+the tool event, text belonging *after* it could already have arrived.
+
 - **v1 — `ClaudeAgentSdkProvider`** (default): `complete` runs
   `claude_agent_sdk.query(...)` with a coach system prompt that
   replaces the Claude Code coding persona. Given an analyst it is

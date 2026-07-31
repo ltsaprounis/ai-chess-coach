@@ -390,9 +390,14 @@ async def test_agent_sdk_provider_chat_streams_text_tool_then_done(
         ChatEvent(type="text", text="Let's check your games."),
         ChatEvent(type="tool", text="looking up games"),
         ChatEvent(type="text", text=" You've played hikaru twice."),
+        # The `done` text is what the model wrote after its last tool call
+        # (docs/06-coach.md, "Providers"). "Let's check your games." still
+        # streams as its own event -- the student watches the coach work --
+        # but it is narration, and the API persists this `done` text as the
+        # assistant turn and replays it into later prompts.
         ChatEvent(
             type="done",
-            text="Let's check your games. You've played hikaru twice.",
+            text="You've played hikaru twice.",
             provider_state="chat-session-1",
         ),
     ]
@@ -870,9 +875,12 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
         ChatEvent(type="text", text="Let's check your games."),
         ChatEvent(type="tool", text="looking up games"),
         ChatEvent(type="text", text=" You've played hikaru twice."),
+        # Narration before a tool call still streams, but is not the reply
+        # the API persists and replays (docs/06-coach.md, "Providers") --
+        # the same rule ClaudeAgentSdkProvider.chat() applies.
         ChatEvent(
             type="done",
-            text="Let's check your games. You've played hikaru twice.",
+            text="You've played hikaru twice.",
             provider_state="fresh-session",
         ),
     ]
@@ -1193,30 +1201,27 @@ async def test_copilot_provider_chat_runaway_tool_calls_cut_the_run_off(
 
     provider = create_provider(LlmConfig(provider="github-copilot"))
     toolkit = _StubChatToolkit(games=[_sample_game_summary()])
-    events = [
-        event
+    events: list[ChatEvent] = []
+    # This run never wrote anything after a tool call, so once the
+    # narration is dropped (docs/06-coach.md, "Providers") there is no
+    # reply to persist. Erroring is the honest end: the alternative
+    # stores "Let's check a few things." as a complete coach turn and
+    # replays it into every later message in the thread.
+    with pytest.raises(CoachProviderError, match="returned no text"):
         async for event in provider.chat(
             system_context="SEED", history=[], message="hi", toolkit=toolkit
-        )
-    ]
+        ):
+            events.append(event)
 
-    # The stream ends right after the in-budget tool events plus a final
-    # done carrying whatever text streamed before the cutoff -- the grace
-    # round produces no event, and the runaway call's drain sentinel cuts
-    # the loop off before the trailing text/idle steps are ever reached.
-    # The done carries NO provider_state: post-cutoff content lives in
-    # the torn-down session but not in the persisted text, so resuming
-    # it next turn would diverge from the stored transcript -- the
-    # cutoff path must force a replay.
+    # The narration and the in-budget tool events still streamed -- the
+    # grace round produces no event, and the runaway call's drain sentinel
+    # cuts the loop off before the trailing text/idle steps are reached, so
+    # the post-cutoff text never escapes.
     assert events[0] == ChatEvent(type="text", text="Let's check a few things.")
     tool_events = [e for e in events if e.type == "tool"]
     assert len(tool_events) == max_calls
-    assert events[-1] == ChatEvent(
-        type="done",
-        text="Let's check a few things.",
-        provider_state=None,
-    )
-    assert "Should never be yielded" not in events[-1].text
+    assert not [e for e in events if e.type == "done"]
+    assert not [e for e in events if "Should never be yielded" in e.text]
 
     assert captured["session_disconnected"] is True
     assert captured["client_stopped"] is True

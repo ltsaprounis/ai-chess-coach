@@ -1511,8 +1511,14 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
 ) -> None:
     """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
     complete() reuses explain()'s MCP-wrapped tool mechanics under the
-    report turn budget, and text across the whole tool loop -- before and
-    after an engine call -- concatenates into the returned advice.
+    report turn budget.
+
+    The returned advice is what the model wrote *after* its last engine
+    call (docs/06-coach.md, "Providers"). This test used to assert the
+    whole tool loop concatenated, which is how "I'll verify the key
+    turning points I plan to feature before writing." ended up glued to
+    the front of a live coaching brief -- with no separator, since the
+    join is on the empty string.
     """
     captured: dict[str, object] = {}
 
@@ -1557,9 +1563,7 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
     provider = create_provider(LlmConfig())
     advice = await provider.complete("write the report", stub_analyst)
 
-    assert (
-        advice == "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
-    )
+    assert advice == "Confirmed: Nxe5 wins the exchange."
     options = captured["options"]
     assert isinstance(options, ClaudeAgentOptions)
     # The engine tool is the only tool on offer, under the report budget --
@@ -1570,6 +1574,103 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
     mcp_servers = options.mcp_servers
     assert isinstance(mcp_servers, dict)
     assert "engine" in mcp_servers
+
+
+async def test_agent_sdk_provider_complete_drops_narration_before_every_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live regression (docs/06-coach.md, "Providers"): a model that
+    narrates before each of two engine calls shipped a brief opening
+    "I'll verify the key turning points I plan to feature before
+    writing.Let me get the concrete refutations...# Coaching brief" --
+    two preambles and the document, joined on the empty string.
+
+    Every tool call clears, not just the first: one clear would have left
+    the second preamble in place.
+    """
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            for narration in (
+                "I'll verify the key turning points I plan to feature before writing.",
+                "Let me get the concrete refutations for the moves I'll feature.",
+            ):
+                yield AssistantMessage(
+                    content=[TextBlock(text=narration)], model="claude-opus-4-8"
+                )
+                yield AssistantMessage(
+                    content=[
+                        ToolUseBlock(
+                            id="t",
+                            name="mcp__engine__analyze_position",
+                            input={"fen": "fen"},
+                        )
+                    ],
+                    model="claude-opus-4-8",
+                )
+            yield AssistantMessage(
+                content=[TextBlock(text="# Coaching brief\nStart here: ...")],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1,
+                is_error=False, num_turns=3, session_id="s",
+            )  # fmt: skip
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == "# Coaching brief\nStart here: ..."
+
+
+async def test_agent_sdk_provider_complete_falls_back_when_nothing_follows_a_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run whose budget expires mid-tool-loop leaves nothing collected
+    once the narration is dropped, so the existing fall-through to the
+    run's own final message carries it (docs/06-coach.md, "Providers").
+    Without that path this would raise instead of returning the answer
+    the SDK already has.
+    """
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="Let me check that line.")],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="t1",
+                        name="mcp__engine__analyze_position",
+                        input={"fen": "fen"},
+                    )
+                ],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1,
+                is_error=False, num_turns=2, session_id="s",
+                result="# Coaching brief\nWhat the run did produce.",
+            )  # fmt: skip
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == "# Coaching brief\nWhat the run did produce."
 
 
 async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
@@ -2171,13 +2272,15 @@ async def test_copilot_provider_complete_raises_on_empty_output(
         await provider.complete("coach me")
 
 
-async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
+async def test_copilot_provider_complete_with_analyst_keeps_only_the_final_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
-    complete() registers analyze_position exactly as explain() does, and
-    text either side of an engine call concatenates into the returned
-    advice."""
+    complete() registers analyze_position exactly as explain() does.
+
+    The advice is what the model wrote after its last engine call, the
+    same rule ClaudeAgentSdkProvider.complete() applies to a
+    ToolUseBlock (docs/06-coach.md, "Providers")."""
     captured: dict[str, object] = {}
     script = [
         ("text", "Let's verify the critical line. "),
@@ -2192,9 +2295,7 @@ async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
     provider = create_provider(LlmConfig(provider="github-copilot"))
     advice = await provider.complete("write the report", stub_analyst)
 
-    assert advice == (
-        "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
-    )
+    assert advice == "Confirmed: Nxe5 wins the exchange."
     # The engine tool is the only tool on offer -- same lockdown as explain().
     available_tools = captured["available_tools"]
     assert isinstance(available_tools, ToolSet)
@@ -2260,10 +2361,16 @@ async def test_copilot_provider_complete_runaway_tool_calls_cut_the_run_off(
     # adapted to complete()'s collection shape: instead of explain()'s
     # queue-based drain sentinel, the runaway branch sets the idle event
     # directly, so `await idle.wait()` returns and the `async with` blocks
-    # disconnect the session -- text collected before the runaway stands.
+    # disconnect the session.
     # No "idle" step is scripted at all: if the implementation failed to
     # set the event on the runaway call, this would hang instead of pass,
     # so the timeout wrapper turns that failure mode into a clean failure.
+    #
+    # This run wrote nothing after any tool call, so once the narration is
+    # dropped (docs/06-coach.md, "Providers") there is no answer at all --
+    # and unlike ClaudeAgentSdkProvider there is no run-level final message
+    # to fall through to. Raising is the honest outcome: returning "Let's
+    # check a few lines." as a coaching brief would be worse than an error.
     max_engine_calls = 8  # _REPORT_MAX_TURNS
     captured: dict[str, object] = {}
     script = [
@@ -2277,11 +2384,11 @@ async def test_copilot_provider_complete_runaway_tool_calls_cut_the_run_off(
     )
 
     provider = create_provider(LlmConfig(provider="github-copilot"))
-    advice = await asyncio.wait_for(
-        provider.complete("write the report", stub_analyst), timeout=5
-    )
+    with pytest.raises(CoachProviderError, match="returned no text"):
+        await asyncio.wait_for(
+            provider.complete("write the report", stub_analyst), timeout=5
+        )
 
-    assert advice == "Let's check a few lines."
     tool_results = cast("list[ToolResult]", captured["tool_results"])
     assert len(tool_results) == max_engine_calls + 2
     assert "budget" in tool_results[-1].text_result_for_llm
