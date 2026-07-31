@@ -17,6 +17,7 @@ from chess_coach.domain import (
     Opening,
     OpeningStats,
     PlayerSummary,
+    Record,
     Result,
     TimeClass,
 )
@@ -43,6 +44,7 @@ class GameFilters(BaseModel):
     opening_eco: str | None = None
     opening_name_like: str | None = None  # case-insensitive substring
     opponent: str | None = None  # case-insensitive exact match
+    color: Color | None = None
     result: Result | None = None
     time_class: TimeClass | None = None
     analyzed: bool | None = None
@@ -120,9 +122,17 @@ _SUMMARY_COLUMNS = (
 _FIRST_PLIES = 6
 
 
-def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]:
+def _game_filter_clauses(
+    username: str, filters: GameFilters
+) -> tuple[list[str], list[object]]:
+    """The WHERE fragments `GameFilters` becomes, shared by every query
+    that takes one -- `list_games` and `game_record` must agree on what
+    a filter means, and one implementation is how they stay agreed."""
     clauses = ["g.username = ?"]
     params: list[object] = [username]
+    if filters.color is not None:
+        clauses.append("g.color = ?")
+        params.append(filters.color)
     if filters.opening_eco is not None:
         clauses.append("g.opening_eco = ?")
         params.append(filters.opening_eco)
@@ -148,6 +158,11 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
     if filters.until is not None:
         clauses.append("g.end_time < ?")
         params.append(filters.until)
+    return clauses, params
+
+
+def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]:
+    clauses, params = _game_filter_clauses(username, filters)
 
     rows = db.execute(
         f"""
@@ -169,6 +184,38 @@ def list_games(db: Db, username: str, filters: GameFilters) -> list[GameSummary]
         )
         for row in rows
     ]
+
+
+def game_record(db: Db, username: str, filters: GameFilters) -> Record:
+    """W/D/L over every game matching `filters` -- the counting half of
+    the coach's comparison guard (docs/06-coach.md, "Reading a
+    comparison").
+
+    One GROUP BY rather than three counts, and it deliberately returns a
+    `Record` and not a score: the coach computes both the mean and its
+    variance from W/D/L, so handing it a percentage would throw away
+    exactly the half it needs.
+
+    Paging on `filters` is ignored -- a record is over the whole match,
+    not a page of it.
+    """
+    clauses, params = _game_filter_clauses(username, filters)
+    rows = db.execute(
+        f"""
+        SELECT g.result AS result, COUNT(*) AS n
+        FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
+        WHERE {" AND ".join(clauses)}
+        GROUP BY g.result
+        """,
+        params,
+    ).fetchall()
+    counts = {row["result"]: row["n"] for row in rows}
+    return Record(
+        games=sum(counts.values()),
+        wins=counts.get("win", 0),
+        losses=counts.get("loss", 0),
+        draws=counts.get("draw", 0),
+    )
 
 
 def get_game(db: Db, game_id: str) -> GameDetail | None:

@@ -1124,6 +1124,11 @@ async def regenerate_player_profile(
         until=None,
         time_class=time_class,
         analyst=_build_analyst(pool, cfg) if pool is not None else None,
+        # Seeds the compare tool's BH family with the splits the facts
+        # already judged, so a question the run asks is weighed
+        # alongside them rather than in a family of its own
+        # (docs/06-coach.md, "Reading a comparison").
+        prior_comparisons=facts.comparisons,
     )
     prompt = render_profile_prompt(facts, has_tools=True)
 

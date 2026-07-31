@@ -46,12 +46,15 @@ from chess_coach.coach import (
 from chess_coach.coach.providers import PositionAnalystFn
 from chess_coach.domain import (
     ChatMessage,
+    Comparison,
+    ComparisonGroup,
     EvalLine,
     GameDetail,
     GameSummary,
     LlmConfig,
     Opening,
     OpeningStats,
+    Record,
     Result,
     TimeClass,
 )
@@ -245,14 +248,33 @@ class _StubChatToolkit:
         games: list[GameSummary] | None = None,
         game_detail: GameDetail | None = None,
         openings: list[OpeningStats] | None = None,
+        prior_comparisons: list[Comparison] | None = None,
+        # (group record, the rest) the compare tool should receive.
+        compare_result: tuple[Record, Record] | None = None,
     ) -> None:
         self.analyst = analyst
         self._games = games if games is not None else []
         self._game_detail = game_detail
         self._openings = openings if openings is not None else []
+        self.prior_comparisons = list(prior_comparisons or [])
+        self._compare_result = compare_result
+        # One entry per compare_games call, so a test can assert what the
+        # model actually asked for.
+        self.compare_calls: list[tuple[ComparisonGroup, ComparisonGroup | None]] = []
         self.find_games_calls: list[dict[str, object]] = []
         self.get_game_calls: list[str] = []
         self.opening_stats_calls = 0
+
+    async def compare_games(
+        self,
+        group: ComparisonGroup,
+        within: ComparisonGroup | None = None,
+    ) -> tuple[Record, Record]:
+        self.compare_calls.append((group, within))
+        if self._compare_result is not None:
+            return self._compare_result
+        empty = Record(games=0, wins=0, losses=0, draws=0)
+        return empty, empty
 
     async def find_games(
         self,
@@ -412,6 +434,7 @@ async def test_agent_sdk_provider_chat_streams_text_tool_then_done(
         "mcp__engine__find_games",
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
+        "mcp__engine__compare_groups",
     ]
     system_prompt = options.system_prompt
     assert isinstance(system_prompt, str)
@@ -458,6 +481,7 @@ async def test_agent_sdk_provider_chat_without_analyst_omits_analyze_tool(
         "mcp__engine__find_games",
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
+        "mcp__engine__compare_groups",
     ]
 
 
@@ -884,6 +908,156 @@ async def test_agent_sdk_provider_complete_with_a_toolkit_offers_every_chat_tool
     assert options.tools == []
 
 
+def _compare_tool(
+    toolkit: _StubChatToolkit,
+) -> Callable[[dict[str, object]], Awaitable[str]]:
+    """The registered compare tool, invoked the way the SDK would.
+
+    Built **once** per test, because the BH ledger lives in the tool
+    closure -- one family per run is the whole point, and rebuilding the
+    roster between calls would silently reset it.
+    """
+    # Same convention as test_coach.py's threshold imports: reaching for
+    # the private builder is how a test drives the real registered
+    # handler without standing up an SDK session.
+    tools = providers_module._build_chat_tools(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit)
+    )
+    compare = next(t for t in tools if t.name == "compare_groups")
+
+    async def call(args: dict[str, object]) -> str:
+        result = await compare.handler(args)
+        blocks = cast("list[dict[str, str]]", result["content"])
+        return blocks[0]["text"]
+
+    return call
+
+
+async def _run_compare_tool(toolkit: _StubChatToolkit, args: dict[str, object]) -> str:
+    return await _compare_tool(toolkit)(args)
+
+
+async def test_compare_tool_never_lets_the_caller_pick_the_other_side() -> None:
+    """docs/06-coach.md, "Reading a comparison": the model names one
+    group and the tool subtracts, so a run cannot compare a group
+    against a set that contains it -- the double counting that made
+    "48% after a loss against 52% overall" understate its own gap.
+    """
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=307, wins=140, losses=155, draws=12),
+            Record(games=275, wins=133, losses=130, draws=12),
+        )
+    )
+
+    text = await _run_compare_tool(
+        toolkit,
+        {"group": {"opening": "Pirc", "color": "black"}, "within": {"color": "black"}},
+    )
+
+    group, within = toolkit.compare_calls[0]
+    assert group.opening == "Pirc"
+    assert group.color == "black"
+    assert within is not None and within.color == "black"
+    assert "307 games" in text
+    assert "275 games" in text
+
+
+async def test_compare_tool_drops_a_result_filter_it_is_never_given() -> None:
+    """A group named by its outcome and then measured by its outcome
+    proves nothing -- the same defect as a +/-100 rating window. The
+    schema offers no `result`, and a model that passes one anyway must
+    not have it silently applied.
+    """
+    toolkit = _StubChatToolkit()
+
+    await _run_compare_tool(toolkit, {"group": {"color": "white", "result": "win"}})
+
+    group, _ = toolkit.compare_calls[0]
+    assert group.color == "white"
+    assert not hasattr(group, "result")
+
+
+async def test_compare_tool_states_the_verdict_and_never_the_arithmetic() -> None:
+    """The live tilt split: 4.8 points over 380 games against 778, which
+    is 1.6 standard errors. The verdict is stated; the sigma is not."""
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=380, wins=173, losses=186, draws=21),
+            Record(games=778, wins=391, losses=343, draws=44),
+        )
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"color": "white"}})
+
+    assert "WITHIN NOISE" in text
+    assert "not a tendency" in text.lower()
+    assert "sigma" not in text.lower()
+    assert "p-value" not in text.lower()
+
+
+async def test_compare_tool_family_grows_with_the_asking() -> None:
+    """Benjamini-Hochberg is a property of the family, so a run that
+    fishes raises its own bar -- and the result says how big the family
+    has become, which is the honest answer to "can I just ask fourteen
+    more ways"."""
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=380, wins=173, losses=186, draws=21),
+            Record(games=778, wins=391, losses=343, draws=44),
+        )
+    )
+
+    compare = _compare_tool(toolkit)
+    first = await compare({"group": {"color": "white"}})
+    second = await compare({"group": {"color": "black"}})
+
+    assert "0 other comparison(s)" in first
+    assert "1 other comparison(s)" in second
+
+
+async def test_compare_tool_family_includes_what_the_profile_already_judged() -> None:
+    """The facts block already states several splits; a question the run
+    asks is weighed alongside them, not in a family of its own."""
+    prior = [
+        Comparison(
+            label="Tilt",
+            left_label="after a loss",
+            left=Record(games=380, wins=173, losses=186, draws=21),
+            right_label="every other game",
+            right=Record(games=778, wins=391, losses=343, draws=44),
+            gap=-4.8,
+            resolution=6.1,
+            significant=False,
+        )
+    ]
+    toolkit = _StubChatToolkit(
+        prior_comparisons=prior,
+        compare_result=(
+            Record(games=100, wins=50, losses=45, draws=5),
+            Record(games=100, wins=48, losses=47, draws=5),
+        ),
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"color": "white"}})
+
+    assert "1 other comparison(s)" in text
+
+
+async def test_compare_tool_says_when_a_group_is_too_thin_to_compare() -> None:
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=1, wins=1, losses=0, draws=0),
+            Record(games=500, wins=250, losses=240, draws=10),
+        )
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"opening": "Latvian"}})
+
+    assert "too few to compare" in text
+    assert "not a tendency" in text.lower()
+
+
 async def test_copilot_provider_chat_streams_text_tool_then_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -945,7 +1119,7 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
     ]
 
 
-async def test_copilot_provider_chat_without_analyst_gets_three_tools(
+async def test_copilot_provider_chat_without_analyst_omits_only_the_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -968,6 +1142,7 @@ async def test_copilot_provider_chat_without_analyst_gets_three_tools(
     assert available_tools.to_list() == [
         "custom:find_games",
         "custom:get_game",
+        "custom:compare_groups",
         "custom:get_opening_stats",
     ]
 

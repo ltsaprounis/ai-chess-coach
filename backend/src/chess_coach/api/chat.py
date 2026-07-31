@@ -21,12 +21,15 @@ from chess_coach.coach import (
 )
 from chess_coach.domain import (
     ChatMessage,
+    Comparison,
+    ComparisonGroup,
     EvalLine,
     GameDetail,
     GameSummary,
     OpeningStats,
     PlayerProfile,
     PlayerReport,
+    Record,
     Result,
     TimeClass,
 )
@@ -36,6 +39,7 @@ from chess_coach.storage import (
     Db,
     GameFilters,
     ReportKey,
+    game_record,
     get_explanation,
     get_game,
     get_player_profile,
@@ -115,6 +119,7 @@ class ApiChatToolkit:
         until: int | None,
         time_class: TimeClass | None,
         analyst: PositionAnalystFn | None,
+        prior_comparisons: list[Comparison] | None = None,
     ) -> None:
         self._db = db
         self._username = username
@@ -125,6 +130,70 @@ class ApiChatToolkit:
         # widens the Literal alias to plain `str`.
         self._time_class: TimeClass | None = time_class
         self.analyst = analyst
+        # Seeds the compare tool's BH family with whatever the caller
+        # already judged and put in the context, so a run's questions are
+        # judged alongside them rather than in a family of their own
+        # (docs/06-coach.md, "Reading a comparison"). Chat passes none.
+        self.prior_comparisons: list[Comparison] = list(prior_comparisons or [])
+
+    async def compare_games(
+        self,
+        group: ComparisonGroup,
+        within: ComparisonGroup | None = None,
+    ) -> tuple[Record, Record]:
+        """The group's record, and the rest of `within` by subtraction.
+
+        Subtraction rather than a second query with the group negated:
+        the group is a subset of `within` by construction, so the two
+        records are exactly disjoint and no SQL has to express "not this
+        opening". `within` defaults to the thread's own scope.
+
+        Both sides are volume-layer counts over every stored game -- a
+        record needs no engine, and restricting it to analyzed games
+        would reintroduce, one level down, the bias the volume/quality
+        split exists to remove.
+        """
+        baseline = await run_in_threadpool(
+            game_record, self._db, self._username, self._filters(within)
+        )
+        inner = await run_in_threadpool(
+            game_record, self._db, self._username, self._filters(within, group)
+        )
+        rest = Record(
+            games=baseline.games - inner.games,
+            wins=baseline.wins - inner.wins,
+            losses=baseline.losses - inner.losses,
+            draws=baseline.draws - inner.draws,
+        )
+        return inner, rest
+
+    def _filters(self, *groups: ComparisonGroup | None) -> GameFilters:
+        """The thread's scope, narrowed by each group in turn. A later
+        group's value wins, which is what makes `within` then `group`
+        read as an intersection."""
+        filters = GameFilters(
+            time_class=self._time_class,
+            since=self._since,
+            until=self._until,
+            limit=0,
+        )
+        for group in groups:
+            if group is None:
+                continue
+            filters = filters.model_copy(
+                update={
+                    key: value
+                    for key, value in (
+                        ("color", group.color),
+                        ("opening_name_like", group.opening),
+                        ("time_class", group.time_class),
+                        ("since", group.since),
+                        ("until", group.until),
+                    )
+                    if value is not None
+                }
+            )
+        return filters
 
     async def find_games(
         self,

@@ -586,6 +586,39 @@ class RatingTrajectory(BaseModel):
         return not long_deltas or any(d > 0 for d in long_deltas)
 
 
+class ComparisonGroup(BaseModel):
+    """A group of games named for a comparison (docs/06-coach.md,
+    "Reading a comparison").
+
+    Every field is a property fixed **before** the game was played.
+    There is deliberately no `result` and no rating band: selecting
+    games on the thing being measured is what makes a +/-100 rating
+    window delete drawdowns and a win-rate-conditioned bucket
+    manufacture tilt. `find_games` keeps its `result` filter, because
+    it answers "show me games" rather than "is this a tendency".
+
+    All-None means "every game in scope", which is what `within`
+    defaults to.
+    """
+
+    color: Color | None = None
+    opening: str | None = None  # case-insensitive name substring
+    time_class: TimeClass | None = None
+    since: int | None = None  # epoch seconds, inclusive
+    until: int | None = None  # epoch seconds, exclusive
+
+    def label(self) -> str:
+        """How the group reads in a rendered comparison row."""
+        parts: list[str] = []
+        if self.color is not None:
+            parts.append(f"as {self.color.capitalize()}")
+        if self.opening:
+            parts.append(f"in the {self.opening}")
+        if self.time_class is not None:
+            parts.append(f"in {self.time_class}")
+        return " ".join(parts) if parts else "in every game"
+
+
 class ComparisonInput(BaseModel):
     """One matched pair of buckets, before the family is judged."""
 

@@ -29,6 +29,7 @@ from copilot.session_events import (
 from copilot.tools import Tool, ToolInvocation, ToolResult
 from pydantic import BaseModel
 
+from chess_coach.coach.comparisons import build_comparisons
 from chess_coach.coach.prompt import (
     CHAT_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -37,11 +38,15 @@ from chess_coach.coach.prompt import (
 )
 from chess_coach.domain import (
     ChatMessage,
+    Comparison,
+    ComparisonGroup,
+    ComparisonInput,
     EvalLine,
     GameDetail,
     GameSummary,
     LlmConfig,
     OpeningStats,
+    Record,
     Result,
     TimeClass,
 )
@@ -98,6 +103,7 @@ _ANALYZE_TOOL_DESCRIPTION = (
 _FIND_GAMES_TOOL_NAME = "find_games"
 _GET_GAME_TOOL_NAME = "get_game"
 _GET_OPENING_STATS_TOOL_NAME = "get_opening_stats"
+_COMPARE_TOOL_NAME = "compare_groups"
 
 _FIND_GAMES_TOOL_DESCRIPTION = (
     "Search the student's own stored games by opponent, opening, result, "
@@ -117,6 +123,26 @@ _GET_OPENING_STATS_TOOL_DESCRIPTION = (
     "whether the name is the opponent's choice, the record, and the "
     "average loss in pawns per move for the opening phase and for the "
     "whole game."
+)
+
+_COMPARE_TOOL_DESCRIPTION = (
+    "Compare one group of the student's games against the rest, and get "
+    "back a verdict on whether the difference is real. This is the ONLY "
+    "way to establish that a difference is a tendency -- a percentage "
+    "you work out yourself from find_games or get_opening_stats has not "
+    "been checked and must not be reported as one.\n"
+    "Name the group by properties fixed before the game was played: "
+    "color, opening, time class, date range. There is deliberately no "
+    "result filter -- selecting games by how they ended and then "
+    "measuring how they ended proves nothing.\n"
+    "The other side is computed for you by subtracting the group from "
+    "`within` (default: every game in scope), so you cannot accidentally "
+    "compare a group against a set that contains it. Use `within` to "
+    "pick the baseline that makes the comparison mean something -- an "
+    "opening the student plays as Black belongs against their other "
+    "Black games, not against every game they have played.\n"
+    "Each call joins a family judged together, so asking more questions "
+    "makes every answer harder to earn."
 )
 
 _RESULT_VALUES = frozenset({"win", "loss", "draw"})
@@ -174,6 +200,52 @@ _GET_OPENING_STATS_TOOL_SCHEMA: dict[str, Any] = {
     "required": [],
 }
 
+_COMPARISON_GROUP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "color": {
+            "type": "string",
+            "enum": ["white", "black"],
+            "description": "Only games the student had this color in.",
+        },
+        "opening": {
+            "type": "string",
+            "description": "Opening name substring, e.g. 'Pirc'.",
+        },
+        "time_class": {
+            "type": "string",
+            "enum": ["bullet", "blitz", "rapid", "daily"],
+            "description": "Only games at this time control.",
+        },
+        "since": {
+            "type": "integer",
+            "description": "Only games ending at or after this epoch second.",
+        },
+        "until": {
+            "type": "integer",
+            "description": "Only games ending before this epoch second.",
+        },
+    },
+    "required": [],
+}
+_COMPARE_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "group": {
+            **_COMPARISON_GROUP_SCHEMA,
+            "description": "The group of games to test.",
+        },
+        "within": {
+            **_COMPARISON_GROUP_SCHEMA,
+            "description": (
+                "The baseline to read it against; the group is subtracted "
+                "from it. Omit for every game in scope."
+            ),
+        },
+    },
+    "required": ["group"],
+}
+
 # What a chat tool call returns once _CHAT_MAX_TURNS's grace round (and
 # every runaway call after it) is spent, in place of doing the real work --
 # mirrors _ENGINE_BUDGET_EXHAUSTED below but phrased for any of chat's four
@@ -222,6 +294,20 @@ class ChatToolkit(Protocol):
     ) -> list[GameSummary]: ...
     async def get_game(self, game_id: str) -> GameDetail | None: ...
     async def opening_stats(self) -> list[OpeningStats]: ...
+
+    # The comparison guard's data half (docs/06-coach.md, "Reading a
+    # comparison"). Returns the group's record and the rest of `within`,
+    # computed by subtraction -- the caller never supplies the other
+    # side, so a run cannot compare a group against a set containing it.
+    # Records and not scores: the coach needs W/D/L to get both the mean
+    # and its variance.
+    prior_comparisons: list[Comparison]
+
+    async def compare_games(
+        self,
+        group: ComparisonGroup,
+        within: ComparisonGroup | None = None,
+    ) -> tuple[Record, Record]: ...
 
 
 class CoachProviderError(Exception):
@@ -1209,7 +1295,12 @@ def _chat_tool_names(toolkit: ChatToolkit) -> list[str]:
     names: list[str] = []
     if toolkit.analyst is not None:
         names.append(_ANALYZE_TOOL_NAME)
-    names += [_FIND_GAMES_TOOL_NAME, _GET_GAME_TOOL_NAME, _GET_OPENING_STATS_TOOL_NAME]
+    names += [
+        _FIND_GAMES_TOOL_NAME,
+        _GET_GAME_TOOL_NAME,
+        _GET_OPENING_STATS_TOOL_NAME,
+        _COMPARE_TOOL_NAME,
+    ]
     return names
 
 
@@ -1226,6 +1317,8 @@ def _chat_tool_summary(block: ToolUseBlock) -> str:
     if name == _GET_GAME_TOOL_NAME:
         game_id = block.input.get("game_id")
         return f"looking up game {game_id}" if game_id else "looking up a game"
+    if name == _COMPARE_TOOL_NAME:
+        return "checking whether a difference is real"
     if name == _GET_OPENING_STATS_TOOL_NAME:
         return "looking up the repertoire"
     return f"calling {name}"
@@ -1262,6 +1355,115 @@ def _build_opening_stats_tool(toolkit: ChatToolkit) -> SdkMcpTool[Any]:
     return get_opening_stats
 
 
+class _ComparisonLedger:
+    """The BH family for one run (docs/06-coach.md, "Reading a
+    comparison").
+
+    Seeded with whatever the profile already judged, then grown by each
+    `compare_groups` call. Every call re-judges the whole family, so a
+    run that fishes raises its own bar -- and a verdict may change
+    between calls, which is not a bug: Benjamini-Hochberg is a property
+    of the family, so the fourteenth question genuinely does change what
+    the first one supports.
+
+    One ledger per run, held by the tool closure, so two concurrent runs
+    never share a family.
+    """
+
+    def __init__(self, prior: list[Comparison]) -> None:
+        self._prior = list(prior)
+        self._asked: list[ComparisonInput] = []
+
+    def add(self, pair: ComparisonInput) -> tuple[Comparison, int]:
+        """Judge `pair` against the whole family; return it and the
+        family size."""
+        self._asked.append(pair)
+        family = [
+            ComparisonInput(
+                label=c.label,
+                left_label=c.left_label,
+                left=c.left,
+                right_label=c.right_label,
+                right=c.right,
+            )
+            for c in self._prior
+        ] + self._asked
+        judged = build_comparisons(family)
+        return judged[-1], len(family)
+
+
+def _render_comparison(row: Comparison, family: int) -> str:
+    """The tool result: the two records, the verdict, and the family
+    size -- never a sigma or a p-value, which are not this audience's
+    vocabulary and invite the false confidence the guard removes."""
+    if not row.measurable:
+        return (
+            f"{row.left.games} game(s) {row.left_label} against "
+            f"{row.right.games} {row.right_label} -- too few to compare. "
+            "This is not a tendency and must not be reported as one."
+        )
+    left = _score_pct(row.left)
+    right = _score_pct(row.right)
+    verdict = (
+        "a real difference, larger than chance accounts for"
+        if row.significant
+        else (
+            "WITHIN NOISE -- a difference this many games cannot tell apart "
+            "from chance. Not a tendency; do not report it as one, and do "
+            'not soften it into "worth watching"'
+        )
+    )
+    return (
+        f"{left} over {row.left.games} games {row.left_label}, against "
+        f"{right} over {row.right.games} games {row.right_label}. "
+        f"Verdict: {verdict}. "
+        f"(Judged together with {family - 1} other comparison(s) in this "
+        "profile; asking more makes each one harder to earn.)"
+    )
+
+
+def _score_pct(record: Record) -> str:
+    if not record.games:
+        return "n/a"
+    return f"{(record.wins + record.draws / 2) / record.games * 100:.0f}%"
+
+
+def _comparison_group(args: dict[str, Any]) -> ComparisonGroup:
+    """A tool argument object as a group, ignoring anything the schema
+    does not name -- notably `result`, which a model may try anyway and
+    which must never reach a comparison (docs/06-coach.md)."""
+    return ComparisonGroup.model_validate(
+        {
+            key: args[key]
+            for key in ("color", "opening", "time_class", "since", "until")
+            if args.get(key) is not None
+        }
+    )
+
+
+async def _run_comparison(
+    toolkit: ChatToolkit, ledger: _ComparisonLedger, args: dict[str, Any]
+) -> str:
+    group_args = cast("dict[str, Any]", args.get("group") or {})
+    within_args = cast("dict[str, Any]", args.get("within") or {})
+    group = _comparison_group(group_args)
+    within = _comparison_group(within_args) if within_args else None
+    left, right = await toolkit.compare_games(group, within)
+    baseline = within.label() if within is not None else "in every game"
+    row, family = ledger.add(
+        ComparisonInput(
+            label=group.label(),
+            left_label=group.label(),
+            left=left,
+            right_label=f"in their other games {baseline}".replace(
+                "in their other games in every game", "in their other games"
+            ),
+            right=right,
+        )
+    )
+    return _render_comparison(row, family)
+
+
 def _build_chat_tools(toolkit: ChatToolkit) -> list[SdkMcpTool[Any]]:
     tools: list[SdkMcpTool[Any]] = []
     if toolkit.analyst is not None:
@@ -1269,7 +1471,22 @@ def _build_chat_tools(toolkit: ChatToolkit) -> list[SdkMcpTool[Any]]:
     tools.append(_build_find_games_tool(toolkit))
     tools.append(_build_get_game_tool(toolkit))
     tools.append(_build_opening_stats_tool(toolkit))
+    # One ledger per build, so the BH family belongs to this run alone.
+    tools.append(
+        _build_compare_tool(toolkit, _ComparisonLedger(toolkit.prior_comparisons))
+    )
     return tools
+
+
+def _build_compare_tool(
+    toolkit: ChatToolkit, ledger: _ComparisonLedger
+) -> SdkMcpTool[Any]:
+    @tool(_COMPARE_TOOL_NAME, _COMPARE_TOOL_DESCRIPTION, _COMPARE_TOOL_SCHEMA)
+    async def compare_groups(args: dict[str, Any]) -> dict[str, Any]:
+        text = await _run_comparison(toolkit, ledger, args)
+        return {"content": [{"type": "text", "text": text}]}
+
+    return compare_groups
 
 
 async def _guarded_chat_tool_call(
@@ -1389,6 +1606,29 @@ def _build_copilot_chat_tools(
         )
     )
     names.append(_GET_GAME_TOOL_NAME)
+
+    ledger = _ComparisonLedger(toolkit.prior_comparisons)
+
+    async def handle_compare(invocation: ToolInvocation) -> ToolResult:
+        args = cast("dict[str, Any]", invocation.arguments or {})
+        return await _guarded_chat_tool_call(
+            queue,
+            budget,
+            "checking whether a difference is real",
+            lambda: _run_comparison(toolkit, ledger, args),
+            on_tool_call,
+        )
+
+    tools.append(
+        Tool(
+            name=_COMPARE_TOOL_NAME,
+            description=_COMPARE_TOOL_DESCRIPTION,
+            parameters=_COMPARE_TOOL_SCHEMA,
+            handler=handle_compare,
+            skip_permission=True,
+        )
+    )
+    names.append(_COMPARE_TOOL_NAME)
 
     async def handle_opening_stats(invocation: ToolInvocation) -> ToolResult:
         return await _guarded_chat_tool_call(

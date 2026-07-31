@@ -220,6 +220,15 @@ class ChatToolkit(Protocol):
                          limit: int = 10) -> list[GameSummary]
     async def get_game(self, game_id: str) -> GameDetail | None
     async def opening_stats(self) -> list[OpeningStats]
+    # The comparison guard, exposed so a run cannot obtain an unjudged
+    # percentage (see "Reading a comparison"). Returns the group's
+    # record and the rest of `within`, computed by subtraction -- the
+    # caller never supplies the other side. `prior_comparisons` seeds
+    # the BH family with whatever the profile already judged.
+    prior_comparisons: list[Comparison]
+    async def compare_games(self, group: ComparisonGroup,
+                            within: ComparisonGroup | None = None,
+                            ) -> tuple[Record, Record]
 
 # Scope seeds — deterministic templates, snapshot-tested like every
 # other prompt. `render_game_chat_context` raises ValueError when
@@ -939,6 +948,44 @@ resolution, and a verdict. The rules:
 - **The verdict is rendered, the arithmetic is not.** Both renderers
   state "within noise" or the plain difference; neither prints sigmas
   or p-values, which are not this audience's vocabulary.
+
+**The guard is a tool, not only a rule.** A run with `find_games` can
+slice the archive itself, and a percentage it derives that way arrives
+outside the BH family with no verdict attached — the multiple
+comparisons problem, reintroduced through the back door by the same
+tools that make the narrative worth generating. So the comparison
+itself is a tool: `compare_groups` is the only way to obtain a
+difference, and everything it returns is already judged.
+
+Three properties make it a guard rather than a convenience:
+
+- **The other side is computed, never supplied.** The model names one
+  group and, optionally, the scope to read it against; the tool
+  subtracts to get the rest. Two free-form filters would let a run
+  compare a group against a set containing it — which is the
+  double-counting that made "48% after a loss against 52% overall"
+  understate its own gap.
+- **A group cannot be named by its outcome.** `ComparisonGroup` takes
+  colour, opening, time control and a date window — properties fixed
+  before the game was played. It deliberately has no `result` and no
+  rating band, because selecting games on the thing being measured is
+  what makes a ±100 rating window delete drawdowns and a
+  win-rate-conditioned bucket manufacture tilt. `find_games` keeps its
+  `result` filter; it answers "show me games", not "is this a
+  tendency".
+- **The family grows with the asking.** Each call is judged over every
+  comparison the profile already made *plus* every one this run has
+  requested, so a run that fishes raises its own bar. The result states
+  the family size, and it is the honest answer to "can I just ask
+  fourteen more ways": yes, and each answer gets harder to earn.
+
+A verdict can therefore change between calls, and that is correct: BH
+is a property of the family, so the fourteenth question genuinely does
+change what the first one supports.
+
+Tilt stays precomputed. It conditions on the *previous* game's result,
+which is not a property of the game being counted and so cannot be
+expressed as a group at all.
 
 The SE is closed-form Welch. A session-level block bootstrap over the
 reference archive (4,000 resamples, 239 sittings) puts the dependence
