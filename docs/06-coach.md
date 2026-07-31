@@ -248,8 +248,11 @@ def render_chat_prompt(history: list[ChatMessage],
 # `complete` takes an optional analyst: with one, the report run is
 # agentic — the analyst exposed as the same `analyze_position(fen)`
 # tool `explain` uses, under a small turn budget — so the model can
-# verify concrete lines before asserting them. With `None` it is
-# today's single turn, the fallback when no engine pool exists.
+# verify concrete lines before asserting them. `toolkit` widens that
+# to chat's whole read-only roster and is what the profile narrative
+# passes (see "Narrative"); it subsumes `analyst`, carrying one of
+# its own. With neither it is a single turn, the fallback when no
+# engine pool exists.
 # `chat` is stateless with an opaque resume token: each call carries
 # everything needed to answer from scratch (seed, stored transcript,
 # new message), and a provider MAY shortcut the replay by resuming a
@@ -262,7 +265,8 @@ def render_chat_prompt(history: list[ChatMessage],
 # the provider has nothing to resume).
 class CoachProvider(Protocol):
     async def complete(self, prompt: str,
-                       analyst: PositionAnalystFn | None = None) -> str
+                       analyst: PositionAnalystFn | None = None,
+                       *, toolkit: ChatToolkit | None = None) -> str
     def explain(self, prompt: str, analyst: PositionAnalystFn,
                 ) -> AsyncGenerator[ExplainEvent]
     def chat(self, *, system_context: str,
@@ -1038,15 +1042,24 @@ it cannot, which is why the clause is conditional rather than
 aspirational — the same shape, and the same reason, as
 `render_explain_prompt`'s profile clause.
 
-**The seam itself is not built.** `complete` still takes a bare
-`PositionAnalystFn`, so today every caller passes `has_tools=False`
-and the narrative is one turn. Widening it to the `ChatToolkit` — the
-mechanics the report brief has had since it gained the engine tool,
-and the reason the brief is the best text this system produces — is
-the next step, and it is a `CoachProvider` change both providers must
-implement. Once it lands the facts block becomes the starting point
-rather than the limit: it exists so the run does not spend turns
-re-deriving, badly, what aggregation already computed correctly.
+`complete` therefore takes an optional `toolkit: ChatToolkit`
+alongside its analyst, and with one registers chat's whole read-only
+roster under `_REPORT_MAX_TURNS` — the same in-process MCP mechanics
+chat uses, and the same mechanics the report brief has had since it
+gained the engine tool, which is why the brief is the best text this
+system produces. A `toolkit` subsumes an `analyst`, since it carries
+one of its own; passing neither is still today's single turn, which
+is what every other `complete` caller does.
+
+The facts block is then the starting point and not the limit: it
+exists so the run does not spend turns re-deriving, badly, what
+aggregation already computed correctly.
+
+The toolkit the API hands it is **unwindowed**, unlike the facts
+beside it. The narrative is generated over the control's whole
+history and stored under that scope alone (see "Why time control keys
+it"), so a tool that could only see the profile's level window would
+contradict the text it is helping write.
 
 One risk comes with the tools and is worth stating where the rule
 lives: **a run that slices the data itself produces comparisons with

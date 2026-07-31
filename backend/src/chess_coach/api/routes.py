@@ -1068,16 +1068,16 @@ async def regenerate_player_profile(
     username: str,
     db: DbDep,
     cfg: CfgDep,
+    pool: PoolDep,
     providers: ProvidersDep,
     body: ProfileGenerateRequest | None = None,
 ) -> ProfileResponse:
     """Regenerate the narrative (user-triggered -- LLM calls cost money;
     GET never generates): fresh facts -> `render_profile_prompt` -> the
-    chosen agent's `complete` with no engine analyst (docs/06-coach.md,
-    "Player profile": the narrative summarizes aggregates and asserts no
-    concrete line, so there is nothing for an engine to verify) ->
-    `save_player_profile`. Responds with the same shape as `GET`. 409 when
-    there are no analyzed games to describe.
+    chosen agent's `complete` with the read-only chat toolkit
+    (docs/06-coach.md, "Narrative") -> `save_player_profile`. Responds
+    with the same shape as `GET`. 409 when there are no analyzed games
+    to describe.
 
     Generated over the time control's **full** history, never a window:
     the narrative is the durable artifact other prompts embed, and one
@@ -1106,14 +1106,29 @@ async def regenerate_player_profile(
             else "no analyzed games yet -- sync and analyze first"
         )
         raise HTTPException(status_code=409, detail=detail)
-    prompt = render_profile_prompt(facts)
+    # Agentic (docs/06-coach.md, "Narrative"): the toolkit is pre-scoped
+    # to this student and this control, so the run can read the
+    # repertoire and pull games rather than paraphrasing the aggregates
+    # it was handed. It is the same read-only toolkit chat uses -- the
+    # engine analyst rides along on it when the pool is up, and the
+    # narrative simply does not ask for positions when it is not.
+    # Unwindowed, like the narrative it serves: the profile's own facts
+    # are level-scoped, but the narrative is generated over the control's
+    # whole history and stored under that scope alone, so a tool that
+    # could only see the window would contradict the text it is helping
+    # write (docs/06-coach.md, "Why time control keys it").
+    toolkit: ChatToolkit = ApiChatToolkit(
+        db,
+        user,
+        since=None,
+        until=None,
+        time_class=time_class,
+        analyst=_build_analyst(pool, cfg) if pool is not None else None,
+    )
+    prompt = render_profile_prompt(facts, has_tools=True)
 
     try:
-        # Single turn by contract (docs/06-coach.md, "Player profile"): the
-        # narrative summarizes aggregates and asserts no concrete
-        # variation, so there is nothing for the engine tool to verify --
-        # never pass the analyst here, unlike /coach and /explain.
-        advice = await provider.complete(prompt, analyst=None)
+        advice = await provider.complete(prompt, toolkit=toolkit)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

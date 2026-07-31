@@ -91,6 +91,7 @@ class StubProvider:
         # One entry per `complete` call, so tests can see whether that
         # call carried a working analyst (pool up) or None (pool down).
         self.complete_analysts: list[PositionAnalystFn | None] = []
+        self.complete_toolkits: list[ChatToolkit | None] = []
         self.complete_error: CoachProviderError | None = None
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
@@ -126,10 +127,17 @@ class StubProvider:
         self.chat_toolkit_probe: Callable[[ChatToolkit], Awaitable[None]] | None = None
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
         self.prompts.append(prompt)
         self.complete_analysts.append(analyst)
+        # One entry per call, so a test can assert the profile run got a
+        # toolkit (agentic) while the report run got a bare analyst.
+        self.complete_toolkits.append(toolkit)
         if self.complete_error is not None:
             raise self.complete_error
         return self.advice
@@ -1823,6 +1831,30 @@ def test_profile_post_routes_to_the_requested_agent(
     ).json()
     assert body["narrative"]["agent_id"] == "beta"
     assert body["profile"]["narrative"] == "advice from beta"
+
+
+def test_profile_post_runs_agentically_with_the_full_toolkit(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md, "Narrative": the narrative run gets the
+    read-only chat toolkit, so it can read the repertoire and pull games
+    rather than paraphrasing the aggregates it was handed -- and the
+    prompt says so, which is the whole point of the conditional clause.
+
+    The toolkit is unwindowed: the narrative is generated over the time
+    control's whole history and stored under that scope alone, so a tool
+    that could only see the profile's level window would contradict the
+    text it is helping write.
+    """
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+
+    post(client, "/api/players/testuser/profile", json={})
+
+    assert provider.complete_toolkits[-1] is not None
+    prompt = provider.prompts[-1]
+    assert "Use the tools to check anything the summary rests on" in prompt
+    assert "there are no tools on this run" not in prompt
 
 
 def test_profile_post_persists_and_a_subsequent_get_sees_it(

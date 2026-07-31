@@ -843,6 +843,47 @@ def _fake_chat_client(
     return factory
 
 
+async def test_agent_sdk_provider_complete_with_a_toolkit_offers_every_chat_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agentic narrative run (docs/06-coach.md, "Narrative"): given a
+    toolkit, complete() registers chat's whole read-only roster rather
+    than the engine tool alone, so the run can read the repertoire and
+    pull games instead of paraphrasing the aggregates it was handed.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        captured["options"] = options
+
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="This student plays the Pirc.")],
+                model="claude-opus-4-8",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    toolkit = _StubChatToolkit(analyst=stub_analyst, games=[_sample_game_summary()])
+
+    narrative = await provider.complete("write the profile", toolkit=toolkit)
+
+    assert narrative == "This student plays the Pirc."
+    options = captured["options"]
+    assert isinstance(options, ClaudeAgentOptions)
+    allowed = options.allowed_tools
+    assert "mcp__engine__get_opening_stats" in allowed
+    assert "mcp__engine__find_games" in allowed
+    assert "mcp__engine__analyze_position" in allowed
+    # Built-in Claude Code tools stay locked out on every coach path.
+    assert options.tools == []
+
+
 async def test_copilot_provider_chat_streams_text_tool_then_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -230,7 +230,11 @@ class CoachProviderError(Exception):
 
 class CoachProvider(Protocol):
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str: ...
     def explain(
         self, prompt: str, analyst: PositionAnalystFn
@@ -259,9 +263,32 @@ class ClaudeAgentSdkProvider:
         self._system_prompt = system_prompt
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
-        if analyst is None:
+        if toolkit is not None:
+            # The agentic profile run (docs/06-coach.md, "Narrative"):
+            # the same in-process MCP mechanics chat uses, with the full
+            # read-only toolkit, so the narrative can read the
+            # repertoire and pull games rather than paraphrasing the
+            # aggregates it was handed. `toolkit` subsumes `analyst` --
+            # it carries one of its own.
+            options = ClaudeAgentOptions(
+                model=self._model,
+                system_prompt=self._system_prompt,
+                max_turns=_REPORT_MAX_TURNS,
+                mcp_servers={
+                    _MCP_SERVER_NAME: create_sdk_mcp_server(
+                        name=_MCP_SERVER_NAME, tools=_build_chat_tools(toolkit)
+                    )
+                },
+                tools=[],  # no built-in Claude Code tools
+                allowed_tools=_chat_allowed_tools(toolkit),
+            )
+        elif analyst is None:
             # Same built-in-tool lockdown as every other provider path:
             # a coaching completion must never reach Claude Code's file
             # or shell tools, and with max_turns=1 a stray tool call
@@ -601,7 +628,11 @@ class CopilotSdkProvider:
         self._system_prompt = system_prompt
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
         chunks: list[str] = []
         error: CoachProviderError | None = None
@@ -629,7 +660,29 @@ class CopilotSdkProvider:
         # does, under the report turn budget.
         tools: list[Tool] | None = None
         available_tools = ToolSet()
-        if analyst is not None:
+        drainer: asyncio.Task[None] | None = None
+        if toolkit is not None:
+            # The agentic profile run, with chat's full read-only
+            # toolkit (docs/06-coach.md, "Narrative"). Chat's tools
+            # report progress onto a queue a streaming consumer drains;
+            # complete() has no stream, so the queue is drained here and
+            # its one meaningful item -- the cutoff sentinel -- is
+            # translated into the idle event this method already waits
+            # on, which is how its own runaway path ends the run.
+            queue: asyncio.Queue[ChatEvent | Exception | None] = asyncio.Queue()
+            tools, available_tools = _build_copilot_chat_tools(
+                toolkit, queue, _ToolCallBudget(_REPORT_MAX_TURNS), chunks.clear
+            )
+
+            async def drain() -> None:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        idle.set()
+                        return
+
+            drainer = asyncio.create_task(drain())
+        elif analyst is not None:
             engine_analyst = analyst  # narrowed: not None from here on
             budget = _ToolCallBudget(_REPORT_MAX_TURNS)
 
@@ -712,6 +765,11 @@ class CopilotSdkProvider:
                 "runtime installed and logged in? (python -m copilot "
                 "download-runtime, then copilot login via the CLI)"
             ) from exc
+
+        if drainer is not None:
+            # The run is over either way; the drainer only exists to
+            # translate a cutoff into `idle`, so it has no work left.
+            drainer.cancel()
 
         if error is not None:
             raise error
