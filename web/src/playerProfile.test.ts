@@ -4,11 +4,15 @@ import {
   blunderShare,
   errorExampleHref,
   errorExampleLabel,
-  formatPawns,
   hasPartialCoverage,
   isProfileStale,
   openingsFor,
+  peakGap,
+  peakLabel,
   scopeLabel,
+  scorePercent,
+  streakLabel,
+  terminationShares,
 } from "./playerProfile.ts";
 
 describe("isProfileStale", () => {
@@ -71,17 +75,6 @@ describe("hasPartialCoverage", () => {
     expect(hasPartialCoverage({ games_covered: 40, games_in_scope: 40 })).toBe(
       false,
     );
-  });
-});
-
-describe("formatPawns", () => {
-  it("converts centipawns to pawns with two decimals", () => {
-    expect(formatPawns(35)).toBe("0.35");
-    expect(formatPawns(142)).toBe("1.42");
-  });
-
-  it("renders zero as 0.00", () => {
-    expect(formatPawns(0)).toBe("0.00");
   });
 });
 
@@ -209,5 +202,86 @@ describe("errorExampleHref", () => {
     expect(
       errorExampleHref(pattern({ example_game_id: "g1", example_ply: 0 })),
     ).toBe("/games/g1?ply=0");
+  });
+});
+
+describe("scorePercent", () => {
+  it("counts draws as half a point", () => {
+    expect(scorePercent({ games: 4, wins: 1, losses: 1, draws: 2 })).toBe(
+      "50%",
+    );
+  });
+
+  it("is null with no games — an absent sample, never a 0% score", () => {
+    expect(scorePercent({ games: 0, wins: 0, losses: 0, draws: 0 })).toBeNull();
+  });
+});
+
+describe("peakLabel / peakGap", () => {
+  const entry = {
+    rating_end: 1523,
+    rating_min: 1380,
+    rating_max: 1540,
+    rating_max_at: 1_700_000_000,
+    rating_min_at: 1_690_000_000,
+  };
+
+  it("dates the peak — a peak with no when is trivia", () => {
+    expect(peakLabel(entry)).toBe(
+      `1540 · ${new Date(1_700_000_000 * 1000).toLocaleDateString()}`,
+    );
+  });
+
+  it("falls back to the bare rating on a snapshot stored before the date existed", () => {
+    expect(peakLabel({ ...entry, rating_max_at: null })).toBe("1540");
+  });
+
+  it("reports how far below the peak the current rating sits", () => {
+    expect(peakGap(entry)).toBe(-17);
+  });
+
+  it("is zero at the peak rather than a positive shortfall", () => {
+    expect(peakGap({ ...entry, rating_end: 1540 })).toBe(0);
+  });
+});
+
+describe("streakLabel", () => {
+  const streaks = {
+    current_result: "loss" as const,
+    current_length: 3,
+    longest_win: 6,
+    longest_loss: 4,
+    after_loss: { games: 10, wins: 3, losses: 6, draws: 1 },
+  };
+
+  it("names the run and its length", () => {
+    expect(streakLabel(streaks)).toBe("3-game losing run");
+  });
+
+  // A run of one is not a run: "1-game winning run" reads as momentum
+  // that does not exist.
+  it("calls a run of one what it is — the last game's result", () => {
+    expect(
+      streakLabel({ ...streaks, current_result: "win", current_length: 1 }),
+    ).toBe("Last game won");
+  });
+});
+
+describe("terminationShares", () => {
+  const terminations = [
+    { result: "win" as const, termination: "win", games: 30 },
+    { result: "loss" as const, termination: "timeout", games: 12 },
+    { result: "loss" as const, termination: "resigned", games: 8 },
+  ];
+
+  it("shares each cause against that result's own total, not every game", () => {
+    expect(terminationShares(terminations, "loss")).toEqual([
+      { termination: "timeout", games: 12, share: 0.6 },
+      { termination: "resigned", games: 8, share: 0.4 },
+    ]);
+  });
+
+  it("is empty for a result that never happened", () => {
+    expect(terminationShares(terminations, "draw")).toEqual([]);
   });
 });

@@ -10,11 +10,18 @@ import EvalGraph from "../components/EvalGraph.tsx";
 import ExplainPanel from "../components/ExplainPanel.tsx";
 import Layout from "../components/Layout.tsx";
 import LiveEvalPanel from "../components/LiveEvalPanel.tsx";
+import { formatPawnLoss, formatPawns } from "../units.ts";
 import { useChat } from "../useChat.ts";
 import { useExplain } from "../useExplain.ts";
 import { useLiveEval } from "../useLiveEval.ts";
 
 const LIVE_EVAL_KEY = "liveEval";
+
+/** Annotate a move in the move list only once it cost a whole pawn or
+ *  more. In centipawns, because that is what `MoveEval.cp_loss` is —
+ *  the threshold is compared against the raw field and only the
+ *  rendered figure is converted (units.ts). */
+const CP_LOSS_SHOWN = 100;
 
 // Board overlays for an analyzed game: the last move's squares are
 // shaded by its judgment, and a green arrow marks the engine's best
@@ -229,7 +236,8 @@ export default function Game() {
       {data.analysis && (
         <div className="acpl-strip">
           <span>
-            <strong>{data.analysis.overall_acpl}</strong> ACPL
+            <strong>{formatPawns(data.analysis.overall_acpl)}</strong> pawns
+            lost per move
           </span>
           <span>
             <strong>{data.analysis.judgment_counts.blunder ?? 0}</strong>{" "}
@@ -400,8 +408,11 @@ export default function Game() {
                     >
                       {movePly % 2 === 1 ? `${(movePly + 1) / 2}. ` : ""}
                       {san}
-                      {moveEval && moveEval.cp_loss >= 100 ? (
-                        <span className="loss"> −{moveEval.cp_loss}</span>
+                      {moveEval && moveEval.cp_loss >= CP_LOSS_SHOWN ? (
+                        <span className="loss">
+                          {" "}
+                          −{formatPawnLoss(moveEval.cp_loss)}
+                        </span>
                       ) : null}
                     </button>
                   </li>

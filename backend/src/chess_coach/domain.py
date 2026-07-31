@@ -122,7 +122,7 @@ class MoveEval(BaseModel):
     eval_cp: int | None
     eval_mate: int | None
     best_move: str
-    cp_loss: int
+    cp_loss: int  # centipawns given up by this one move
     judgment: Judgment
 
 
@@ -144,7 +144,7 @@ class GameAnalysis(BaseModel):
     game_id: str
     depth: int
     evals: list[MoveEval]
-    overall_acpl: float  # mean cp loss of the player's moves
+    overall_acpl: float  # centipawns per player move
     acpl_by_phase: dict[Phase, float]
     judgment_counts: dict[Judgment, int]
 
@@ -208,6 +208,10 @@ class OpeningStats(BaseModel):
     # the first is opening advice. Both are None until games are
     # analyzed, and both are move-weighted, never a mean of per-game
     # means.
+    # Both in CENTIPAWNS per player move, like every other loss
+    # aggregate on this module -- renderers divide by 100 at the point
+    # they turn one into text and nowhere earlier (docs/06-coach.md,
+    # "Units").
     opening_acpl: float | None = None  # opening-phase moves only
     avg_cp_loss: float | None = None  # whole game, all phases
     # The denominators behind those two columns. Consumers roll these
@@ -237,12 +241,20 @@ class PhaseStats(BaseModel):
     """
 
     moves: int
-    acpl: float | None
+    acpl: float | None  # centipawns per player move
     judgment_counts: dict[Judgment, int]
 
 
 class TimeClassStats(BaseModel):
-    """Play and rating movement within one time control."""
+    """Play and rating movement within one time control.
+
+    The extremes carry their dates: "peaked at 1723" is trivia,
+    "peaked at 1723 last March and has been below it since" is the
+    fact a student measures themselves against. Both are the extreme
+    *of the games in scope* — the archive stored here, not chess.com's
+    own all-time best — and both are stamped at the **first** game that
+    reached the value, since a peak is when they got there.
+    """
 
     time_class: TimeClass
     record: Record
@@ -250,6 +262,12 @@ class TimeClassStats(BaseModel):
     rating_end: int  # newest game in the window
     rating_min: int
     rating_max: int
+    # Epoch seconds of the first game at each extreme. None only on a
+    # profile snapshot stored before the fields existed (the same
+    # backward-compatible absence `Game.termination` carries); every
+    # freshly built row sets both.
+    rating_max_at: int | None = None
+    rating_min_at: int | None = None
 
 
 class MonthStats(BaseModel):
@@ -258,7 +276,7 @@ class MonthStats(BaseModel):
     month: str  # "2026-07"
     games: int
     rating_end: int | None  # last rating seen that month
-    acpl: float | None
+    acpl: float | None  # centipawns per player move
     blunder_rate: float | None  # blunders ÷ player moves
 
 
@@ -288,9 +306,60 @@ class PeriodStats(BaseModel):
     record: Record
     analyzed_games: int  # how many carry analysis — the quality sample
     player_moves: int  # denominator for acpl and blunder_rate
-    acpl: float | None  # None when the window has no analyzed moves
+    # Centipawns per player move; None when the window has no
+    # analyzed moves.
+    acpl: float | None
     blunder_rate: float | None  # blunders ÷ player_moves
     rating_end: int | None  # last rating seen in the window
+
+
+class BestWin(BaseModel):
+    """The strongest opponent the player beat in scope.
+
+    A milestone, not an aggregate: the one game a student actually
+    remembers, and the only figure in a profile that says the ceiling
+    is higher than the average. Volume-layer — beating a 1900 is a fact
+    about the game, not about whether an engine has looked at it — so
+    it is drawn from every stored game, analyzed or not.
+
+    Carries the game's identity for the same reason `CriticalPosition`
+    does: the UI deep-links it (`/games/{id}`) and a coach can name the
+    opponent and date rather than "one of your games".
+    """
+
+    game_id: str
+    end_time: int
+    time_class: TimeClass
+    color: Color  # the side the player had
+    opponent: str
+    opponent_rating: int
+    player_rating: int  # the player's own rating in that game
+
+
+class StreakStats(BaseModel):
+    """Runs and rebounds — what the volume layer knows about momentum.
+
+    Two questions no lifetime average answers. **Are they on a run
+    right now**: `current_*` describe the run the most recent game in
+    scope belongs to, where a run is consecutive games with the same
+    result (a draw is a run of draws, not a break in one), and
+    `longest_*` are the longest such runs anywhere in scope. **Do they
+    tilt**: `after_loss` is the record over games played in the same
+    sitting as, and immediately after, a loss — set against the
+    player's overall record it is the difference between "lost six
+    today" and "lost one, then lost five chasing it".
+
+    `after_loss` is a strict subset of `record`, and its own `games`
+    is the denominator: on a correspondence archive, or one with no
+    back-to-back games at all, it is legitimately empty and must read
+    as "no sample", never as a 0% score.
+    """
+
+    current_result: Result
+    current_length: int
+    longest_win: int
+    longest_loss: int
+    after_loss: Record
 
 
 class OpponentStats(BaseModel):
@@ -358,7 +427,7 @@ class CriticalPosition(BaseModel):
     leading_up: list[str]  # the SAN plies into this position
     played: str
     best: str  # SAN when it parses in this position, else raw UCI
-    cp_loss: int
+    cp_loss: int  # centipawns given up by this one move
     eval_before_cp: int | None
     eval_before_mate: int | None
     eval_after_cp: int | None
@@ -371,7 +440,8 @@ class PlayerReport(BaseModel):
     Two layers with two different denominators (docs/06-coach.md,
     "Volume and quality"). **Volume** — `record`, `time_classes` and
     their ratings, `months` game counts, `terminations`, `opponents`,
-    and the repertoire's `games`/win-loss columns — describes every
+    `color_records`, `best_win`, `streaks`, and the repertoire's
+    `games`/win-loss columns — describes every
     stored game in scope. **Quality** — `overall_acpl`,
     `judgment_counts`, `phases`, `error_patterns`, `critical_positions`,
     the ACPL columns, and `months` ACPL/blunder rate — describes the
@@ -404,7 +474,7 @@ class PlayerReport(BaseModel):
     requested_until: int | None = None
     games_in_scope: int | None = None
     record: Record
-    overall_acpl: float  # total loss ÷ player_moves
+    overall_acpl: float  # centipawns per player move
     phases: dict[Phase, PhaseStats]
     judgment_counts: dict[Judgment, int]
     time_classes: list[TimeClassStats]
@@ -412,6 +482,12 @@ class PlayerReport(BaseModel):
     periods: list[PeriodStats] = []  # trailing windows, narrowest first
     terminations: list[TerminationStats]
     opponents: OpponentStats | None  # None with no games
+    # Volume-layer milestones and splits (docs/06-coach.md,
+    # "Milestones"). All three default to empty so a stored profile
+    # snapshot written before they existed still parses.
+    color_records: dict[Color, Record] = {}  # score as White / as Black
+    best_win: BestWin | None = None  # None with no win in scope
+    streaks: StreakStats | None = None  # None with no games
     openings: list[OpeningStats]
     error_patterns: list[ErrorPattern]
     critical_positions: list[CriticalPosition]
@@ -467,12 +543,27 @@ class PlayerProfile(BaseModel):
     window_start: int | None  # covered span, as in PlayerReport
     window_end: int | None
     player_moves: int  # denominator for judgment_counts
-    overall_acpl: float
+    overall_acpl: float  # centipawns per player move
     judgment_counts: dict[Judgment, int]
     phases: dict[Phase, PhaseStats]
     time_classes: list[TimeClassStats]
     months: list[MonthStats]  # most recent months only, oldest first
     periods: list[PeriodStats] = []  # trailing windows, narrowest first
+    # Volume-layer figures, copied from the report (docs/06-coach.md,
+    # "Milestones"): the overall record, what a student remembers, and
+    # how they win and lose — none of which any ACPL average expresses.
+    # `terminations` rides uncapped, unlike every other list here: it is
+    # bounded by chess.com's own result-code vocabulary, and a capped
+    # list would make the totals its renderers state disagree with the
+    # records above them. All default to empty, so a snapshot stored
+    # before they existed still parses — the fields simply read as
+    # absent until the next regeneration.
+    record: Record = Record()  # every stored game in scope
+    color_records: dict[Color, Record] = {}
+    best_win: BestWin | None = None
+    streaks: StreakStats | None = None
+    opponents: OpponentStats | None = None
+    terminations: list[TerminationStats] = []
     openings: list[ProfileOpening]  # chosen + faced, capped per color
     error_patterns: list[ErrorPattern]
     narrative: str | None = None  # stored LLM layer; None until generated

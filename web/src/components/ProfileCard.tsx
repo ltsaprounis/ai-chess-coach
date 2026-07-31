@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import { Link } from "react-router-dom";
 import type { Color, PlayerProfile, ProfileNarrative } from "../api.ts";
@@ -5,12 +6,18 @@ import {
   blunderShare,
   errorExampleHref,
   errorExampleLabel,
-  formatPawns,
+  formatGameDate,
   hasPartialCoverage,
   isProfileStale,
   openingsFor,
+  peakGap,
+  peakLabel,
   scopeLabel,
+  scorePercent,
+  streakLabel,
+  terminationShares,
 } from "../playerProfile.ts";
+import { formatPawns } from "../units.ts";
 
 type Props = {
   profile: PlayerProfile;
@@ -37,6 +44,8 @@ const COLOR_LABEL: Record<Color, string> = {
   white: "As White",
   black: "As Black",
 };
+// The bare side, for inline prose where "As White 52%" would not read.
+const SIDE_LABEL: Record<Color, string> = { white: "White", black: "Black" };
 
 /** One (color, chosen|faced) partition's rows — a plain table, no
  *  sorting or paging: the list is already small and ranked by the
@@ -77,6 +86,103 @@ function OpeningRows({
   );
 }
 
+/** One labelled milestone row. Rows are built individually and the
+ *  empty ones dropped, so a student with no win yet simply has no
+ *  "Best win" row rather than a dash where a milestone should be. */
+type Milestone = { label: string; value: ReactNode };
+
+/** "weaker 80% (5)" — a split's score with its own denominator, which
+ *  every one of these needs: the bands and the colors can rest on
+ *  wildly different sample sizes within the same row. */
+function scored(label: string, record: PlayerProfile["record"]): string {
+  return `${label} ${scorePercent(record) ?? "—"} (${record.games})`;
+}
+
+/** The volume-layer milestones (docs/06-coach.md, "Milestones"): what
+ *  the student has managed and how they win and lose, none of which
+ *  needs engine analysis — so these cover every game in scope, which
+ *  the section says out loud rather than leaving to the coverage line
+ *  above it. */
+function milestoneRows(profile: PlayerProfile): Milestone[] {
+  const rows: Milestone[] = [];
+  const win = profile.best_win;
+  if (win) {
+    rows.push({
+      label: "Best win",
+      value: (
+        <>
+          <Link to={`/games/${win.game_id}`}>
+            beat {win.opponent} ({win.opponent_rating})
+          </Link>{" "}
+          on {formatGameDate(win.end_time)}, rated {win.player_rating} at the
+          time
+        </>
+      ),
+    });
+  }
+
+  const streaks = profile.streaks;
+  if (streaks) {
+    rows.push({
+      label: "Current run",
+      value: `${streakLabel(streaks)} · longest ${streaks.longest_win} wins, ${
+        streaks.longest_loss
+      } losses`,
+    });
+    // Tilt, stated as a comparison — a 39% score is only bad against a
+    // better overall one. Omitted when no game in scope was played
+    // straight after a loss: that is an absent sample, and 0% would
+    // read as a catastrophic one.
+    const afterLoss = scorePercent(streaks.after_loss);
+    const overall = scorePercent(profile.record);
+    if (afterLoss !== null) {
+      rows.push({
+        label: "After a loss",
+        value: `${afterLoss} over ${streaks.after_loss.games} game${
+          streaks.after_loss.games === 1 ? "" : "s"
+        } played straight after one${overall === null ? "" : ` · ${overall} overall`}`,
+      });
+    }
+  }
+
+  const colorParts = COLORS.map((color) => {
+    const record = profile.color_records[color];
+    return record === undefined || record.games === 0
+      ? null
+      : scored(SIDE_LABEL[color], record);
+  }).filter((part) => part !== null);
+  if (colorParts.length > 0) {
+    rows.push({ label: "By color", value: colorParts.join(" · ") });
+  }
+
+  const opponents = profile.opponents;
+  if (opponents) {
+    // Counts, not bare percentages: matchmaking keeps nearly every
+    // game inside the "similar" band, so the other two rest on a
+    // handful of games and "0% against stronger players" would read as
+    // a verdict rather than as the six-game footnote it is.
+    rows.push({
+      label: "Opposition",
+      value: [
+        scored("stronger", opponents.vs_stronger),
+        scored("similar", opponents.vs_similar),
+        scored("weaker", opponents.vs_weaker),
+      ].join(" · "),
+    });
+  }
+
+  const losses = terminationShares(profile.terminations, "loss");
+  if (losses.length > 1) {
+    rows.push({
+      label: "How you lose",
+      value: losses
+        .map((row) => `${row.termination} ${Math.round(row.share * 100)}%`)
+        .join(" · "),
+    });
+  }
+  return rows;
+}
+
 /**
  * The Coach page's player-profile card (docs/08-frontend.md): the
  * always-free facts distilled by `build_profile` plus, once
@@ -115,6 +221,7 @@ export default function ProfileCard({
 
   const narrativeText = profile.narrative ?? null;
   const stale = isProfileStale(profile, narrative, narrativeGamesNow);
+  const milestones = milestoneRows(profile);
 
   return (
     <section className="panel profile-card">
@@ -127,6 +234,14 @@ export default function ProfileCard({
             <div className="tile-label">
               {entry.time_class} rating ({entry.record.games} game
               {entry.record.games === 1 ? "" : "s"})
+            </div>
+            {/* The peak with the date it was first reached: how far the
+                student has ever been is only coaching signal next to
+                when they were there and how far below it they sit now
+                (docs/06-coach.md, "Milestones"). */}
+            <div className="tile-label">
+              peak {peakLabel(entry)}
+              {peakGap(entry) < 0 ? ` (${peakGap(entry)})` : ""}
             </div>
           </div>
         ))}
@@ -167,7 +282,7 @@ export default function ProfileCard({
                   <th>Games</th>
                   <th>Score</th>
                   <th>Rating</th>
-                  <th>Avg loss</th>
+                  <th>Avg loss (pawns)</th>
                   <th>Blunders</th>
                 </tr>
               </thead>
@@ -176,15 +291,7 @@ export default function ProfileCard({
                   <tr key={period.label}>
                     <td>{period.label}</td>
                     <td>{period.games}</td>
-                    <td>
-                      {period.record.games > 0
-                        ? `${Math.round(
-                            ((period.record.wins + period.record.draws / 2) /
-                              period.record.games) *
-                              100,
-                          )}%`
-                        : "—"}
-                    </td>
+                    <td>{scorePercent(period.record) ?? "—"}</td>
                     <td>{period.rating_end ?? "—"}</td>
                     <td>
                       {period.acpl !== null ? formatPawns(period.acpl) : "—"}
@@ -194,6 +301,30 @@ export default function ProfileCard({
                         ? `${(period.blunder_rate * 100).toFixed(1)}%`
                         : "—"}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {milestones.length > 0 && (
+        <>
+          <h3>Milestones</h3>
+          {/* None of these needs an engine, so all of them cover every
+              game in scope — worth saying under a card whose quality
+              figures cover only the analyzed ones. */}
+          <p className="agent-note">
+            Over all {profile.games_in_scope} games in scope, analyzed or not.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {milestones.map((row) => (
+                  <tr key={row.label}>
+                    <th scope="row">{row.label}</th>
+                    <td>{row.value}</td>
                   </tr>
                 ))}
               </tbody>

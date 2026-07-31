@@ -97,8 +97,10 @@ def build_profile(report: PlayerReport) -> PlayerProfile
 def render_profile_prompt(profile: PlayerProfile) -> str
 
 # The ~250-token block other prompts embed at the top: a header
-# naming the profile's time control, coverage when partial, the facts
-# one line each, then the narrative as the coach's read when present.
+# naming the student and the profile's time control, coverage when
+# partial, the facts one line each, then the narrative as the coach's
+# read when present, block-quoted. Quality figures spell their unit
+# ("1.07 pawns lost per move"), as everywhere else (see "Units").
 # Total over narrative=None (renders the facts alone).
 def render_profile_context(profile: PlayerProfile) -> str
 
@@ -107,6 +109,25 @@ def render_profile_context(profile: PlayerProfile) -> str
 # Row metadata, never a cache key: a bump flags staleness in the UI;
 # it must never silently re-bill (docs/03-storage.md).
 PROFILE_PROMPT_VERSION: str
+
+# --- Milestones (see "Milestones" below) ---
+#
+# Volume-layer figures on PlayerReport, copied onto PlayerProfile:
+#
+#   TimeClassStats.rating_max_at / rating_min_at  # dated extremes
+#   PlayerReport.color_records: dict[Color, Record]
+#   PlayerReport.best_win: BestWin | None
+#   PlayerReport.streaks: StreakStats | None
+#
+# class BestWin(BaseModel):       # the strongest opponent beaten
+#     game_id: str; end_time: int; time_class: TimeClass; color: Color
+#     opponent: str; opponent_rating: int; player_rating: int
+#
+# class StreakStats(BaseModel):   # runs, and the rebound after a loss
+#     current_result: Result      # the run the newest game belongs to
+#     current_length: int
+#     longest_win: int; longest_loss: int
+#     after_loss: Record          # the next game of the same sitting
 
 # --- Move explanation (runs only on explicit user request — LLM
 # --- calls cost money; the API layer caches results in storage) ---
@@ -132,8 +153,9 @@ def build_move_context(game: Game, analysis: GameAnalysis,
 # redundant annotation ("?" glyphs AND the word blunder). Eval
 # numbers handed to the model in this template are pre-rendered in
 # pawns for the same reason. Given a `profile`, the student-profile
-# context block opens the prompt (see "Player profile"); with None
-# the prompt renders exactly as before.
+# context block opens the prompt and the instructions gain one clause
+# telling the model to use it (see "Player profile"); with None the
+# prompt renders exactly as before.
 def render_explain_prompt(ctx: MoveContext, lines: list[EvalLine], *,
                           profile: PlayerProfile | None = None) -> str
 
@@ -358,8 +380,8 @@ singleton above every genuine problem. Each row shows a score
 percentage, not only W-L-D.
 
 **Rendering the split.** Each color section renders two sub-tables:
-"Systems you chose" (the chosen partition, keyed and labelled as
-above) and "What you face as White" / "as Black" (the faced
+"Systems the student chose" (the chosen partition, keyed and
+labelled as above) and "What they face as White" / "as Black" (the faced
 partition, keyed by name root and rendered with `first_moves` so the
 player's reply is visible alongside the opponent's line). The chosen
 table is the player's repertoire; the faced table is the coaching
@@ -374,11 +396,17 @@ ones that had analysis, presented under a window line that made the
 shrunken span look like the request. When the caller supplies them,
 the prompt's student section states the requested window alongside the
 covered span, and renders coverage as "N of M games in scope"; when
-analysis covers less than the scope it adds an explicit caveat that
-the remaining games are unanalyzed and the quality figures describe
-only the analyzed span — which is what lets the instruction block's
+analysis covers less than the scope it adds an explicit caveat naming
+the remaining games — which is what lets the instruction block's
 honesty rule actually bite. With no scope information (`None`
 throughout) the section renders as it always did.
+
+The caveat **names which figures the shortfall touches**, rather than
+saying every figure below describes the analyzed span. That shorter
+wording was true when it was written and the next section made it
+false: ratings, records, milestones, terminations and the
+repertoire's game counts all cover every stored game. Left as it was,
+it told the model to discount the half of the brief that is complete.
 
 ### Volume and quality
 
@@ -434,11 +462,105 @@ Three choices worth stating:
   row, and showing both invites a narrative to read a difference that
   cannot exist.
 
-The profile prompt renders them as a table and its instructions lead
-with the most recent window carrying a real sample; the compact embed
-block renders one line — the narrowest window with analysis, against
-the whole-span figure — because the question other prompts need
-settled is just "better or worse than usual right now".
+All three data prompts render the table through one shared function
+(`_periods_section`, as `_trend_section` is shared for `months` — the
+table is register-free), and the report brief and profile prompt both
+instruct the model to lead with the most recent window carrying a
+real sample, in preference to a single month's row. The compact embed
+block renders one line instead — the narrowest window with analysis,
+against the whole-span figure — because the question other prompts
+need settled is just "better or worse than usual right now".
+
+The brief went a release without this: `periods` shipped with the
+profile and reached only the profile prompt, so every piece of
+`/coach` advice averaged the whole span flat while the profile
+narrative beside it led with the last 30 days.
+
+### Milestones
+
+Averages describe a student; milestones are what the student
+describes themselves by. "Peaked at 1723 last March and has been
+below it since", "beat a 1900 in May", "lost four in a row", "scores
+39% in the game right after a loss against 48% overall", "loses 38%
+of their losses on the clock" — none of these survives being averaged
+into an ACPL, and every one of them names a coaching problem or a
+piece of evidence a coach can hand back.
+
+All of it is **volume layer**, so all of it covers every stored game
+in scope, analyzed or not: beating a 1900 is a fact about the game,
+not about whether an engine has looked at it. Computing any of it over
+the analyzed subset would reproduce, one level down, the bug the
+volume/quality split exists to stamp out.
+
+Four rules worth stating, since each has a wrong-looking alternative:
+
+- **A peak is dated at the first game that reached it.** `max()` over
+  a chronological list returns the earliest extreme, which is when the
+  student got there — "peaked in March and has not passed it since" is
+  only true of the first date. Both extremes are extremes *of the
+  games in scope*, never chess.com's own all-time best, which the
+  archive does not carry.
+- **A run of one is not a run.** The current run is the run the most
+  recent game belongs to, where a run is consecutive games with the
+  same result (a draw is a run of draws, not a break in one). Both
+  renderers word a run of length one as the last game's result rather
+  than as "a 1-game winning run", which invites a reader to narrate
+  momentum that does not exist.
+- **The after-a-loss score is a comparison or it is nothing.** 39% is
+  bad only next to a better overall score, so `PlayerProfile.record`
+  rides beside it and every renderer states both. `after_loss` counts
+  each game whose immediately preceding game in scope was a loss
+  ended within two hours — the same sitting, which is where tilt shows
+  up. Chained losses each seed the next game, so a six-game slide
+  contributes five. On an archive with no back-to-back games it is
+  legitimately empty, and an empty record must read as "no sample",
+  never as a 0% score.
+- **Terminations reach the profile uncapped**, unlike every other list
+  it distills: the vocabulary is chess.com's own handful of result
+  codes, and a capped list would make the totals its renderers state
+  ("62 losses: …") disagree with the record above them.
+
+All three prompts render them: the report brief and the report-scope
+chat seed as a "Milestones" section, the profile prompt as
+"Milestones and tendencies", both above the shared "How games end"
+table.
+
+**Every milestone line is subject-free** — "Best win: beat marko77
+(1750) on…" — like every other line of the student section it sits
+beside. A subject would have to be a person, and the system prompt
+opens "You are a … coach", so "you beat marko77" briefly has two
+candidate referents where a label:value line has none. Nothing is
+gained by spending that ambiguity.
+
+**One register per document.** Where a subject *is* unavoidable, the
+report's data uses the third person — "Systems the student chose",
+"Played **7.Qd2**" — matching its own instruction block and the
+profile prompt alike. The brief once mixed the two, describing the
+student in the third person in its milestones and addressing them in
+the second in its repertoire headings and turning points; both
+registers are defensible, having both in one document is not. The
+data is the side that moved because the instructions could not: a
+second person inside an instruction is the model being instructed,
+not the student. What the model *writes* is unaffected and stays
+second person, stated by the register rule above rather than implied
+by a heading.
+
+Subject-free leaves the after-a-loss and color-split lines identical
+in both prompts, so there is one implementation of each, taking the
+fields rather than either container. Only two lines genuinely differ.
+
+The two that do: the profile's best-win line names **no opponent**,
+the report's does. The profile narrative is stored and pasted into
+other prompts where a game reference resolves to nothing, so its
+citation ban covers opponent handles; the brief's whole citation rule
+is "name the game by opponent and date", and a milestone the student
+cannot go and find is not a milestone. And the profile's streak line
+carries "their", where the report's needs no subject at all.
+
+The compact embed block takes **one** of them — how the student
+loses — because that is the only one that changes advice about a
+single move: "you were winning and lost on time" is a different
+lesson from "you were winning and blundered".
 
 ### Judgment counts carry their denominator
 
@@ -546,6 +668,60 @@ on the Game page. Evals stay white-POV as stored; the consumer folds
 by `color`. Sorting is deterministic: newest game first
 (`end_time` desc, ties by `game_id`), then ascending `ply`.
 
+### Units
+
+**Every loss figure is in pawns, and nothing is called "ACPL".** One
+scale with one name, from the domain types out to the browser tab.
+
+The acronym was doing double duty and a glossary line was papering
+over it: both data prompts used to open `*(ACPL = average centipawn
+loss per move, shown in pawns…)*`, which expands the acronym to one
+scale and then redefines the figure as the other. Prompts followed
+the redefinition; the frontend followed the literal meaning; the
+same Englund row read `5.16` in the brief and `516` in the
+dashboard's repertoire table, and a move that cost `−310` in the
+move list was `about 3.1 pawns` in the explanation beside it.
+
+Pawns won for three reasons. A single move's cost cannot be anything
+else — the eval bar is pawns everywhere in chess — so unifying on
+centipawns was never actually available, only "two scales" under a
+different name. The audience arrives from chess.com, where the eval
+bar is pawns and ACPL is not house vocabulary. And the coach's own
+prose is pawns by style contract, rendered on the same screens as
+these numbers.
+
+Where the conversion happens:
+
+- **Nowhere but the render edge.** `MoveEval.cp_loss`, `overall_acpl`,
+  `PhaseStats`/`MonthStats`/`PeriodStats.acpl`, `OpeningStats.
+  opening_acpl` and `avg_cp_loss` are centipawns, as their field
+  comments now say — the engine's own unit, and integers. Aggregation,
+  rollups, sorting and chart geometry all stay on those raw numbers,
+  where a factor of a hundred cancels; only the step that produces a
+  *string* divides.
+- **Backend:** `_pawns_or_na` (aggregates, two decimals),
+  `format_cp_loss` (one move, one decimal, "about 3.1 pawns"),
+  `format_eval` (signed evals), and `providers.py::_pawns` for chat
+  tool results. Tool results name the unit beside the number: they
+  land mid-conversation with no header above them.
+- **Frontend:** `web/src/units.ts` — `formatPawns` and `formatPawnLoss`
+  mirror the first two backend helpers, decimals included, so a table
+  cell and the advice paragraph under it agree. The conversion itself
+  is deliberately not exported: everything leaving that module is a
+  string, so no pawn-scale number is ever in flight for something
+  downstream to divide a second time.
+- **Charts** keep centipawn values and convert only in the axis labels
+  and tooltip, which is why `BarChart`/`MonthlyMetricChart` take a
+  `formatValue` and apply it to *both*. An axis reading 50 under a
+  tooltip reading 0.50 is the same defect at chart scale.
+
+"Centipawns" still appears in the instruction blocks, always as the
+thing not to do ("pawns, never centipawns"), and in code comments and
+field names where the reader is a developer and precision is the
+point. What no template does any more is put the acronym next to a
+figure — `test_no_template_says_acpl_anywhere` splits each document at
+its instruction block and asserts the data half is clean.
+
 ### Prompt
 
 `render_prompt` renders the report into a fixed markdown template —
@@ -560,10 +736,17 @@ The instruction block states the student (rating band, time controls),
 demands **one** biggest lever rather than a flat list of co-equal
 weaknesses, and carries the rules the data alone cannot enforce:
 
+- **Audience and register.** The brief is written **to the student,
+  in the second person** — the register the UI renders and the one
+  thing about person that is not negotiable. The data above it
+  describes the student in the third, and the instruction block must
+  (its own second person is the model), so the rule states the
+  output register outright rather than leaving the data's headings
+  to imply it.
 - **Attribution.** An opening is the student's only where the
-  repertoire lists it under their color in "Systems you chose". Never
-  advise dropping a line from the "What you face" table — recommend a
-  response to it.
+  repertoire lists it under their color in "Systems the student
+  chose". Never advise dropping a line from the "What they face"
+  table — recommend a response to it.
 - **Citation.** Game first, move second: name the game by opponent
   and date at its first citation, then give the move in notation as
   the link — "In your game against marko77 on June 14,
@@ -634,8 +817,8 @@ other prompt embeds at the top, one place to improve it.
 **Scope.** A profile covers **one time control** (`time_class`;
 `None` = all controls mixed). A 2100 bullet player and their 1500
 rapid self are different students, and one profile averaging both
-describes neither — measurably: on a real archive, rapid runs 1.66
-pawns ACPL at 8.9% blunders against bullet's 2.01 and 12.2%. The
+describes neither — measurably: on a real archive, rapid loses 1.66
+pawns a move at 8.9% blunders against bullet's 2.01 and 12.2%. The
 scope is carried on the profile, stated by both renderers, and is
 storage's key for the narrative. It is deliberately the *only* scope
 the narrative carries — see "Narrative" below for why the window is
@@ -643,8 +826,11 @@ not.
 
 **Facts.** `build_profile(report)` distills an already-built
 `PlayerReport` into `domain.PlayerProfile`: rating and record per
-time class, the most recent months of trend, the recent-form
-`periods`, overall and per-phase quality, the repertoire as
+time class with the extremes dated, the most recent months of trend,
+the recent-form `periods`, overall and per-phase quality, the
+milestones (see "Milestones" above — `record`, `color_records`,
+`best_win`, `streaks`, `opponents`, `terminations`, all copied
+verbatim), the repertoire as
 `ProfileOpening` rows, and the tagged error patterns. Pure and free,
 recomputed on demand; the aggregation itself runs once, in
 `build_report` — the profile projects it and adds no second
@@ -662,8 +848,14 @@ Distillation rules:
   actually plays), faced rows by impact (what actually hurts them,
   the same games × win-rate-deficit sort the report tables use).
 - Every list is capped so the rendered block stays around 250
-  tokens; the exact caps are implementation detail, pinned by the
-  snapshot tests rather than stated here.
+  tokens, `terminations` excepted for the reason given under
+  "Milestones"; the exact caps are implementation detail, pinned by
+  the snapshot tests rather than stated here.
+- Fields added to `PlayerProfile` after the first release carry
+  empty-ish defaults, so a snapshot stored under an older shape still
+  parses. The embed paths read stored rows (see "Embedding"), and a
+  required new field would turn every one of them into a validation
+  error until the student paid to regenerate.
 
 **Narrative.** Three to five sentences of tendencies plus a short
 weakness list, every claim tied to a figure the facts state.
@@ -681,15 +873,33 @@ student. This is the same fact as the citation rule, applied to
 person: the text is stored and pasted into other prompts, where the
 reader is another coach, so a v1 narrative opening "You are a rapid
 player who hangs pieces" told that coach *they* were the rapid
-player. The instructions forbid the second person, and the rendered
-facts follow suit ("Systems the student chose", not "Systems you
-chose") since a model copies the register it is given. The register
+player. The instructions forbid the second person and the rendered
+facts follow suit, since a model copies the register it is given.
+What differs from the brief is the *output*: the narrative is third
+person because a coach reads it, the brief second person because the
+student does. Their data reads the same way in both. The register
 otherwise matches explain: club player, pawns never centipawns.
 
 The instructions also carry the scope and both denominators into the
 text: name the time control, never generalize it to the student's
 whole game, never present the analyzed sample as their whole history,
 and lead with the most recent form window that has a real sample.
+
+**Two rules are about the trip, not the content** (both new in
+`profile-v4`). The narrative is written under one prompt and read
+under others, and each rule closes something that only goes wrong on
+the way: **spell every unit out** — "1.30 pawns a move", never "1.30
+ACPL", per "Units" below — and **no markdown headings**, since the
+text lands *inside* another prompt's sections where a heading of its
+own reads as starting a new one. The second is belt and braces beside
+the block quote the embed applies: quoting bounds whatever arrives,
+the rule stops it arriving.
+
+Neither was worth a bump alone, and neither had to be: they were
+queued behind the first `PROFILE_PROMPT_VERSION` move and taken with
+it. A bump only flags stored narratives stale in the UI — it never
+re-bills on its own — so the standing rule is to bank cheap durable-
+text rules like these and spend one bump on the lot.
 
 Expensive, therefore stored: the API layer persists the narrative —
 beside the facts snapshot it described, the agent that wrote it, and
@@ -717,9 +927,33 @@ as stale.
 **Embedding.** `render_explain_prompt` and `render_game_chat_context`
 take `profile: PlayerProfile | None = None`; given one they open
 with `render_profile_context(profile)`, and with None they render
-exactly as before. The block names its own scope in the header —
-without that, an embedded rapid profile reads as a description of the
-whole player.
+exactly as before. The block names its own student and scope in the
+header — without the scope, an embedded rapid profile reads as a
+description of the whole player; without the name, the header's own
+"their" refers to nobody, since it is the first line of the host
+prompt and the block never names the student anywhere else.
+
+Explain also **says what the block is for**: with a profile its
+instructions gain one clause — pitch the explanation at the student
+the profile describes, and name the move as an instance of a pattern
+the profile already counts when it is one. Context a prompt never
+refers to is context a model may ignore, and that clause is the
+whole embed's payoff. It renders only alongside the block, so the
+profile-less prompt is unchanged and the instruction never points at
+a section that is not there. One clause and no more: these
+instructions are the one part of the explain prompt on a strict
+length budget, and the profile is context, not the subject. Chat
+needs no equivalent — its seed rule now names the context as usable
+directly.
+
+The narrative is embedded **block-quoted**. It is model-written, so
+an unquoted narrative opening `## Tendencies` would forge a section
+boundary in the host and hand every section after it to the
+narrative. The instructions do now forbid headings (see "Narrative"),
+but that only binds text written under `profile-v4` and later:
+narratives stored before it are still out there, and a rule is a
+model obeying an instruction while quoting is arithmetic on a
+string. Quoting bounds whatever actually arrives.
 
 The API layer passes the **stored** profile (facts snapshot with
 narrative attached — one row read), never a fresh aggregation: the
@@ -772,13 +1006,27 @@ pawns, never centipawns.
 
 **Instructions.** The chat system prompt carries the explain
 register rules (club player, the idea before the number, no
-redundant annotation) plus two chat-specific rules: claims about the
-student's games must come from tool results in this conversation,
-never from memory of the seed or of earlier turns; and game
-references are written as app-relative markdown links
-(`/games/{id}?ply={n}`) using ids returned by tools — never an
+redundant annotation) plus two chat-specific rules: the facts the
+seed states are established and may be used and quoted, while any
+claim past them — another game, another result, a move not shown —
+must come from a tool result in this conversation, never from
+memory; and game references are written as app-relative markdown
+links (`/games/{id}?ply={n}`) using ids returned by tools — never an
 invented id (see "Link discipline" in the design record for why
 there is no `append_game_links` pass here).
+
+The first rule is *stated versus recalled*, not context versus
+tools, and the distinction is load-bearing. Scoped to the whole
+context it bans the seed: report scope ships ~1,650 tokens of
+ratings, record, repertoire and turning points and then forbids all
+of it, and on a thread's first message no tool has run, so the model
+may assert nothing whatever about the student it was just briefed
+on. Game scope additionally loses the anchored game's own result,
+opponent and played move, which the seed states three lines above
+the rule. The invented-game risk the rule exists for lives entirely
+past the seed's edge, which is where it now sits. Game *links* stay
+tool-only regardless: the seed's own game is already linked by the
+UI, so an id has no legitimate source but a tool result.
 
 **Replay.** A provider that cannot resume renders the transcript
 into its prompt: the shared module helper `render_chat_prompt(
@@ -795,6 +1043,21 @@ the counted grace-round pattern on Copilot. The stall timeout is
 shared with the other flows.
 
 ## Providers
+
+**One persona, three artifacts.** `create_provider` builds a single
+provider carrying a single system prompt, and that provider serves
+the report brief, the profile narrative and move explanations alike.
+So the persona names none of them: it establishes the coach, states
+that the figures it is handed are already computed, and defers what
+to write to the instruction block each template ends with. A persona
+that named one artifact would misdirect the other two — a move
+explanation is not a brief and re-averages nothing, and the
+narrative is a briefing *about* the student for another coach, which
+its own instructions say and a "write the coaching brief" persona
+would contradict. Chat is the one genuine divergence and keeps its
+own persona (`CHAT_SYSTEM_PROMPT`): its instructions arrive in the
+seed, not in a block at the end, and the turns after the first are a
+conversation rather than a request for a finished piece.
 
 - **v1 — `ClaudeAgentSdkProvider`** (default): `complete` runs
   `claude_agent_sdk.query(...)` with a coach system prompt that

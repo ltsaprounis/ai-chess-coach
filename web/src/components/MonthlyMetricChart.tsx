@@ -16,15 +16,18 @@ export type MonthPoint = { month: string; value: number | null };
 
 type Props = {
   data: MonthPoint[];
-  /** Accessible name, e.g. "ACPL by month". */
+  /** Accessible name, e.g. "average pawns lost per move by month". */
   label: string;
-  /** Formats the hover/tooltip value, e.g. "12.3%" for blunder rate. */
+  /** Formats the axis ticks and the hover value, e.g. "12.3%" for
+   *  blunder rate or "1.07" for a centipawn series shown in pawns.
+   *  Both, never just the tooltip: an axis reading 50 under a tooltip
+   *  reading 0.50 is the same figure twice in two scales. */
   formatValue?: (value: number) => string;
 };
 
 /**
  * A metric per calendar month, oldest first — months the player is
- * covered for report the trend (ACPL, blunder rate); months with no
+ * covered for report the trend (average loss, blunder rate); months with no
  * analyzed games are `null` and simply break the line rather than
  * plotting as zero, which would read as flawless play.
  */
@@ -97,7 +100,7 @@ export default function MonthlyMetricChart({
               fontSize={11}
               fill={MUTED_COLOR}
             >
-              {tick}
+              {format(tick)}
             </text>
           </g>
         ))}

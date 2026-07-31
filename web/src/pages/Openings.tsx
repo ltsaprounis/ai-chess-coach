@@ -373,7 +373,7 @@ export default function Openings() {
                           />
                           <SortableTh
                             column="avgLoss"
-                            label="Avg loss"
+                            label="Avg loss (pawns)"
                             sortKey={childSort.sortKey}
                             sortDir={childSort.sortDir}
                             onSort={childSort.onSort}

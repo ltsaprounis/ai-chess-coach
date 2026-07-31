@@ -22,6 +22,7 @@ from chess_coach.domain import (
     OPENING_PLIES,
     PIECE_POINTS,
     AnalyzedGame,
+    BestWin,
     Color,
     CriticalPosition,
     ErrorPattern,
@@ -38,6 +39,7 @@ from chess_coach.domain import (
     PlayerReport,
     Record,
     Result,
+    StreakStats,
     TerminationStats,
     TimeClass,
     TimeClassStats,
@@ -121,6 +123,7 @@ class _VolumeGame:
     time_class: TimeClass
     result: Result
     end_time: int
+    opponent: str
     player_rating: int
     opponent_rating: int
     termination: str | None
@@ -136,6 +139,7 @@ def _volume_from_analyzed(game: AnalyzedGame) -> _VolumeGame:
         time_class=game.time_class,
         result=game.result,
         end_time=game.end_time,
+        opponent=game.opponent,
         player_rating=game.player_rating,
         opponent_rating=game.opponent_rating,
         termination=game.termination,
@@ -152,6 +156,7 @@ def _volume_from_summary(game: GameSummary) -> _VolumeGame:
         time_class=game.time_class,
         result=game.result,
         end_time=game.end_time,
+        opponent=game.opponent,
         player_rating=game.player_rating,
         opponent_rating=game.opponent_rating,
         termination=game.termination,
@@ -227,6 +232,9 @@ def build_report(
         periods=_period_stats(volume, quality_by_id),
         terminations=_termination_stats(volume),
         opponents=_opponent_stats(volume),
+        color_records=_color_records(volume),
+        best_win=_best_win(volume),
+        streaks=_streaks(volume),
         openings=_opening_stats(volume, quality_by_id),
         error_patterns=_error_patterns(games),
         critical_positions=_critical_positions(games),
@@ -342,6 +350,15 @@ def _record(games: list[_VolumeGame]) -> Record:
 
 
 def _time_class_stats(games: list[_VolumeGame]) -> list[TimeClassStats]:
+    """Rating movement per control, each extreme stamped with the date
+    it was first reached (docs/06-coach.md, "Milestones").
+
+    First, not last: `max`/`min` over a chronological list return the
+    earliest game holding the value, which is when the student got
+    there -- the fact "peaked in March and has been below it since"
+    rests on. Both are extremes of the games in scope, never chess.com's
+    own all-time best, which the archive does not carry.
+    """
     buckets: dict[TimeClass, list[_VolumeGame]] = defaultdict(list)
     for g in games:
         buckets[g.time_class].append(g)
@@ -350,6 +367,10 @@ def _time_class_stats(games: list[_VolumeGame]) -> list[TimeClassStats]:
     for tclass, members in buckets.items():
         by_time = sorted(members, key=lambda g: g.end_time)
         ratings = [g.player_rating for g in by_time]
+        # max()/min() return the first extreme element, and `by_time` is
+        # chronological -- that is the "first reached" rule above.
+        peak = max(by_time, key=lambda g: g.player_rating)
+        low = min(by_time, key=lambda g: g.player_rating)
         ordered.append(
             (
                 by_time[0].end_time,
@@ -358,8 +379,10 @@ def _time_class_stats(games: list[_VolumeGame]) -> list[TimeClassStats]:
                     record=_record(by_time),
                     rating_start=ratings[0],
                     rating_end=ratings[-1],
-                    rating_min=min(ratings),
-                    rating_max=max(ratings),
+                    rating_min=low.player_rating,
+                    rating_max=peak.player_rating,
+                    rating_max_at=peak.end_time,
+                    rating_min_at=low.end_time,
                 ),
             )
         )
@@ -492,6 +515,102 @@ def _termination_stats(games: list[_VolumeGame]) -> list[TerminationStats]:
         TerminationStats(result=result, termination=term, games=count)
         for (result, term), count in items
     ]
+
+
+# --- milestones (docs/06-coach.md, "Milestones") -----------------------
+#
+# Volume-layer, every one of them: beating a 1900, losing four in a row
+# and scoring worse as Black are facts about the games played, not about
+# which of them an engine has reached. Computing any of these over the
+# analyzed subset alone would reproduce, one level down, the bug the
+# volume/quality split exists to stamp out.
+
+# How close together two games must be to count as the same sitting.
+# Two hours is a round, documented choice, like `_OPPONENT_BAND`: long
+# enough that a 30-minute rapid game still chains to the next one,
+# short enough that "came back the following evening" does not read as
+# a rebound from the loss before it. Games are stamped at their end, so
+# the gap is measured end to end.
+_SESSION_GAP = 7_200
+
+
+def _color_records(games: list[_VolumeGame]) -> dict[Color, Record]:
+    """Score as White against score as Black.
+
+    Both keys always present: a player who never had Black in scope is
+    a `Record` of zero games, which reads as "no sample", where a
+    missing key would have every consumer guess.
+    """
+    return {
+        color: _record([g for g in games if g.color == color])
+        for color in ("white", "black")
+    }
+
+
+def _best_win(games: list[_VolumeGame]) -> BestWin | None:
+    """The win against the highest-rated opponent, most recent on a tie.
+
+    Ties broken toward the recent game because the milestone is meant
+    to be recognizable: of two wins over 1900s, the one from last month
+    is the one the student remembers.
+    """
+    wins = [g for g in games if g.result == "win"]
+    if not wins:
+        return None
+    best = max(wins, key=lambda g: (g.opponent_rating, g.end_time))
+    return BestWin(
+        game_id=best.id,
+        end_time=best.end_time,
+        time_class=best.time_class,
+        color=best.color,
+        opponent=best.opponent,
+        opponent_rating=best.opponent_rating,
+        player_rating=best.player_rating,
+    )
+
+
+def _streaks(games: list[_VolumeGame]) -> StreakStats | None:
+    """Current and longest runs, plus the same-sitting rebound after a
+    loss (docs/06-coach.md, "Milestones").
+
+    A run is consecutive games with the same result in chronological
+    order; the "current" one is the run the most recent game belongs
+    to. `after_loss` counts each game whose immediately preceding game
+    in scope was a loss played within `_SESSION_GAP` -- the next game
+    of the same sitting, which is the one tilt shows up in. Chained
+    losses each seed the next game, so a six-game slide contributes
+    five games here, not one.
+    """
+    if not games:
+        return None
+    by_time = sorted(games, key=lambda g: (g.end_time, g.id))
+
+    longest: dict[Result, int] = {"win": 0, "loss": 0, "draw": 0}
+    run_result = by_time[0].result
+    run_length = 0
+    after_loss: list[_VolumeGame] = []
+    for index, game in enumerate(by_time):
+        if game.result == run_result:
+            run_length += 1
+        else:
+            run_result, run_length = game.result, 1
+        longest[run_result] = max(longest[run_result], run_length)
+
+        previous = by_time[index - 1] if index else None
+        if (
+            previous is not None
+            and previous.result == "loss"
+            and game.end_time - previous.end_time <= _SESSION_GAP
+        ):
+            after_loss.append(game)
+
+    return StreakStats(
+        current_result=run_result,
+        current_length=run_length,
+        longest_win=longest["win"],
+        longest_loss=longest["loss"],
+        after_loss=_record(after_loss),
+    )
 
 
 def _opponent_stats(games: list[_VolumeGame]) -> OpponentStats | None:

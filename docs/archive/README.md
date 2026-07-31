@@ -12,6 +12,7 @@ component doc *before* its report is archived.
 
 | Report | Subject | Closed |
 |--------|---------|--------|
+| [prompt-hygiene.md](prompt-hygiene.md) | Audit of the five coach templates as they render: seven defects, all fixed, plus the units pass it triggered | 2026-07-31 |
 | [engine-search-hangs.md](engine-search-hangs.md) | Fixed-depth searches with no cost bound hung the engine workers; fix plus the full re-analysis it forced | 2026-07-28 |
 | [coach-report-improvements.md](coach-report-improvements.md) | Review of the whole-report coaching output and the Dashboard views on the same data, and the rework it planned | 2026-07-28 |
 | [fixes-2026-07/](fixes-2026-07/README.md) | The follow-up fix iteration to that rework — seven items, waves 1-7 | 2026-07-27 |
@@ -19,6 +20,19 @@ component doc *before* its report is archived.
 
 ## What each one left behind
 
+- **Prompt hygiene** — nothing. All seven findings were fixed in one
+  pass, and the two rules it left optional were taken with them. The
+  standing statements it produced live in
+  [06-coach.md](../06-coach.md): "Units" (one scale, one name — the
+  finding-1 defect generalized across the whole system), "One register
+  per document", "One persona, three artifacts", and the seed carve-out
+  under "Chat". The guards are
+  `test_no_template_says_acpl_anywhere`,
+  `test_render_prompt_data_describes_the_student_in_one_register` and
+  `test_system_prompt_names_no_one_artifact`. Its own method — read the
+  rendered snapshots in `backend/tests/testdata/`, not the templates —
+  is the part worth repeating: two of the seven were invisible in the
+  source.
 - **Engine search hangs** — `analysis_version` on stored analyses, so
   a future engine-behaviour change can re-queue affected rows the
   same way. The addendum records the re-analysis results and the one
@@ -51,3 +65,4 @@ name the original locations:
 | `docs/CODEBASE-SCAN-2026-07.md` | `docs/archive/codebase-scan-2026-07.md` |
 | `docs/fixes-2026-07/` | `docs/archive/fixes-2026-07/` |
 | `docs/fixes-2026-07/06-player-profile.md` | `docs/future-improvements/player-profile.md` |
+| `docs/future-improvements/prompt-hygiene.md` | `docs/archive/prompt-hygiene.md` |

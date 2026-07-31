@@ -114,7 +114,12 @@ player_profiles (                    -- the durable student profile
                                      --   save; staleness metadata,
                                      --   never a cache key
   facts TEXT NOT NULL,               -- JSON PlayerProfile, narrative
-                                     --   field excluded
+                                     --   field excluded. Read back by
+                                     --   the embed paths, so new
+                                     --   PlayerProfile fields carry
+                                     --   defaults and rows written
+                                     --   under an older shape keep
+                                     --   parsing (docs/06-coach.md)
   narrative TEXT NOT NULL,           -- the LLM layer, markdown
   created_at INTEGER NOT NULL,       -- unix seconds
   PRIMARY KEY (username, time_class)
