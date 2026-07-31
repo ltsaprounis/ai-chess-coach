@@ -191,6 +191,14 @@ faithfulness verifier over generated text.
 - **Reserved live-eval worker**: one long analysis run currently
   starves the live panel (workers=2). Reserve one worker for
   interactive streams, or make it a config choice.
+- **Docker packaging**: the install is five prerequisites deep and
+  the C++ engine build is the step most likely to fail on someone
+  else's machine. One `docker compose up` fixes that, and settles how
+  a container authenticates when both providers ride a local CLI
+  login rather than a key. Designed, not scheduled —
+  [docker-packaging.md](future-improvements/docker-packaging.md) also
+  closes scan finding 14, whose revisit was gated on the licence
+  decision that has since been made.
 
 ## Recommended order
 
@@ -219,3 +227,10 @@ The **local LLM provider** (2026-07-31) joins them as research
 rather than a scheduled build: it is sized as the largest item in
 item 9, and its own doc lists four cheap in-repo measurements that
 should settle before anyone starts.
+
+**Docker packaging** (2026-07-31) sits outside the ordering for a
+different reason: its trigger is publishing the repo, not a feature
+anyone is waiting on. It touches no component contract as designed,
+and one assumption — that the CLI bundled inside the Claude SDK
+wheel can complete an interactive login — should be tested before
+the first slice.
