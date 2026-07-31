@@ -677,14 +677,40 @@ Qwen3.6 was trained to emit `<tool_call>` tags. That mismatch is the
 most plausible way this spike fails, and it is exactly what it
 exists to find out.
 
-**Phase A — no tools.** Render the report prompt for a heavy
-archive, tokenize it with `llm.tokenize()` for a true count, then
-generate and read the output. Record prompt tokens, wall clock split
-prefill/decode, and a human judgment on the prose.
+**Dump the inputs first; the spike needs two strings, not a
+database.** Render the report prompt and an explain prompt once, to
+files, and have every run after that read the files.
+
+> **Hazard: `open_db` writes.** It calls `_apply_migrations`
+> ([storage/db.py](../../backend/src/chess_coach/storage/db.py)), so
+> opening the live database through the app's own API migrates it —
+> not what a read-only experiment should do. Bypass it:
+> `sqlite3.connect("file:data/coach.sqlite3?mode=ro", uri=True)`.
+> `backend/scripts/backfill.py` is the precedent for a one-off
+> script against this database.
+
+Pinning the inputs to files is what makes the model comparison
+valid: Phase B's 15–20 runs and the walk-down below must see a
+byte-identical prompt, or a re-sync or re-analysis shifts it
+underneath the experiment and the difference gets attributed to the
+model. Render the **widest** realistic scope — all time controls,
+full history, no window — since the fixture-derived ~3k estimate is
+exactly what is in question, and the typical case would measure the
+wrong number.
+
+The dumped prompts carry real usernames, opponents and dates, and
+`data/` is gitignored for that reason: keep them out of the repo,
+and quote token counts and structure in the report, never the prompt
+body.
+
+**Phase A — no tools.** Tokenize the dumped report prompt with
+`llm.tokenize()` for a true count, then generate and read the
+output. Record prompt tokens, wall clock split prefill/decode, and a
+human judgment on the prose.
 
 **Phase B — tools on.** Register the real `analyze_position` schema,
-feed a real explain prompt containing a FEN, and run it 15–20 times.
-This is a hit rate, not an impression:
+feed the dumped explain prompt, and run it 15–20 times. This is a
+hit rate, not an impression:
 
 - how often it calls the tool at all;
 - how often the FEN argument is valid and parses;
