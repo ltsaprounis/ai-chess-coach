@@ -45,9 +45,11 @@ from chess_coach.coach import (
     render_profile_context,
     render_profile_prompt,
     render_prompt,
+    render_report_chat_context,
 )
 from chess_coach.domain import (
     AnalyzedGame,
+    Color,
     ErrorPattern,
     EvalLine,
     GameSummary,
@@ -638,10 +640,22 @@ def test_partial_coverage_renders_caveat() -> None:
     prompt = render_prompt(report)
 
     assert "Coverage: 19 of 25 games in scope are analyzed" in prompt
-    assert (
-        "Note: the other 6 games in scope are not engine-analyzed; every "
-        "figure below describes only the analyzed span." in prompt
+    assert "Note: the other 6 games in scope are not engine-analyzed." in prompt
+
+
+def test_partial_coverage_caveat_names_which_figures_it_touches() -> None:
+    """The caveat used to say "every figure below describes only the
+    analyzed span", which the volume/quality split made false: ratings,
+    records and milestones cover every game (docs/06-coach.md, "Volume
+    and quality"). Telling the model otherwise discounts the half of
+    the brief that is complete."""
+    prompt = render_prompt(
+        build_report("testuser", scenario_games(), games_in_scope=25)
     )
+
+    assert "figure below describes only the analyzed span" not in prompt
+    assert "Ratings, records, milestones" in prompt
+    assert "cover every game in scope" in prompt
 
 
 def test_requested_window_handles_one_sided_bounds() -> None:
@@ -968,7 +982,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v2"
+    assert PROFILE_PROMPT_VERSION == "profile-v3"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -2576,3 +2590,374 @@ def test_profile_context_states_coverage_only_when_it_is_partial() -> None:
 
     assert "3 of 5 games analyzed" in render_profile_context(partial)
     assert "Coverage:" not in render_profile_context(complete)
+
+
+# --- milestones (docs/06-coach.md, "Milestones") -------------------------
+#
+# Every aggregate below is volume-layer, so each test hands `build_report`
+# an *empty* analyzed list beside a full `all_games` — the shape a
+# barely-analyzed archive has, and the one that would catch any of these
+# being computed over the analyzed subset instead.
+
+_HOUR = 3_600
+_DAY = 86_400
+
+
+def _volume(
+    game_id: str,
+    *,
+    result: Result = "win",
+    end_time: int,
+    player_rating: int = 1500,
+    opponent_rating: int = 1500,
+    opponent: str = "rival",
+    color: Color = "white",
+    time_class: TimeClass = "blitz",
+    termination: str | None = None,
+) -> GameSummary:
+    """One stored, *unanalyzed* game as the volume layer sees it."""
+    return summarize(
+        make_game(
+            id=game_id,
+            result=result,
+            end_time=end_time,
+            player_rating=player_rating,
+            opponent_rating=opponent_rating,
+            opponent=opponent,
+            color=color,
+            time_class=time_class,
+            termination=termination,
+        ),
+        analyzed=False,
+    )
+
+
+def _volume_report(games: list[GameSummary]) -> PlayerReport:
+    return build_report("testuser", [], all_games=games, games_in_scope=len(games))
+
+
+def test_time_class_stats_date_the_rating_extremes() -> None:
+    """ "Peaked at 1600" is trivia; "peaked at 1600 in March and has been
+    below it since" is the fact a student measures themselves against."""
+    peak_day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", end_time=peak_day - 10 * _DAY, player_rating=1480),
+            _volume("g-2", end_time=peak_day, player_rating=1600),
+            _volume("g-3", end_time=peak_day + 10 * _DAY, player_rating=1520),
+        ]
+    )
+
+    stats = report.time_classes[0]
+
+    assert stats.rating_max == 1600
+    assert stats.rating_max_at == peak_day
+    assert stats.rating_min == 1480
+    assert stats.rating_min_at == peak_day - 10 * _DAY
+    assert stats.rating_end == 1520  # still below the peak
+
+
+def test_rating_peak_is_dated_at_the_first_game_that_reached_it() -> None:
+    """A peak is when they got there, not the last time they matched it:
+    "peaked in March and has not passed it since" is only true if the
+    date is the first."""
+    first = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", end_time=first, player_rating=1600),
+            _volume("g-2", end_time=first + _DAY, player_rating=1550),
+            _volume("g-3", end_time=first + 2 * _DAY, player_rating=1600),
+        ]
+    )
+
+    assert report.time_classes[0].rating_max_at == first
+
+
+def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
+    """Losses to stronger players are not milestones, and the winner is
+    picked on the opponent's rating, not the player's own."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume(
+                "g-lost",
+                result="loss",
+                end_time=day,
+                opponent="titled",
+                opponent_rating=2200,
+            ),
+            _volume(
+                "g-best",
+                result="win",
+                end_time=day + _DAY,
+                opponent="strongest",
+                opponent_rating=1750,
+                player_rating=1500,
+            ),
+            _volume(
+                "g-ok",
+                result="win",
+                end_time=day + 2 * _DAY,
+                opponent="weaker",
+                opponent_rating=1400,
+            ),
+        ]
+    )
+
+    assert report.best_win is not None
+    assert report.best_win.game_id == "g-best"
+    assert report.best_win.opponent == "strongest"
+    assert report.best_win.opponent_rating == 1750
+    assert report.best_win.player_rating == 1500
+
+
+def test_best_win_is_none_without_a_win() -> None:
+    report = _volume_report([_volume("g-1", result="loss", end_time=1_780_000_000)])
+
+    assert report.best_win is None
+
+
+def test_streaks_report_the_current_run_and_the_longest_ones() -> None:
+    day = 1_780_000_000
+    results: list[Result] = ["win", "win", "win", "loss", "draw", "loss", "loss"]
+    report = _volume_report(
+        [
+            _volume(f"g-{i}", result=result, end_time=day + i * _DAY)
+            for i, result in enumerate(results)
+        ]
+    )
+
+    assert report.streaks is not None
+    assert report.streaks.current_result == "loss"
+    assert report.streaks.current_length == 2  # the two most recent games
+    assert report.streaks.longest_win == 3
+    assert report.streaks.longest_loss == 2
+
+
+def test_after_loss_counts_the_next_game_of_the_same_sitting() -> None:
+    """Tilt: the game played straight after a loss. Chained losses each
+    seed the next game, and a game played the following day does not
+    count — that is a fresh sitting, not a rebound."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", result="loss", end_time=day),
+            _volume("g-2", result="loss", end_time=day + _HOUR),  # after a loss
+            _volume("g-3", result="win", end_time=day + 2 * _HOUR),  # after a loss
+            _volume("g-4", result="win", end_time=day + 3 * _DAY),  # new sitting
+        ]
+    )
+
+    assert report.streaks is not None
+    assert report.streaks.after_loss.games == 2
+    assert report.streaks.after_loss.wins == 1
+    assert report.streaks.after_loss.losses == 1
+
+
+def test_after_loss_is_an_empty_record_when_no_game_follows_a_loss() -> None:
+    """An empty sample, never a 0% score: on an archive of one game a
+    day, "scores 0% after a loss" would be a fabrication."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", result="loss", end_time=day),
+            _volume("g-2", result="win", end_time=day + _DAY),
+        ]
+    )
+
+    assert report.streaks is not None
+    assert report.streaks.after_loss.games == 0
+
+
+def test_color_records_split_the_score_by_side() -> None:
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", result="win", color="white", end_time=day),
+            _volume("g-2", result="win", color="white", end_time=day + _DAY),
+            _volume("g-3", result="loss", color="black", end_time=day + 2 * _DAY),
+        ]
+    )
+
+    assert report.color_records["white"].wins == 2
+    assert report.color_records["black"].games == 1
+    assert report.color_records["black"].wins == 0
+
+
+def test_color_records_keep_a_side_the_player_never_had() -> None:
+    """Zero games reads as "no sample"; a missing key would make every
+    consumer guess."""
+    report = _volume_report([_volume("g-1", color="white", end_time=1_780_000_000)])
+
+    assert report.color_records["black"].games == 0
+
+
+def test_milestones_cover_every_game_not_just_the_analyzed_ones() -> None:
+    """The bug the volume/quality split exists to stamp out, one level
+    down: a best win the engine never reached is still a best win."""
+    analyzed, all_games = _partly_analyzed()
+
+    biased = build_report("testuser", analyzed)
+    correct = build_report("testuser", analyzed, all_games=all_games)
+
+    assert biased.best_win is None  # every analyzed game is a loss
+    assert correct.best_win is not None
+    assert correct.streaks is not None
+    assert correct.streaks.current_result == "win"
+
+
+def test_report_prompt_renders_recent_form_and_milestones() -> None:
+    """The gap this closes: the brief never rendered `periods` at all,
+    so every piece of advice averaged the whole span flat while the
+    profile narrative beside it led with the last 30 days."""
+    report = build_report("testuser", scenario_games())
+
+    prompt = render_prompt(report)
+
+    assert "## Recent form" in prompt
+    assert "| last 30 days |" in prompt
+    assert "## Milestones" in prompt
+    assert "- Best win: beat " in prompt
+    assert "- By color: White " in prompt
+    assert "**Recent form first.**" in prompt
+
+
+def test_report_milestone_lines_state_no_subject() -> None:
+    """The brief's *headings* are second person because the advice is
+    written to the student, but its data lines are label:value and
+    subject-free. An assertion like "you beat marko77" reads against a
+    system prompt that opens "You are a ... coach", so the referent is
+    briefly ambiguous where a label:value line has no referent at all
+    (docs/06-coach.md, "Milestones")."""
+    report = build_report("testuser", scenario_games())
+
+    section = render_prompt(report).split("## Milestones")[1].split("\n\n")[0]
+
+    for pronoun in ("you ", "your ", "you'", "their "):
+        assert pronoun not in section.lower()
+
+
+def test_report_prompt_names_the_best_win_opponent() -> None:
+    """The opposite of the profile prompt's rule, for the opposite
+    reason: this brief's citation rule is "name the game by opponent
+    and date", and it is read by the student who played it."""
+    report = build_report("testuser", scenario_games())
+
+    prompt = render_prompt(report)
+
+    assert report.best_win is not None
+    assert report.best_win.opponent in prompt
+
+
+def test_report_prompt_and_report_chat_seed_show_the_same_sections() -> None:
+    """docs/06-coach.md pins the report-scope chat seed as "the same data
+    sections render_prompt shows, minus the instruction block" -- a new
+    section must reach both or that promise quietly rots."""
+    report = build_report("testuser", scenario_games())
+
+    prompt = render_prompt(report)
+    seed = render_report_chat_context(report, engine_available=True)
+
+    for heading in ("## Recent form", "## Milestones", "## How games end"):
+        assert heading in prompt
+        assert heading in seed
+
+
+def test_build_profile_copies_the_milestones_verbatim() -> None:
+    """The profile restates the report's milestones; it re-derives
+    none of them (docs/06-coach.md, "Milestones")."""
+    report = build_report("testuser", scenario_games())
+
+    profile = build_profile(report)
+
+    assert profile.record == report.record
+    assert profile.best_win == report.best_win
+    assert profile.streaks == report.streaks
+    assert profile.color_records == report.color_records
+    assert profile.opponents == report.opponents
+    assert profile.terminations == report.terminations
+
+
+def test_profile_prompt_reads_the_after_loss_score_against_the_overall_one() -> None:
+    """The figure means nothing alone: 50% after a loss is bad only next
+    to a better overall score, so the comparison is rendered, not left
+    for the model to find."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", result="win", end_time=day),
+            _volume("g-2", result="win", end_time=day + _DAY),
+            _volume("g-3", result="loss", end_time=day + 2 * _DAY),
+            _volume("g-4", result="loss", end_time=day + 2 * _DAY + _HOUR),
+        ]
+    )
+
+    prompt = render_profile_prompt(build_profile(report))
+
+    assert "- After a loss: 0% (1g) in the next game of the same sitting" in prompt
+    assert "against 50% (4g) overall" in prompt
+
+
+def test_profile_prompt_renders_the_dated_peak_and_the_milestones() -> None:
+    report = build_report("testuser", scenario_games())
+
+    prompt = render_profile_prompt(build_profile(report))
+
+    peak = report.time_classes[0]
+    assert peak.rating_max_at is not None
+    assert f"{peak.rating_max} on " in prompt
+    assert "## Milestones and tendencies" in prompt
+    assert "- Best win: beat a " in prompt
+    assert "## How games end" in prompt
+
+
+def test_profile_prompt_best_win_names_no_opponent() -> None:
+    """The narrative's citation ban applies to the facts it is given: an
+    opponent's handle is a game reference, and this text is embedded
+    where no reference can be resolved (docs/06-coach.md, "Narrative")."""
+    report = _volume_report(
+        [
+            _volume(
+                "g-1",
+                result="win",
+                end_time=1_780_000_000,
+                opponent="marko77",
+                opponent_rating=1700,
+            )
+        ]
+    )
+
+    prompt = render_profile_prompt(build_profile(report))
+
+    assert "1700" in prompt
+    assert "marko77" not in prompt
+
+
+def test_profile_context_states_how_the_student_loses() -> None:
+    """The one milestone the embedded block carries: "winning, then lost
+    on time" is a different lesson from "winning, then blundered"."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume("g-1", result="loss", end_time=day, termination="timeout"),
+            _volume("g-2", result="loss", end_time=day + _DAY, termination="timeout"),
+            _volume(
+                "g-3", result="loss", end_time=day + 2 * _DAY, termination="resigned"
+            ),
+        ]
+    )
+
+    context = render_profile_context(build_profile(report))
+
+    assert "- How they lose: 3 losses -- timeout 67%, resigned 33%" in context
+
+
+def test_profile_context_omits_the_losing_line_with_a_single_cause() -> None:
+    """One code restates the record above it, exactly as the report's own
+    terminations section collapses a single-code result."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [_volume("g-1", result="loss", end_time=day, termination="resigned")]
+    )
+
+    assert "How they lose" not in render_profile_context(build_profile(report))

@@ -23,22 +23,31 @@ from chess_coach.coach.repertoire import (
 from chess_coach.domain import (
     MATE_SCORE,
     ChatMessage,
+    Color,
     CriticalPosition,
     ErrorPattern,
     EvalLine,
     GameDetail,
     MonthStats,
     OpeningStats,
+    PeriodStats,
     PlayerProfile,
     PlayerReport,
     ProfileOpening,
     Record,
+    StreakStats,
+    TerminationStats,
+    TimeClassStats,
 )
 
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-PROMPT_VERSION = "2026-07-opponent-citations"
+# This bump: the brief gained the recent-form windows (it had never
+# rendered `periods` at all, so every brief averaged the whole span
+# flat) and the volume-layer milestones, with instructions to lead with
+# recent form and to read a split against its own sample.
+PROMPT_VERSION = "2026-07-recent-form-and-milestones"
 
 # The narrative's own version, independent of PROMPT_VERSION above -- the
 # report template and the profile prompt evolve on separate schedules
@@ -49,7 +58,11 @@ PROMPT_VERSION = "2026-07-opponent-citations"
 # "you", which reads as addressing the *coach* once the text is embedded
 # in another prompt), gained its time-control scope, and gained the
 # volume/quality coverage split plus recent-form windows.
-PROFILE_PROMPT_VERSION = "profile-v2"
+# v3: the facts gained the volume-layer milestones (docs/06-coach.md,
+# "Milestones") -- dated rating peaks, best win, streaks and the
+# after-a-loss rebound, the color split, the opposition split, and how
+# games end -- with instructions to use them.
+PROFILE_PROMPT_VERSION = "profile-v3"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -106,6 +119,22 @@ _INSTRUCTIONS = (
     "- **One biggest lever.** Open with the single change most likely to "
     "raise this student's results, not a flat list of co-equal "
     "weaknesses. Order everything else by impact behind it.\n"
+    "- **Recent form first.** Where the recent-form windows disagree "
+    "with the whole-span figures, lead with the most recent window that "
+    "has a real analyzed sample and say which way it is moving -- how "
+    "they play now matters more than their average over years. Ignore a "
+    "window whose analyzed count is too small to carry a conclusion, "
+    "and prefer these windows to a single month's row, which swings on "
+    "one bad game.\n"
+    "- **Milestones are evidence.** The dated rating peak, the best "
+    "win, the streaks, the score in the game right after a loss, the "
+    "White/Black split and how games end are facts about every game in "
+    "scope, not just the analyzed ones. Use the ones that say something "
+    "-- sitting well below a peak reached long ago, a worse score right "
+    "after a loss, a lopsided color split, a large share of losses on "
+    "the clock each name a problem worth a paragraph -- and ignore the "
+    "rest. Never read a split resting on a handful of games as a "
+    "tendency: each carries its own game count, so check it first.\n"
     "- **Honesty.** If the data does not support a conclusion -- too few "
     "games, no sample past the floor -- say so plainly instead of "
     "filling the section anyway.\n"
@@ -128,9 +157,11 @@ def render_prompt(report: PlayerReport) -> str:
     handles = _game_link_handles(report)
     sections = [
         _student_section(report),
+        _periods_section(report.periods),
         _phase_section(report),
         _trend_section(report.months),
-        _terminations_section(report),
+        _milestones_section(report),
+        _terminations_section(report.terminations),
         _repertoire_section(report),
         _error_patterns_section(report, handles),
         _turning_points_section(report, handles),
@@ -168,7 +199,7 @@ def _student_section(report: PlayerReport) -> str:
         lines.append(
             f"- {tc.time_class.capitalize()}: {_plural(tc.record.games, 'game')}, "
             f"rating {tc.rating_start} → {tc.rating_end} "
-            f"(range {tc.rating_min}-{tc.rating_max})"
+            f"(range {tc.rating_min}-{tc.rating_max}; peak {_peak_cell(tc)})"
         )
     if report.opponents:
         o = report.opponents
@@ -179,6 +210,121 @@ def _student_section(report: PlayerReport) -> str:
             f"{_score_line(o.vs_weaker)} vs weaker"
         )
     return "\n".join(lines)
+
+
+# --- milestones (docs/06-coach.md, "Milestones") ------------------------
+#
+# Every data line here is subject-free ("Best win: beat marko77 ..."),
+# like every other line of the student section it sits beside. The
+# report's *headings* are second person ("Systems you chose") because
+# the brief is written to the student and a model copies the register
+# it is given -- but an assertion with a verb is not a heading: the
+# system prompt opens "You are a ... coach", so "you beat marko77"
+# briefly has two candidate referents where a label:value line has
+# none. Nothing is gained by spending that ambiguity, and the profile
+# prompt's third-person variants of these lines exist for a different
+# reason again (its text is stored and re-read by another coach).
+#
+# `_after_loss_line` and `_color_split_line` are shared with the
+# profile prompt outright -- subject-free leaves the two renderings
+# identical, so there is one of each, taking the fields rather than
+# either container.
+
+
+def _report_best_win_line(report: PlayerReport) -> str | None:
+    """Named by opponent and date, unlike the profile's version.
+
+    The citation ban that strips the opponent from the profile's line
+    exists because that text is stored and embedded where no game
+    reference resolves. This brief is the opposite case: its whole
+    citation rule is "name the game by opponent and date", and a
+    milestone the student cannot go and find is not a milestone.
+    """
+    win = report.best_win
+    if win is None:
+        return None
+    gap = win.opponent_rating - win.player_rating
+    return (
+        f"- Best win: beat {win.opponent} ({win.opponent_rating}) on "
+        f"{_format_date(win.end_time)}, rated {win.player_rating} at the "
+        f"time ({gap:+d})"
+    )
+
+
+def _report_streak_line(report: PlayerReport) -> str | None:
+    """A run of one is worded as the last game's result -- see
+    docs/06-coach.md, "Milestones"."""
+    s = report.streaks
+    if s is None:
+        return None
+    outcome = {"win": "a win", "loss": "a loss", "draw": "a draw"}[s.current_result]
+    run = {"win": "winning", "loss": "losing", "draw": "drawn"}[s.current_result]
+    current = (
+        f"last game was {outcome}"
+        if s.current_length == 1
+        else f"on a {s.current_length}-game {run} run"
+    )
+    return (
+        f"- Streaks: {current}; longest runs {s.longest_win} wins, "
+        f"{s.longest_loss} losses"
+    )
+
+
+def _after_loss_line(streaks: StreakStats | None, record: Record) -> str | None:
+    """Tilt, and only ever as a comparison -- the figure means nothing
+    alone, since 39% is bad only against a better overall score.
+    Omitted when no game follows a loss in the same sitting: that is a
+    missing sample, and a 0% score would read as a catastrophic one
+    (docs/06-coach.md, "Milestones").
+
+    Shared verbatim by the report brief and the profile prompt: the
+    line is subject-free, so neither register needs its own copy.
+    """
+    if streaks is None or streaks.after_loss.games == 0:
+        return None
+    return (
+        f"- After a loss: {_score_line(streaks.after_loss)} in the next game "
+        f"of the same sitting -- against {_score_line(record)} overall"
+    )
+
+
+def _color_split_line(color_records: dict[Color, Record]) -> str | None:
+    """The overall score by side, which the repertoire tables cannot
+    give: they are per family and past a sample floor, so a student who
+    is simply worse with Black shows up nowhere in them. Shared by both
+    prompts, like `_after_loss_line`.
+    """
+    if not color_records:
+        return None
+    parts = "; ".join(
+        f"{color.capitalize()} {_score_line(record)}"
+        for color, record in color_records.items()
+        if record.games
+    )
+    return f"- By color: {parts}" if parts else None
+
+
+def _milestones_section(report: PlayerReport) -> str:
+    lines = [
+        line
+        for line in (
+            _report_best_win_line(report),
+            _report_streak_line(report),
+            _after_loss_line(report.streaks, report.record),
+            _color_split_line(report.color_records),
+        )
+        if line
+    ]
+    if not lines:
+        return ""
+    return "\n".join(
+        [
+            "## Milestones",
+            "*(Over every game in scope, analyzed or not -- none of these "
+            "needs an engine.)*",
+            *lines,
+        ]
+    )
 
 
 def _window_line(report: PlayerReport) -> str | None:
@@ -225,10 +371,19 @@ def _coverage_lines(report: PlayerReport) -> list[str]:
     missing = report.games_in_scope - report.games_analyzed
     if missing > 0:
         verb = "is" if missing == 1 else "are"
+        # Which figures the shortfall actually touches. "Every figure
+        # below describes only the analyzed span" was true when this
+        # note was written and stopped being true with the volume/
+        # quality split (docs/06-coach.md): ratings, records, the
+        # repertoire's game counts, terminations, opposition and the
+        # milestones all cover every stored game. Saying otherwise tells
+        # the model to discount the half of the brief that is complete.
         lines.append(
             f"- Note: the other {_plural(missing, 'game')} in scope "
-            f"{verb} not engine-analyzed; every figure below describes "
-            "only the analyzed span."
+            f"{verb} not engine-analyzed. Ratings, records, milestones, "
+            "how games end and the repertoire's game counts cover every "
+            "game in scope; ACPL, blunder rates, error patterns and "
+            "turning points cover the analyzed ones only."
         )
     return lines
 
@@ -307,8 +462,13 @@ def _trend_section(months: list[MonthStats]) -> str:
     return "\n".join(lines)
 
 
-def _terminations_section(report: PlayerReport) -> str:
-    if not report.terminations:
+def _terminations_section(terminations: list[TerminationStats]) -> str:
+    """Renders `terminations` as-is -- shared by the report prompt and
+    `render_profile_prompt`, which passes the profile's own copy of the
+    same list (docs/06-coach.md, "Milestones"), exactly as
+    `_trend_section` is shared for `months`.
+    """
+    if not terminations:
         return ""
     lines = ["## How games end"]
     labels = {"win": "Wins", "loss": "Losses", "draw": "Draws"}
@@ -319,7 +479,7 @@ def _terminations_section(report: PlayerReport) -> str:
     # (ingestion/normalize.py), so a win row can never have more than one
     # distinct termination.
     for result in ("loss", "draw", "win"):
-        rows = [t for t in report.terminations if t.result == result]
+        rows = [t for t in terminations if t.result == result]
         if not rows:
             continue
         total = sum(t.games for t in rows)
@@ -711,13 +871,18 @@ def _profile_intro(profile: PlayerProfile) -> str:
     )
 
 
-def _profile_periods_section(profile: PlayerProfile) -> str:
+def _periods_section(periods: list[PeriodStats]) -> str:
     """Recent form as trailing windows (docs/06-coach.md, "Recent
-    form"), so the narrative can weight how the student plays now over
-    how they played a year ago. Empty when the builder produced no
-    windows -- a span too short to slice.
+    form"), so a reader can weight how the student plays now over how
+    they played a year ago. Empty when the builder produced no windows
+    -- a span too short to slice.
+
+    Shared by `render_prompt` and `render_profile_prompt` over their own
+    `periods` lists, exactly like `_trend_section` is for `months`: the
+    table is register-free, so unlike the repertoire and milestone
+    sections it needs no second-person variant.
     """
-    if not profile.periods:
+    if not periods:
         return ""
     lines = [
         "## Recent form",
@@ -726,7 +891,7 @@ def _profile_periods_section(profile: PlayerProfile) -> str:
         "| Window | Games | Score | Rating | ACPL | Blunder % | Analyzed |",
         "|---|---|---|---|---|---|---|",
     ]
-    for p in profile.periods:
+    for p in periods:
         rating = p.rating_end if p.rating_end is not None else "n/a"
         blunder = (
             f"{p.blunder_rate * 100:.1f}%" if p.blunder_rate is not None else "n/a"
@@ -739,20 +904,132 @@ def _profile_periods_section(profile: PlayerProfile) -> str:
 
 
 def _profile_ratings_section(profile: PlayerProfile) -> str:
+    """Rating movement per control, with the peak dated (docs/06-coach.md,
+    "Milestones").
+
+    The peak gets its own column rather than staying folded into the
+    range, because a peak and a range answer different questions: how
+    far the student has ever been is only coaching signal next to *when*
+    they were there and how far below it they sit now.
+    """
     if not profile.time_classes:
         return ""
     lines = [
         "## Ratings",
-        "| Time class | Score | Rating |",
-        "|---|---|---|",
+        "| Time class | Score | Rating | Peak |",
+        "|---|---|---|---|",
     ]
     for tc in profile.time_classes:
         lines.append(
             f"| {tc.time_class.capitalize()} | {_score_line(tc.record)} "
             f"| {tc.rating_start} → {tc.rating_end} "
-            f"(range {tc.rating_min}-{tc.rating_max}) |"
+            f"(range {tc.rating_min}-{tc.rating_max}) "
+            f"| {_peak_cell(tc)} |"
         )
     return "\n".join(lines)
+
+
+def _peak_cell(tc: TimeClassStats) -> str:
+    """ "1496 on 2026-06-10, -42 since" -- the date is what makes a peak
+    a milestone, and the gap is what makes it actionable. Renders
+    without the date on a profile snapshot stored before the field
+    existed (`rating_max_at` is None only there).
+    """
+    peak = str(tc.rating_max)
+    if tc.rating_max_at is not None:
+        peak += f" on {_format_date(tc.rating_max_at)}"
+    if tc.rating_end < tc.rating_max:
+        peak += f", {tc.rating_end - tc.rating_max} since"
+    return peak
+
+
+def _opposition_line(profile: PlayerProfile) -> str | None:
+    """The same opposition split the report's student section renders,
+    over the profile's own copy -- a student who only beats weaker
+    players is a different coaching problem from one who holds their
+    own above their rating.
+    """
+    o = profile.opponents
+    if o is None:
+        return None
+    return (
+        f"- Opposition: avg rating diff {o.avg_rating_diff:+.0f}; "
+        f"{_score_line(o.vs_stronger)} vs stronger, "
+        f"{_score_line(o.vs_similar)} vs similar, "
+        f"{_score_line(o.vs_weaker)} vs weaker"
+    )
+
+
+def _best_win_line(profile: PlayerProfile) -> str | None:
+    """The one line in this prompt naming a single game -- and it names
+    no opponent (docs/06-coach.md, "Narrative"): the citation ban exists
+    because this text is embedded where a game reference cannot be
+    resolved, and an opponent's handle is exactly such a reference. The
+    rating and the date are what make the milestone legible.
+    """
+    win = profile.best_win
+    if win is None:
+        return None
+    gap = win.opponent_rating - win.player_rating
+    return (
+        f"- Best win: beat a {win.opponent_rating} on "
+        f"{_format_date(win.end_time)}, rated {win.player_rating} at the "
+        f"time ({gap:+d})"
+    )
+
+
+def _streak_line(profile: PlayerProfile) -> str | None:
+    """A run of one is not a run, so it is worded as what it is -- the
+    last game's result -- rather than as "a 1-game winning run", which
+    invites a model to narrate momentum that does not exist.
+    """
+    s = profile.streaks
+    if s is None:
+        return None
+    outcome = {"win": "a win", "loss": "a loss", "draw": "a draw"}[s.current_result]
+    run = {"win": "winning", "loss": "losing", "draw": "drawn"}[s.current_result]
+    current = (
+        f"their last game was {outcome}"
+        if s.current_length == 1
+        else f"on a {s.current_length}-game {run} run"
+    )
+    return (
+        f"- Streaks: {current}; longest runs {s.longest_win} wins, "
+        f"{s.longest_loss} losses"
+    )
+
+
+def _profile_milestones_section(profile: PlayerProfile) -> str:
+    """The volume layer's own findings (docs/06-coach.md, "Milestones"):
+    what the student has managed, how they are running, and which side
+    of the board they are worse on. None of it needs an engine, so all
+    of it covers every game in scope rather than the analyzed subset --
+    the section states that once, so the model does not read these
+    against the analyzed count in the header.
+    """
+    lines = [
+        line
+        for line in (
+            _best_win_line(profile),
+            _streak_line(profile),
+            # Subject-free in both prompts, so shared with the report
+            # brief rather than restated here.
+            _after_loss_line(profile.streaks, profile.record),
+            _color_split_line(profile.color_records),
+            _opposition_line(profile),
+        )
+        if line
+    ]
+    if not lines:
+        return ""
+    return "\n".join(
+        [
+            "## Milestones and tendencies",
+            "*(All over every game in scope, analyzed or not -- none of "
+            "these needs an engine.)*",
+            *lines,
+        ]
+    )
 
 
 def _profile_quality_section(profile: PlayerProfile) -> str:
@@ -873,6 +1150,15 @@ _PROFILE_INSTRUCTIONS = (
     "student plays now matters more than their average over years. "
     "Ignore a window whose analyzed count is too small to carry a "
     "conclusion.\n"
+    "- **Milestones are evidence, not decoration.** The rating peak "
+    "with its date, the best win, the streaks, the after-a-loss score, "
+    "the color split and how games end are all facts about every game "
+    "in scope. Use the ones that say something -- sitting well below a "
+    "peak reached long ago, a worse score in the game right after a "
+    "loss, a lopsided White/Black split, or a large share of losses on "
+    "the clock are each a coaching problem with a name. Ignore the "
+    "ones that do not, and never read a split whose sample is a "
+    "handful of games as a tendency.\n"
     "- **Register.** Write for a club player's coach, not a fellow "
     "engine: pawns, never centipawns, and the idea before the number.\n"
     "- **Evidence.** Every claim must tie to a figure stated above -- a "
@@ -902,9 +1188,11 @@ def render_profile_prompt(profile: PlayerProfile) -> str:
     sections = [
         _profile_intro(profile),
         _profile_ratings_section(profile),
-        _profile_periods_section(profile),
+        _periods_section(profile.periods),
         _profile_quality_section(profile),
         _trend_section(profile.months),
+        _profile_milestones_section(profile),
+        _terminations_section(profile.terminations),
         _profile_repertoire_section(profile),
         _profile_error_patterns_section(profile),
         _PROFILE_INSTRUCTIONS,
@@ -1024,6 +1312,36 @@ def _profile_recent_line(profile: PlayerProfile) -> str | None:
     )
 
 
+# How many termination codes the embedded block names. The block's whole
+# budget is ~250 tokens and the shares are stated against the real loss
+# total, so a truncated tail costs nothing the reader can be misled by.
+_CONTEXT_TERMINATIONS = 3
+
+
+def _profile_losing_line(profile: PlayerProfile) -> str | None:
+    """How the student loses -- the one milestone that changes advice
+    about a *single move*, which is what this block is embedded into.
+    "You were winning here and lost on time" is a different lesson from
+    "you were winning here and blundered", and only this line tells the
+    reading coach which one is in character.
+
+    Omitted when a single code covers every loss: it would restate the
+    record above it, the same reason `_terminations_section` collapses a
+    one-code result.
+    """
+    rows = [t for t in profile.terminations if t.result == "loss"]
+    if len(rows) < 2:
+        return None
+    total = sum(t.games for t in rows)
+    detail = ", ".join(
+        f"{t.termination} {t.games / total * 100:.0f}%"
+        for t in rows[:_CONTEXT_TERMINATIONS]
+    )
+    # Not `_plural`, whose rule is a bare "s" ("losss").
+    noun = "loss" if total == 1 else "losses"
+    return f"- How they lose: {total} {noun} -- {detail}"
+
+
 def render_profile_context(profile: PlayerProfile) -> str:
     """The ~250-token block `render_explain_prompt` and
     `render_game_chat_context` embed at the top when given a profile
@@ -1039,6 +1357,7 @@ def render_profile_context(profile: PlayerProfile) -> str:
         _profile_quality_line(profile),
         _profile_recent_line(profile),
         _profile_trend_line(profile),
+        _profile_losing_line(profile),
         _profile_chosen_line(profile),
         _profile_faced_line(profile),
         _profile_errors_line(profile),
@@ -1265,9 +1584,11 @@ def render_report_chat_context(report: PlayerReport, *, engine_available: bool) 
     """
     sections = [
         _student_section(report),
+        _periods_section(report.periods),
         _phase_section(report),
         _trend_section(report.months),
-        _terminations_section(report),
+        _milestones_section(report),
+        _terminations_section(report.terminations),
         _repertoire_section(report),
         _error_patterns_section(report, {}),
         _turning_points_section(report),
