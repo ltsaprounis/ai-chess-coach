@@ -1,8 +1,33 @@
 # Prompt hygiene — seven fixes across five templates
 
-Status: audited 2026-07-31, none fixed. All seven are agreed for
-fixing in one pass. Nothing here needs new data or new domain types:
-every fix is wording, structure, or where a constant is attached.
+Status: **closed 2026-07-31 — all seven fixed in one pass**, plus the
+two rules this left optional and a system-wide units pass that finding
+1 turned out to be a symptom of. History, not a plan: for what the
+templates do now, read [06-coach.md](../06-coach.md) — "Units", "One
+register per document", "One persona, three artifacts", and the seed
+carve-out under "Chat".
+
+Two choices this doc left open, and how they went:
+
+- **Finding 4 was generalised, not split.** `SYSTEM_PROMPT` stopped
+  naming the coaching brief; no per-call persona, so the
+  `CoachProvider` seam is untouched.
+- **Finding 6's optional "no headings" clause was taken**, together
+  with a matching "spell the unit, never ACPL" rule, on one
+  `PROFILE_PROMPT_VERSION` bump (`profile-v4`). The reasoning this doc
+  used to defer such rules — that a bump costs something — was wrong:
+  it is row metadata and never re-bills on its own.
+
+Finding 1 was the thread that unravelled: the acronym labelling pawns
+was not local to the embedded block. The same figure read `5.16` in
+the brief and `516` in the dashboard's repertoire table, and a move
+costing `−310` in the move list was "about 3.1 pawns" in the
+explanation beside it. The whole system moved to pawns, and "ACPL"
+is retired from every label in both the prompts and `web/`.
+
+Below is the audit as written, before any of that. Nothing here needed
+new data or new domain types: every fix was wording, structure, or
+where a constant is attached.
 
 The audit ran over the branch that added the milestone stats
 (`claude/player-profile-stats-8a96e8`), reading the rendered snapshots
@@ -277,7 +302,7 @@ person).
   explanation cached today keeps serving the pre-fix text until
   someone hits refresh. Fixes 1, 3 and 5 therefore reach new
   explanations only. This is the same gap
-  [prompt-version-fingerprint.md](prompt-version-fingerprint.md)
+  [prompt-version-fingerprint.md](../future-improvements/prompt-version-fingerprint.md)
   exists to close; if that lands first, these fixes propagate on their
   own.
 - **Chat seeds are rebuilt per message**, so fix 2 reaches every

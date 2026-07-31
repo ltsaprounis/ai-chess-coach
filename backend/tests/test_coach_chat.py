@@ -115,7 +115,7 @@ def test_render_game_chat_context_no_ply_no_engine() -> None:
     assert "Positions (FEN)" not in context  # no ply anchor -- no MoveContext
     assert "not available in this conversation" in context
     assert "How to respond" in context
-    assert "Claims from tools only" in context
+    assert "Stated facts, or a tool result" in context
 
 
 def test_render_game_chat_context_out_of_range_ply_raises() -> None:
@@ -187,6 +187,18 @@ def test_render_report_chat_context_omits_coaching_brief_instructions() -> None:
     assert "two-week training plan" not in context
     assert "How to respond" in context
     assert "not available in this conversation" in context
+
+
+def test_chat_instructions_do_not_ban_the_seed_they_ship_with() -> None:
+    """docs/06-coach.md, "Chat": the tool rule covers what the seed does
+    not state. Banning recall of the seed itself banned the report
+    scope's whole briefing before the first message, when no tool has
+    run and the model may therefore assert nothing at all."""
+    report = build_report("testuser", scenario_games())
+    context = render_report_chat_context(report, engine_available=True)
+
+    assert "never from memory of the context above" not in context
+    assert "The facts stated in the context above are established" in context
 
 
 def test_render_report_chat_context_turning_points_carry_no_citation_handle() -> None:
@@ -953,9 +965,13 @@ async def test_copilot_provider_chat_renders_all_three_data_tools(
     assert "id `g-1`" in tool_results[0].text_result_for_llm  # find_games row
     assert "id `g-ctx`" in tool_results[1].text_result_for_llm  # get_game identity
     assert "Ruy Lopez" in tool_results[2].text_result_for_llm  # opening_stats row
-    # Pawns, never centipawns, anywhere a tool result reaches the model.
+    # Pawns, never centipawns, anywhere a tool result reaches the model
+    # -- and never the acronym either (docs/06-coach.md, "Units"): a
+    # tool result lands mid-conversation, with no header above it to
+    # define one and a seed three lines up demanding pawns.
     for result in tool_results:
         assert "centipawn" not in result.text_result_for_llm.lower()
+        assert "acpl" not in result.text_result_for_llm.lower()
     assert toolkit.find_games_calls == [
         {
             "opponent": "hikaru",

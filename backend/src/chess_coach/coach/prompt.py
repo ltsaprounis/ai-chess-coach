@@ -43,11 +43,19 @@ from chess_coach.domain import (
 # Bumped whenever the template changes materially -- the API layer keys
 # its report cache on this, so a reworded prompt invalidates cached advice
 # instead of being served alongside a template that no longer exists.
-# This bump: the brief gained the recent-form windows (it had never
-# rendered `periods` at all, so every brief averaged the whole span
-# flat) and the volume-layer milestones, with instructions to lead with
-# recent form and to read a split against its own sample.
-PROMPT_VERSION = "2026-07-recent-form-and-milestones"
+# This bump: the template settled on one register (its data described the
+# student in the third person in some sections and addressed them in the
+# second in others, while its instructions -- which cannot use the second
+# person for the student, since that is the model -- were third
+# throughout), and the instructions now state the brief's own register
+# instead of implying it through headings. Also SYSTEM_PROMPT, which the
+# cache does not see: it stopped naming the coaching brief as the thing
+# to write, so advice cached under the old persona would otherwise be
+# served beside advice written under the new one. And the template
+# stopped saying "ACPL": every loss figure now names pawns where the
+# number is, so the glossary line that used to redefine the acronym as
+# pawns is gone (docs/06-coach.md, "Units").
+PROMPT_VERSION = "2026-07-one-register-one-unit"
 
 # The narrative's own version, independent of PROMPT_VERSION above -- the
 # report template and the profile prompt evolve on separate schedules
@@ -62,27 +70,48 @@ PROMPT_VERSION = "2026-07-recent-form-and-milestones"
 # "Milestones") -- dated rating peaks, best win, streaks and the
 # after-a-loss rebound, the color split, the opposition split, and how
 # games end -- with instructions to use them.
-PROFILE_PROMPT_VERSION = "profile-v3"
+# v4: two rules about the narrative's *durability*, both cases of the
+# same thing -- it is written under this prompt and read under another.
+# Spell units out, because a model knows "ACPL" whether or not a prompt
+# defines it, and this text is read where nothing does; and no markdown
+# headings, because it lands inside another prompt's sections. The
+# embed also block-quotes the narrative, so the second is belt and
+# braces. The templates stopped saying "ACPL" at the same time (see
+# docs/06-coach.md, "Units"), so nothing here models the habit either.
+PROFILE_PROMPT_VERSION = "profile-v4"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
+#
+# `create_provider` builds one provider with one system prompt, and that
+# provider serves all three non-chat artifacts: the report brief, the
+# profile narrative and a move explanation. So this names none of them.
+# A persona that says "respond with the coaching brief only" tells a
+# model writing a move explanation to write a brief instead, and tells
+# the narrative -- a briefing about the student, for another coach --
+# that it is a brief for the student, contradicting its own instruction
+# block. What all three share is the coach, the pre-computed figures and
+# the do-what-the-instructions-say discipline; what they produce is the
+# instruction block's business, and each one states it.
 SYSTEM_PROMPT = (
-    "You are a strong, practical chess coach reviewing a student's "
-    "engine-analyzed games. Every figure in the brief below is already "
-    "move-weighted and carries its own denominator -- read the numbers as "
-    "given rather than recomputing or re-averaging them. This is a "
-    "coaching conversation, not a software task: respond with the "
-    "coaching brief only, no preamble about the nature of the request, "
-    "and follow the instruction block at the end exactly."
+    "You are a strong, practical chess coach working from a student's "
+    "engine-analyzed games. Every figure you are given is already "
+    "computed -- move-weighted, and carrying its own denominator where "
+    "it has one -- so read the numbers as given rather than recomputing "
+    "or re-averaging them. This is a coaching task, not a software "
+    "task: write what the instruction block at the end asks for and "
+    "nothing else, with no preamble about the nature of the request, "
+    "and follow that block exactly."
 )
 
 # Given to the LLM as its system prompt for a chat turn (docs/06-coach.md,
-# "Chat") -- SYSTEM_PROMPT above is tailored to writing one-shot briefs
-# ("respond with the coaching brief only") and would read oddly telling a
-# model to keep doing that mid-conversation, so chat gets its own persona
-# line. The scope seed (render_game_chat_context / render_report_chat_context)
-# is concatenated after this by the provider and carries the actual
-# instructions (_CHAT_INSTRUCTIONS below).
+# "Chat") -- SYSTEM_PROMPT above closes on an instruction block at the
+# end of the prompt, which is not how a chat turn is shaped: the
+# instructions arrive once in the seed and the turns that follow are a
+# conversation, not a request for a finished piece. So chat gets its own
+# persona line. The scope seed (render_game_chat_context /
+# render_report_chat_context) is concatenated after this by the provider
+# and carries the actual instructions (_CHAT_INSTRUCTIONS below).
 CHAT_SYSTEM_PROMPT = (
     "You are a strong, practical chess coach in a live conversation with "
     "a student about their own engine-analyzed games. This is a coaching "
@@ -98,13 +127,16 @@ _MATE_SCALE = MATE_SCORE - 1_000
 _INSTRUCTIONS = (
     "## Instructions\n"
     "Write the coaching brief now, following these rules:\n"
-    "- **Audience and register.** Write for a club player, not a fellow "
+    "- **Audience and register.** Write the brief *to* the student, in "
+    'the second person ("you lose most of these on the clock"): the data '
+    "above describes them in the third person, but they are the one "
+    "reading what you write. Write for a club player, not a fellow "
     "engine: pawns, never centipawns, and lead with the idea -- the "
     "threat, the plan, what a line wins -- before any number.\n"
     "- **Attribution.** An opening is the student's own only where the "
-    'repertoire lists it under their color in "Systems you chose". Never '
-    'advise dropping a line from the "What you face" table -- recommend '
-    "a response to it instead.\n"
+    'repertoire lists it under their color in "Systems the student '
+    'chose". Never advise dropping a line from the "What they face" '
+    "table -- recommend a response to it instead.\n"
     "- **Citation.** Game first, move second: name the game by "
     "opponent and date at its first citation, then give the move in "
     'notation as the link, e.g. "In your game against marko77 on '
@@ -176,9 +208,9 @@ def render_prompt(report: PlayerReport) -> str:
 def _student_section(report: PlayerReport) -> str:
     lines = [
         f"# Coaching brief -- {report.username}",
-        "*(ACPL = average centipawn loss per move, shown in pawns; lower "
-        "is better. Every figure below is move-weighted across the games "
-        "in scope.)*",
+        "*(Losses are in pawns per move -- 0.35 means the average move "
+        "gave up about a third of a pawn; lower is better. Every figure "
+        "below is move-weighted across the games in scope.)*",
         "",
         "## The student",
     ]
@@ -215,15 +247,15 @@ def _student_section(report: PlayerReport) -> str:
 # --- milestones (docs/06-coach.md, "Milestones") ------------------------
 #
 # Every data line here is subject-free ("Best win: beat marko77 ..."),
-# like every other line of the student section it sits beside. The
-# report's *headings* are second person ("Systems you chose") because
-# the brief is written to the student and a model copies the register
-# it is given -- but an assertion with a verb is not a heading: the
-# system prompt opens "You are a ... coach", so "you beat marko77"
-# briefly has two candidate referents where a label:value line has
-# none. Nothing is gained by spending that ambiguity, and the profile
-# prompt's third-person variants of these lines exist for a different
-# reason again (its text is stored and re-read by another coach).
+# like every other line of the student section it sits beside -- and
+# like the rest of this template's data, which describes the student in
+# the third person throughout. That is the register the instruction
+# block was always in ("raise this student's results"), and the side
+# that had to move was the data: second person inside an instruction
+# addresses the *model*, not the student. The register of the
+# brief the model writes is the opposite and unchanged -- second person,
+# to the student -- and _INSTRUCTIONS now says so outright, where the
+# old "Systems you chose" headings only implied it.
 #
 # `_after_loss_line` and `_color_split_line` are shared with the
 # profile prompt outright -- subject-free leaves the two renderings
@@ -382,7 +414,8 @@ def _coverage_lines(report: PlayerReport) -> list[str]:
             f"- Note: the other {_plural(missing, 'game')} in scope "
             f"{verb} not engine-analyzed. Ratings, records, milestones, "
             "how games end and the repertoire's game counts cover every "
-            "game in scope; ACPL, blunder rates, error patterns and "
+            "game in scope; average loss, blunder rates, error patterns "
+            "and "
             "turning points cover the analyzed ones only."
         )
     return lines
@@ -401,7 +434,7 @@ def _score_line(record: Record) -> str:
 def _phase_section(report: PlayerReport) -> str:
     lines = [
         "## How the play breaks down",
-        "| Phase | Moves | ACPL | Blunder % |",
+        "| Phase | Moves | Avg loss | Blunder % |",
         "|---|---|---|---|",
     ]
     for phase in ("opening", "middlegame", "endgame"):
@@ -426,7 +459,8 @@ def _phase_section(report: PlayerReport) -> str:
         else 0.0
     )
     lines.append(
-        f"Overall {_pawns_or_na(report.overall_acpl)} ACPL over {total_moves} "
+        f"Overall {_pawns_or_na(report.overall_acpl)} pawns lost per move "
+        f"over {total_moves} "
         f"moves -- {quality}; {blunders_per_game} blunders/game."
     )
     return "\n".join(lines)
@@ -449,7 +483,7 @@ def _trend_section(months: list[MonthStats]) -> str:
         return ""
     lines = [
         "## Trend",
-        "| Month | Games | Rating | ACPL | Blunder % |",
+        "| Month | Games | Rating | Avg loss | Blunder % |",
         "|---|---|---|---|---|",
     ]
     for m in months:
@@ -550,14 +584,14 @@ def _repertoire_color_section(label: str, rows: list[OpeningStats]) -> str:
 
 
 def _chosen_subtable(families: list[Family]) -> str:
-    lines = ["#### Systems you chose"]
+    lines = ["#### Systems the student chose"]
     if not families:
         lines.append(
             f"No line yet reaches the {REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
         )
         return "\n".join(lines)
     lines += [
-        "| System (first moves) | Games | Score | Opening ACPL | Game ACPL |",
+        "| System (first moves) | Games | Score | Opening avg loss | Game avg loss |",
         "|---|---|---|---|---|",
     ]
     for f in families:
@@ -575,14 +609,15 @@ def _chosen_subtable(families: list[Family]) -> str:
 
 
 def _faced_subtable(families: list[FacedFamily], label: str) -> str:
-    lines = [f"#### What you face as {label}"]
+    lines = [f"#### What they face as {label}"]
     if not families:
         lines.append(
             f"No line yet reaches the {REPERTOIRE_SAMPLE_FLOOR}-game sample floor."
         )
         return "\n".join(lines)
     lines += [
-        "| Opponent's line (your reply) | Games | Score | Opening ACPL | Game ACPL |",
+        "| Opponent's line (their reply) | Games | Score "
+        "| Opening avg loss | Game avg loss |",
         "|---|---|---|---|---|",
     ]
     for f in families:
@@ -695,7 +730,7 @@ def _turning_point_entry(n: int, p: CriticalPosition, handle: str | None) -> str
     # Turning points are never mate-scale by construction (report.py
     # excludes them from candidacy), so cp_loss always renders as pawns.
     lines.append(
-        f"You played **{move_label}{p.played}** (lost {format_cp_loss(p.cp_loss)}): "
+        f"Played **{move_label}{p.played}** (lost {format_cp_loss(p.cp_loss)}): "
         f"{swing}. Engine preferred **{p.best}**."
     )
     return "\n".join(lines)
@@ -826,15 +861,25 @@ def _pawns_or_na(value: float | None) -> str:
 # checked by a tool (docs/06-coach.md, "Narrative").
 
 
-def _profile_scope(profile: PlayerProfile) -> str:
-    """ "their rapid games" / "their games (all time controls)" -- the
-    scope phrase every profile renderer opens with (docs/06-coach.md,
-    "Player profile"). A profile covers one time control; saying which
-    is what stops a rapid narrative from being read as the whole player.
+def _profile_games_phrase(profile: PlayerProfile) -> str:
+    """ "rapid games" / "games (all time controls)" -- the scope every
+    profile renderer names (docs/06-coach.md, "Player profile"). A
+    profile covers one time control; saying which is what stops a rapid
+    narrative from being read as the whole player. Bare, so each caller
+    can attach whatever subject reads correctly where it sits.
     """
     if profile.time_class is None:
-        return "their games (all time controls)"
-    return f"their {profile.time_class} games"
+        return "games (all time controls)"
+    return f"{profile.time_class} games"
+
+
+def _profile_scope(profile: PlayerProfile) -> str:
+    """The scope phrase with a pronoun -- "their rapid games". Only for
+    `_profile_intro`, which sits under a header naming the student:
+    `render_profile_context` opens on its header, where "their" would
+    have no antecedent at all, so it names the student instead.
+    """
+    return f"their {_profile_games_phrase(profile)}"
 
 
 def _profile_coverage(profile: PlayerProfile) -> str:
@@ -842,14 +887,15 @@ def _profile_coverage(profile: PlayerProfile) -> str:
     quality"): how many games the volume figures describe and how many
     of them the engine has actually analyzed. Without this the model
     reads every figure against one number and treats a quarter-analyzed
-    archive's ACPL as the player's settled quality.
+    archive's average loss as the player's settled quality.
     """
     if profile.games_in_scope <= profile.games_covered:
         return f"all {_plural(profile.games_covered, 'game')} analyzed"
     return (
         f"{profile.games_covered} of {profile.games_in_scope} analyzed -- "
         "ratings, records and repertoire counts cover every game; "
-        "ACPL, blunder rates and error patterns cover the analyzed ones"
+        "average loss, blunder rates and error patterns cover the "
+        "analyzed ones"
     )
 
 
@@ -862,9 +908,9 @@ def _profile_intro(profile: PlayerProfile) -> str:
         )
     return (
         f"# Player profile -- {profile.username}\n"
-        "*(ACPL = average centipawn loss per move, shown in pawns; lower "
-        "is better. Every figure below is move-weighted over the games "
-        "covered.)*\n"
+        "*(Losses are in pawns per move -- 0.35 means the average move "
+        "gave up about a third of a pawn; lower is better. Every figure "
+        "below is move-weighted over the games covered.)*\n"
         f"Covering {_profile_scope(profile)}: "
         f"{_plural(profile.games_in_scope, 'game')}{window} "
         f"({_profile_coverage(profile)})."
@@ -888,7 +934,7 @@ def _periods_section(periods: list[PeriodStats]) -> str:
         "## Recent form",
         "*(Windows are nested and end at the most recent game, so each "
         "wider row contains the narrower ones.)*",
-        "| Window | Games | Score | Rating | ACPL | Blunder % | Analyzed |",
+        "| Window | Games | Score | Rating | Avg loss | Blunder % | Analyzed |",
         "|---|---|---|---|---|---|---|",
     ]
     for p in periods:
@@ -1040,7 +1086,7 @@ def _profile_quality_section(profile: PlayerProfile) -> str:
     """
     lines = [
         "## Quality",
-        "| Phase | Moves | ACPL | Blunder % |",
+        "| Phase | Moves | Avg loss | Blunder % |",
         "|---|---|---|---|",
     ]
     for phase in ("opening", "middlegame", "endgame"):
@@ -1065,7 +1111,8 @@ def _profile_quality_section(profile: PlayerProfile) -> str:
         else 0.0
     )
     lines.append(
-        f"Overall {_pawns_or_na(profile.overall_acpl)} ACPL over {total_moves} "
+        f"Overall {_pawns_or_na(profile.overall_acpl)} pawns lost per move "
+        f"over {total_moves} "
         f"moves -- {quality}; {blunders_per_game} blunders/game."
     )
     return "\n".join(lines)
@@ -1140,7 +1187,8 @@ _PROFILE_INSTRUCTIONS = (
     "generalize the figures to their whole game -- a rapid profile is "
     "not a description of their bullet play.\n"
     "- **Two denominators.** Ratings, records and repertoire counts "
-    "cover every game in scope; ACPL, blunder rates and error patterns "
+    "cover every game in scope; average loss, blunder rates and error "
+    "patterns "
     "cover only the analyzed subset, whose size the header states. "
     "Never present the analyzed sample as the student's whole history, "
     "and if coverage is thin, say the quality read is provisional.\n"
@@ -1160,9 +1208,18 @@ _PROFILE_INSTRUCTIONS = (
     "ones that do not, and never read a split whose sample is a "
     "handful of games as a tendency.\n"
     "- **Register.** Write for a club player's coach, not a fellow "
-    "engine: pawns, never centipawns, and the idea before the number.\n"
+    "engine: pawns, never centipawns, and the idea before the number. "
+    'Spell the unit out where the number is -- "1.30 pawns a move", '
+    'never "1.30 ACPL" or any other acronym. Nothing here defines one, '
+    "and what you write is stored and pasted into prompts that define "
+    "nothing either, where a reader has no way to tell the figure is "
+    "not centipawns.\n"
+    "- **Plain prose only.** Sentences and the bullet list, and no "
+    "markdown headings (`#`, `##`) anywhere -- this text is pasted "
+    "*inside* another prompt's sections, and a heading of your own "
+    "would read there as starting a new one.\n"
     "- **Evidence.** Every claim must tie to a figure stated above -- a "
-    "rating, an ACPL, a blunder rate, a repertoire score, an "
+    "rating, an average loss, a blunder rate, a repertoire score, an "
     "error-pattern count. Never assert a tendency the facts do not "
     "support.\n"
     "- **No invented lines.** Do not assert a concrete variation, "
@@ -1211,6 +1268,13 @@ def _profile_ratings_line(profile: PlayerProfile) -> str | None:
 
 
 def _profile_quality_line(profile: PlayerProfile) -> str:
+    """Spells the unit where the number is -- "1.07 pawns lost per move",
+    never "1.07 ACPL". `_pawns_or_na` divides by 100, so the acronym's
+    own expansion (average *centipawn* loss) contradicts the figure by a
+    factor of a hundred. `_profile_intro` gets away with it because it
+    opens on a glossary line; the embedded block has no budget for one
+    and lands inside hosts that say "pawns, never centipawns" outright.
+    """
     overall_blunder = _rate(
         profile.judgment_counts.get("blunder", 0), profile.player_moves
     )
@@ -1224,7 +1288,7 @@ def _profile_quality_line(profile: PlayerProfile) -> str:
         )
         phase_bits.append(f"{phase} {rate}")
     return (
-        f"- Quality: {_pawns_or_na(profile.overall_acpl)} ACPL overall, "
+        f"- Quality: {_pawns_or_na(profile.overall_acpl)} pawns lost per move, "
         f"{overall_blunder} blunders overall ({', '.join(phase_bits)})"
     )
 
@@ -1306,9 +1370,11 @@ def _profile_recent_line(profile: PlayerProfile) -> str | None:
         else ""
     )
     return (
-        f"- Recent form ({recent.label}): {_pawns_or_na(recent.acpl)} ACPL"
-        f"{blunder} over {_plural(recent.analyzed_games, 'analyzed game')} "
-        f"-- against {_pawns_or_na(profile.overall_acpl)} ACPL over the whole span"
+        f"- Recent form ({recent.label}): {_pawns_or_na(recent.acpl)} pawns "
+        f"lost per move{blunder} over "
+        f"{_plural(recent.analyzed_games, 'analyzed game')} "
+        f"-- against {_pawns_or_na(profile.overall_acpl)} pawns over the "
+        "whole span"
     )
 
 
@@ -1342,15 +1408,38 @@ def _profile_losing_line(profile: PlayerProfile) -> str | None:
     return f"- How they lose: {total} {noun} -- {detail}"
 
 
+def _blockquote(text: str) -> str:
+    """Quote every line, blanks included, so the passage is one quote
+    rather than two with a gap. Used on model-written text pasted into a
+    prompt: the marker makes the extent unambiguous whatever the text
+    turns out to contain.
+    """
+    return "\n".join(f"> {line}" if line.strip() else ">" for line in text.splitlines())
+
+
 def render_profile_context(profile: PlayerProfile) -> str:
     """The ~250-token block `render_explain_prompt` and
     `render_game_chat_context` embed at the top when given a profile
-    (docs/06-coach.md, "Player profile"): the facts one line each, then
-    -- when `profile.narrative` is set -- the stored narrative under a
-    "Coach's read" line. Total over `narrative=None`: renders the facts
-    alone.
+    (docs/06-coach.md, "Player profile"): a header naming the student
+    and the time control, the facts one line each, then -- when
+    `profile.narrative` is set -- the stored narrative, block-quoted,
+    under a "Coach's read" line. Total over `narrative=None`: renders
+    the facts alone.
+
+    The header names the student because this is the *first* line of
+    every prompt that embeds the block, where `_profile_scope`'s "their"
+    would refer to nobody: the block never names them otherwise, and the
+    host's own username line comes further down.
+
+    The narrative is quoted because nothing constrains its structure --
+    `_PROFILE_INSTRUCTIONS` asks for sentences plus bullets and never
+    forbids a heading, and a narrative opening "## Tendencies" would
+    otherwise forge a section boundary in the host prompt, handing every
+    section after it to the narrative.
     """
-    lines = [f"## Student profile -- {_profile_scope(profile)}"]
+    lines = [
+        f"## Student profile -- {profile.username}, {_profile_games_phrase(profile)}"
+    ]
     for line in (
         _profile_coverage_line(profile),
         _profile_ratings_line(profile),
@@ -1367,7 +1456,7 @@ def render_profile_context(profile: PlayerProfile) -> str:
     if profile.narrative is not None:
         lines.append("")
         lines.append("Coach's read:")
-        lines.append(profile.narrative)
+        lines.append(_blockquote(profile.narrative))
     return "\n".join(lines)
 
 
@@ -1391,6 +1480,24 @@ _EXPLAIN_INSTRUCTIONS = (
     "concrete."
 )
 
+# Appended only when the prompt opens with the profile block, so the
+# profile-less prompt stays byte-identical (docs/06-coach.md,
+# "Embedding") and the instruction never points at a section that is not
+# there. One clause and no more: the block is context, not the subject,
+# and these instructions are the one part of this prompt on a strict
+# length budget.
+_EXPLAIN_PROFILE_CLAUSE = (
+    "The student profile above describes this same student -- pitch the "
+    "explanation at that player, and where this move is an instance of a "
+    "pattern the profile already counts, say so."
+)
+
+
+def _explain_instructions(*, has_profile: bool) -> str:
+    if not has_profile:
+        return _EXPLAIN_INSTRUCTIONS
+    return f"{_EXPLAIN_INSTRUCTIONS} {_EXPLAIN_PROFILE_CLAUSE}"
+
 
 def render_explain_prompt(
     ctx: MoveContext,
@@ -1399,9 +1506,12 @@ def render_explain_prompt(
     profile: PlayerProfile | None = None,
 ) -> str:
     """Given a `profile`, the student-profile context block opens the
-    prompt (docs/06-coach.md, "Player profile"); with `None` (the
-    default) the prompt renders exactly as it always did -- an empty
-    leading section is filtered out below like every other empty one.
+    prompt and the instructions gain the clause that tells the model to
+    use it (docs/06-coach.md, "Player profile") -- unexplained context
+    is context a model may ignore, and the block's whole payoff is an
+    explanation pitched at this student. With `None` (the default) the
+    prompt renders exactly as it always did -- an empty leading section
+    is filtered out below like every other empty one.
     """
     sections = [
         render_profile_context(profile) if profile is not None else "",
@@ -1409,7 +1519,7 @@ def render_explain_prompt(
         _explain_positions(ctx),
         _explain_move(ctx),
         _explain_lines(lines),
-        _EXPLAIN_INSTRUCTIONS,
+        _explain_instructions(has_profile=profile is not None),
     ]
     return "\n\n".join(section for section in sections if section)
 
@@ -1490,9 +1600,17 @@ def format_cp_loss(cp_loss: int) -> str:
 # to when it cannot resume a warm session. Both seeds close with the same
 # engine-availability statement and the same chat instructions: the
 # explain register rules (club player, idea before number, no redundant
-# annotation) plus two chat-specific rules (claims from tools only, and
-# app-relative game links minted only from tool-returned ids -- there is
-# no append_game_links pass here, so no [gN] handle citation is offered).
+# annotation) plus two chat-specific rules (stated facts are usable and
+# everything past them needs a tool result, and app-relative game links
+# minted only from tool-returned ids -- there is no append_game_links
+# pass here, so no [gN] handle citation is offered).
+#
+# The first of those is scoped to what the seed does *not* state on
+# purpose. Banning the seed itself -- which the rule did until the
+# distinction was drawn -- bans the report scope's whole ~1,650-token
+# briefing, and the game scope's own result and played move, before the
+# first message: no tool has run yet, so the model could assert nothing
+# at all about the student it had just been briefed on.
 
 _CHAT_INSTRUCTIONS = (
     "## How to respond\n"
@@ -1501,11 +1619,12 @@ _CHAT_INSTRUCTIONS = (
     "threat, the plan, what a line wins -- before any number. Skip "
     'engine-style annotation -- no "?"/"??" next to a move you\'re also '
     "calling a mistake or blunder; say it once, in plain language.\n"
-    "- **Claims from tools only.** Any claim about the student's games -- "
-    "a result, a move, an opponent, a pattern -- must come from a tool "
-    "result returned earlier in this conversation, never from memory of "
-    "the context above or of an earlier turn. Look something up before "
-    "asserting it, or say you don't know.\n"
+    "- **Stated facts, or a tool result.** The facts stated in the "
+    "context above are established: use them and quote them freely. "
+    "Anything past them -- another game, another result, an opponent or "
+    "a move not shown here -- must come from a tool result returned in "
+    "this conversation. Never fill the gap from memory: look it up "
+    "first, or say you don't know.\n"
     "- **Game links.** When you reference one of the student's games, "
     "link it with an app-relative markdown reference in the form "
     "`[text](/games/{id}?ply={n})`, using only a game id a tool result "

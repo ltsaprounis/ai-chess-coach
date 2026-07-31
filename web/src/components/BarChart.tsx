@@ -27,18 +27,36 @@ export type BarDatum = {
 
 type Props = {
   data: BarDatum[];
-  /** Accessible name, e.g. "average centipawn loss by phase". */
+  /** Accessible name, e.g. "average pawns lost per move by phase". */
   label: string;
+  /**
+   * Smallest axis step, and the floor the axis is scaled to when every
+   * bar is smaller. Defaults to 1, which is right for counts (half a
+   * blunder is not a tick). Fractional series must lower it: pawn
+   * losses live between roughly 0.1 and 1.5, and a step of 1 collapses
+   * the whole series onto the bottom gridline.
+   */
+  minStep?: number;
+  /** Formats tick labels and the hover value. Defaults to `String`,
+   *  which is only safe for integers — a converted value needs fixed
+   *  decimals or binary float noise reaches the tooltip. */
+  formatValue?: (value: number) => string;
 };
 
 /** Zero-based vertical bars for a handful of categories. */
-export default function BarChart({ data, label }: Props) {
+export default function BarChart({
+  data,
+  label,
+  minStep = 1,
+  formatValue,
+}: Props) {
   if (data.length === 0) {
     return null;
   }
+  const format = formatValue ?? ((value: number) => String(value));
 
-  const maxValue = Math.max(1, ...data.map((datum) => datum.value));
-  const scale = axisScale(0, maxValue, { zeroBased: true, minStep: 1 });
+  const maxValue = Math.max(minStep, ...data.map((datum) => datum.value));
+  const scale = axisScale(0, maxValue, { zeroBased: true, minStep });
   const hasNotes = data.some((datum) => datum.note !== undefined);
   const topMargin = MARGIN.top + (hasNotes ? NOTE_HEADROOM : 0);
   const innerHeight = VB_HEIGHT - topMargin - MARGIN.bottom;
@@ -73,14 +91,14 @@ export default function BarChart({ data, label }: Props) {
               fontSize={11}
               fill={MUTED_COLOR}
             >
-              {tick}
+              {format(tick)}
             </text>
           </g>
         ))}
         {data.map((datum, index) => {
           const barX = MARGIN.left + index * slot + (slot - barWidth) / 2;
           const top = y(datum.value);
-          const title = `${datum.label}: ${datum.value}`;
+          const title = `${datum.label}: ${format(datum.value)}`;
           return (
             <g key={datum.label}>
               {datum.value > 0 && (

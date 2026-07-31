@@ -7,7 +7,6 @@ import {
   errorExampleHref,
   errorExampleLabel,
   formatGameDate,
-  formatPawns,
   hasPartialCoverage,
   isProfileStale,
   openingsFor,
@@ -18,6 +17,7 @@ import {
   streakLabel,
   terminationShares,
 } from "../playerProfile.ts";
+import { formatPawns } from "../units.ts";
 
 type Props = {
   profile: PlayerProfile;
@@ -282,7 +282,7 @@ export default function ProfileCard({
                   <th>Games</th>
                   <th>Score</th>
                   <th>Rating</th>
-                  <th>Avg loss</th>
+                  <th>Avg loss (pawns)</th>
                   <th>Blunders</th>
                 </tr>
               </thead>

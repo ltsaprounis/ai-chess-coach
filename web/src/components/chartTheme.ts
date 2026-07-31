@@ -8,7 +8,7 @@ export const WIN_COLOR = "var(--win)";
 export const LOSS_COLOR = "var(--loss)";
 export const DRAW_COLOR = "var(--draw)";
 
-/** Primary single-series color: rating line, ACPL bars. */
+/** Primary single-series color: rating line, average-loss bars. */
 export const PRIMARY_COLOR = "var(--accent)";
 
 /** Axis text and labels. */
