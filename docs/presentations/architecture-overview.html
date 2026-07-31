@@ -1,0 +1,1388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Chess Coach — Architecture Overview</title>
+<style>
+/* ------------------------------------------------------------------
+   Design tokens mirror web/src/index.css, so the deck looks like the
+   app it describes. Light and dark follow the OS preference.
+   ------------------------------------------------------------------ */
+:root {
+  --bg: #faf9f5;
+  --surface: #ffffff;
+  --surface-2: #f3f1ea;
+  --border: #e4e2da;
+  --border-strong: #d3d1c7;
+  --text: #262624;
+  --muted: #6f6e69;
+  --accent: #2563eb;
+  --accent-soft: #eaf0fe;
+  --win: #15803d;
+  --loss: #b91c1c;
+  --draw: #898781;
+  --j-inaccuracy: #ca8a04;
+  --j-mistake: #ea580c;
+  --j-blunder: #dc2626;
+  --piece-dark: #3f3d3a;
+  --radius: 0.6em;
+  --radius-sm: 0.35em;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f1e1c;
+    --surface: #262624;
+    --surface-2: #302f2c;
+    --border: #3a3936;
+    --border-strong: #4a4844;
+    --text: #ecebe5;
+    --muted: #a3a19a;
+    --accent: #3b82f6;
+    --accent-soft: #1b2740;
+    --win: #4ade80;
+    --loss: #f87171;
+    --draw: #9a988f;
+    --j-inaccuracy: #eab308;
+    --j-mistake: #f97316;
+    --j-blunder: #ef4444;
+    --piece-dark: #d8d6cf;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Everything inside a slide is sized in em off this one value, so the
+   whole deck scales with the smaller of the two viewport axes. */
+.slide {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: 5vmin 6vmin 9vmin;
+  font-size: clamp(12px, min(1.2vw, 2.3vh), 23px);
+  overflow: hidden;
+}
+.slide.active { display: flex; }
+.inner { width: 100%; max-width: 64em; margin: 0 auto; }
+
+/* ---------- type ---------- */
+.eyebrow {
+  font-size: 0.82em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 0.9em;
+}
+h1 { font-size: 3.4em; line-height: 1.08; letter-spacing: -0.025em; font-weight: 700; }
+h2 { font-size: 2.05em; line-height: 1.15; letter-spacing: -0.02em; font-weight: 650; }
+h2 .thin { color: var(--muted); font-weight: 400; }
+.deck-sub { font-size: 1.35em; color: var(--muted); margin-top: 0.9em; max-width: 30em; }
+.lede { font-size: 1.12em; color: var(--muted); margin-top: 0.85em; max-width: 46em; }
+.note { font-size: 0.85em; color: var(--muted); margin-top: 1.6em; }
+strong { font-weight: 620; color: var(--text); }
+code, .mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+}
+code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.35em;
+}
+
+/* ---------- title slide ---------- */
+.title-slide { justify-content: center; }
+.board-strip {
+  display: flex;
+  width: 8em;
+  height: 1em;
+  margin-bottom: 2.2em;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.board-strip i { flex: 1; background: var(--surface); }
+.board-strip i:nth-child(odd) { background: var(--piece-dark); }
+.title-meta {
+  margin-top: 3em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em 2.4em;
+  font-size: 0.92em;
+  color: var(--muted);
+}
+.title-meta b { color: var(--text); font-weight: 600; }
+
+/* ---------- generic blocks ---------- */
+.cols { display: grid; gap: 1.2em; margin-top: 1.8em; }
+.cols-2 { grid-template-columns: 1fr 1fr; }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1em 1.2em;
+}
+.card h3 {
+  font-size: 1em;
+  font-weight: 650;
+  margin-bottom: 0.45em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em;
+}
+.card p { font-size: 0.9em; color: var(--muted); }
+.card.accent { border-color: var(--accent); background: var(--accent-soft); }
+.tag {
+  font-size: 0.68em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.55em;
+}
+
+ul.bullets { list-style: none; margin-top: 1.5em; }
+ul.bullets li {
+  position: relative;
+  padding-left: 1.4em;
+  margin-bottom: 0.85em;
+  font-size: 1.02em;
+  max-width: 52em;
+}
+ul.bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0.15em;
+  top: 0.62em;
+  width: 0.42em;
+  height: 0.42em;
+  background: var(--accent);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+ul.bullets li span { color: var(--muted); }
+
+/* ---------- flow diagrams ---------- */
+.flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55em;
+  margin-top: 1.6em;
+}
+.node {
+  flex: 1 1 0;
+  min-width: 7.5em;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.7em 0.8em;
+}
+.node .k {
+  font-size: 0.68em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25em;
+}
+.node .v { display: block; font-size: 0.92em; font-weight: 600; line-height: 1.3; }
+.node .d { display: block; font-size: 0.78em; color: var(--muted); margin-top: 0.3em; line-height: 1.35; }
+.node.ext { background: var(--surface-2); border-style: dashed; }
+.node.hot { border-color: var(--accent); }
+.node.hot .k { color: var(--accent); }
+.arrow {
+  align-self: center;
+  color: var(--border-strong);
+  font-size: 1.15em;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+/* ---------- system map ---------- */
+.map { margin-top: 1.5em; }
+.band {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.65em 0.9em;
+  text-align: center;
+}
+.band.root { border-color: var(--accent); background: var(--accent-soft); }
+.band .t { font-weight: 650; font-size: 0.98em; }
+.band .s { font-size: 0.78em; color: var(--muted); }
+.rail {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.76em;
+  padding: 0.4em 0;
+  letter-spacing: 0.06em;
+}
+.grid6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5em; }
+.comp {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55em 0.5em;
+  text-align: center;
+}
+.comp .n { font-weight: 620; font-size: 0.85em; }
+.comp .w { font-size: 0.72em; color: var(--muted); line-height: 1.3; margin-top: 0.15em; }
+.ext-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5em; margin-top: 0.5em; }
+.ext-row div {
+  font-size: 0.72em;
+  color: var(--muted);
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.4em 0.3em;
+  background: var(--surface-2);
+}
+.ext-row div.empty { border: none; background: none; }
+.domain-bar {
+  margin-top: 0.5em;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 0.45em;
+  text-align: center;
+  font-size: 0.78em;
+  color: var(--muted);
+}
+
+/* ---------- prompt anatomy ---------- */
+.stack { margin-top: 1.5em; display: flex; flex-direction: column; gap: 0.4em; }
+.layer {
+  border: 1px solid var(--border-strong);
+  border-left: 0.35em solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 0.6em 0.85em;
+  display: flex;
+  gap: 1em;
+  align-items: baseline;
+}
+.layer .lbl { font-weight: 620; font-size: 0.92em; min-width: 12em; }
+.layer .txt { font-size: 0.85em; color: var(--muted); }
+.layer.opt { border-left-color: var(--border-strong); border-left-style: dashed; }
+.layer.last { border-left-color: var(--j-inaccuracy); }
+
+/* ---------- tool table ---------- */
+.toolgrid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr 1.35fr 1.9fr;
+  gap: 0 0.9em;
+  margin-top: 1.5em;
+  font-size: 0.86em;
+}
+.toolgrid > div { padding: 0.55em 0; border-bottom: 1px solid var(--border); }
+.toolgrid .th {
+  font-size: 0.82em;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+  border-bottom-color: var(--border-strong);
+  padding-bottom: 0.35em;
+}
+.toolgrid .tn {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-weight: 600;
+  color: var(--accent);
+}
+.toolgrid .ta, .toolgrid .tt, .toolgrid .tr { color: var(--muted); line-height: 1.4; }
+.toolgrid em { font-style: normal; opacity: 0.8; }
+.toolgrid .mono { font-size: 0.86em; }
+
+/* ---------- chat transcript ---------- */
+.chatwrap {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 1.6em;
+  margin-top: 1.3em;
+}
+.chat { display: flex; flex-direction: column; gap: 0.4em; }
+.seedline {
+  font-size: 0.78em;
+  color: var(--muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 0.4em 0.65em;
+}
+.msg {
+  border-radius: var(--radius);
+  padding: 0.55em 0.8em;
+  font-size: 0.86em;
+  line-height: 1.45;
+}
+.msg .who {
+  display: block;
+  font-size: 0.72em;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: var(--muted);
+  margin-bottom: 0.15em;
+}
+.msg.student { background: var(--accent-soft); border: 1px solid var(--accent); }
+.msg.coach { background: var(--surface); border: 1px solid var(--border); }
+.msg.coach u { text-decoration-color: var(--accent); text-underline-offset: 0.15em; }
+.tool {
+  border-left: 2px solid var(--border-strong);
+  padding: 0.1em 0 0.1em 0.7em;
+  font-size: 0.78em;
+  color: var(--muted);
+}
+.tool b {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 0.94em;
+}
+.tool .ret { display: block; opacity: 0.85; line-height: 1.35; }
+.chatnotes h3 { font-size: 1em; font-weight: 650; margin-bottom: 0.7em; }
+.chatnotes ul { list-style: none; }
+.chatnotes li {
+  font-size: 0.83em;
+  color: var(--muted);
+  margin-bottom: 0.6em;
+  padding-left: 1em;
+  position: relative;
+  line-height: 1.45;
+}
+.chatnotes li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 0.35em;
+  height: 0.35em;
+  background: var(--accent);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+/* ---------- stat tiles ---------- */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7em; margin-top: 1.5em; }
+.stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.8em 0.85em;
+}
+.stat .num { font-size: 1.75em; font-weight: 680; letter-spacing: -0.02em; line-height: 1.1; }
+.stat .lab { font-size: 0.78em; color: var(--muted); margin-top: 0.25em; line-height: 1.35; }
+
+/* ---------- misc ---------- */
+.kv { margin-top: 1.4em; display: grid; grid-template-columns: max-content 1fr; gap: 0.55em 1.4em; font-size: 0.95em; }
+.kv dt { font-weight: 620; }
+.kv dd { color: var(--muted); }
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6em; margin-top: 1.6em; }
+.split h3 { font-size: 1.02em; font-weight: 650; margin-bottom: 0.7em; }
+.split ul { list-style: none; }
+.split li { font-size: 0.9em; margin-bottom: 0.55em; padding-left: 1.15em; position: relative; color: var(--muted); }
+.split li::before { position: absolute; left: 0; font-weight: 700; }
+.yes li::before { content: "+"; color: var(--win); }
+.no li::before { content: "\2013"; color: var(--loss); }
+
+.pill-row { display: flex; flex-wrap: wrap; gap: 0.4em; margin-top: 1.2em; }
+.pill {
+  font-size: 0.82em;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.2em 0.75em;
+  background: var(--surface);
+}
+.pill.on { border-color: var(--win); color: var(--win); }
+.pill.off { border-style: dashed; color: var(--muted); }
+
+/* ---------- chrome ---------- */
+.chrome {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  padding: 0.7em 1.4em;
+  font-size: clamp(11px, 1.35vh, 14px);
+  color: var(--muted);
+  background: linear-gradient(to top, var(--bg) 55%, transparent);
+  z-index: 10;
+}
+.chrome .deck-name { font-weight: 600; color: var(--text); }
+.chrome .spacer { flex: 1; }
+.chrome button {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.15em 0.6em;
+  cursor: pointer;
+}
+.chrome button:hover { border-color: var(--accent); color: var(--accent); }
+.counter { font-variant-numeric: tabular-nums; }
+.progress {
+  position: fixed;
+  top: 0; left: 0;
+  height: 2px;
+  background: var(--accent);
+  z-index: 11;
+  transition: width 0.18s ease;
+}
+
+/* ---------- narrow screens ----------
+   A slide cannot hold a slide's worth of content on a phone, so stop
+   pretending: stack the columns, scroll the slide, and keep the deck
+   readable as a document. */
+@media (max-width: 720px) {
+  .slide {
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 1.6rem 1.25rem 4.5rem;
+  }
+  .cols-2, .cols-3, .cols-4, .split { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .grid6, .ext-row { grid-template-columns: repeat(2, 1fr); }
+  .arrow { display: none; }
+  .node { flex-basis: 100%; }
+  .layer { flex-direction: column; gap: 0.2em; }
+  .kv { grid-template-columns: 1fr; gap: 0.15em 0; }
+  .kv dd { margin-bottom: 0.6em; }
+  .chatwrap { grid-template-columns: 1fr; }
+  .toolgrid { grid-template-columns: 1fr; gap: 0; }
+  .toolgrid .th { display: none; }
+  .toolgrid .tn { border-bottom: none; padding-bottom: 0.15em; }
+  .toolgrid .ta, .toolgrid .tt { border-bottom: none; padding: 0 0 0.15em; }
+}
+
+@media (max-width: 480px) {
+  .chrome .deck-name { display: none; }
+}
+
+/* ---------- print / PDF: one slide per page ---------- */
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  html, body { height: auto; background: #fff; }
+  .chrome, .progress { display: none !important; }
+  .slide {
+    display: flex !important;
+    position: relative;
+    inset: auto;
+    width: 1280px;
+    height: 720px;
+    font-size: 17px;
+    break-after: page;
+    page-break-after: always;
+  }
+  /* Without this the last page break emits a trailing blank sheet. */
+  .slide:last-of-type { break-after: auto; page-break-after: auto; }
+}
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+
+<!-- 1 ------------------------------------------------------------- -->
+<section class="slide title-slide">
+  <div class="inner">
+    <div class="board-strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <h1>AI Chess&nbsp;Coach</h1>
+    <p class="deck-sub">
+      A system overview: how a chess.com archive becomes engine-grounded
+      coaching advice, and the decisions that shape the path.
+    </p>
+    <div class="title-meta">
+      <span><b>Backend</b> Python 3.12 · FastAPI · python-chess</span>
+      <span><b>Frontend</b> Vite · React · TypeScript</span>
+      <span><b>Engine</b> Stockfish over UCI</span>
+      <span><b>Store</b> SQLite</span>
+    </div>
+    <p class="note">
+      Systems, data flows, prompt flows, and the constraints behind them.
+      Use <code>&larr;</code> <code>&rarr;</code> to navigate.
+    </p>
+  </div>
+</section>
+
+<!-- 2 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The product in one loop</p>
+    <h2>Fetch a player's games. Analyze them.<br><span class="thin">Then let a model explain what the engine found.</span></h2>
+    <div class="flow">
+      <div class="node"><span class="k">Sync</span><span class="v">chess.com archive</span><span class="d">Public API, no auth. Games cached locally, openings classified on the way in.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Analyze</span><span class="v">Stockfish, every position</span><span class="d">Centipawn loss per move, judged against fixed thresholds, aggregated by game phase.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node hot"><span class="k">Coach</span><span class="v">LLM, on request</span><span class="d">A deterministic report becomes a prompt; the model narrates it and can call the engine to check a line.</span></div>
+    </div>
+    <ul class="bullets">
+      <li><strong>The engine does the judging; the model does the explaining.</strong>
+        <span>No figure in a prompt is computed by a language model — every number is
+        aggregated in Python from stored evaluations first.</span></li>
+      <li><strong>The model can reach the engine, not the filesystem.</strong>
+        <span>A single <code>analyze_position(fen)</code> tool is published to the coach;
+        every built-in shell, file and web tool is disabled on every path.</span></li>
+      <li><strong>Nothing expensive happens twice.</strong>
+        <span>Games, analyses, advice, explanations and profiles are all cached in SQLite,
+        and an LLM call only ever fires on an explicit user action.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 3 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">System map</p>
+    <h2>One composition root, six leaf components</h2>
+    <div class="map">
+      <div class="band">
+        <div class="t">web/ — React SPA</div>
+        <div class="s">7 pages · types generated from the backend's OpenAPI schema, never hand-written</div>
+      </div>
+      <div class="rail">&darr;&nbsp; HTTP + Server-Sent Events &nbsp;&darr;</div>
+      <div class="band root">
+        <div class="t">chess_coach.api — the composition root</div>
+        <div class="s">The only module that may import the others. Owns all orchestration: what gets fetched, analyzed, cached, and when.</div>
+      </div>
+      <div class="rail">&darr;&nbsp; injected as plain arguments &nbsp;&darr;</div>
+      <div class="grid6">
+        <div class="comp"><div class="n">config</div><div class="w">settings, paths, secrets</div></div>
+        <div class="comp"><div class="n">ingestion</div><div class="w">fetch + parse</div></div>
+        <div class="comp"><div class="n">storage</div><div class="w">SQLite persistence</div></div>
+        <div class="comp"><div class="n">engine</div><div class="w">Stockfish pool</div></div>
+        <div class="comp"><div class="n">openings</div><div class="w">ECO lookup</div></div>
+        <div class="comp"><div class="n">coach</div><div class="w">report + prompts + LLM</div></div>
+      </div>
+      <div class="ext-row">
+        <div>coach.config.yaml<br>+ env</div>
+        <div>chess.com<br>public API</div>
+        <div>coach.sqlite3<br>7 tables</div>
+        <div>Stockfish<br>subprocesses</div>
+        <div>lichess ECO<br>submodule</div>
+        <div>Claude / Copilot<br>via local CLI login</div>
+      </div>
+      <div class="domain-bar">
+        <strong>chess_coach.domain</strong> — the one contract every component may share:
+        30 pydantic models and 4 constants, and nothing else
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The rule that shapes everything</p>
+    <h2>Components cannot see each other<span class="thin"> — and CI proves it</span></h2>
+    <p class="lede">
+      Decoupling that lives in a style guide erodes. Here it is two
+      import-linter contracts that fail the build: an <em>independence</em>
+      contract over the six leaf components, and a three-layer contract
+      putting <code>api</code> above them and <code>domain</code> below.
+    </p>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Only <code>api</code> composes</h3>
+        <p>The engine never calls storage; the coach never opens the database.
+        The API layer holds every wire between them, so a component can be read,
+        tested and replaced on its own.</p>
+      </div>
+      <div class="card">
+        <h3>Config is injected, never imported</h3>
+        <p>One component reads the YAML file and the environment. Everything else
+        receives depth, thresholds, worker counts and file paths as plain arguments —
+        so nothing else needs to know a config system exists.</p>
+      </div>
+      <div class="card">
+        <h3>Shared rules live in <code>domain</code></h3>
+        <p>Phase boundaries are a good example: engine and coach both derive them,
+        cannot import each other, and read the same constants — with a test asserting
+        the two implementations agree.</p>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><strong>The seam is a function, not a dependency.</strong>
+        <span>The coach's engine tool is an injected <code>FEN &rarr; candidate lines</code>
+        callable that the API layer builds from the pool. Same trick for the chat toolkit.</span></li>
+      <li><strong>The frontend shares no code with the backend at all.</strong>
+        <span>It compiles against types generated from the OpenAPI schema; hand-writing a
+        response type is a review blocker. SSE payloads are the single documented exemption.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Data flow 1 of 3</p>
+    <h2>Sync <span class="thin">— chess.com to SQLite, incrementally</span></h2>
+    <div class="flow">
+      <div class="node ext"><span class="k">Source</span><span class="v">chess.com public API</span><span class="d">Monthly PGN archives. No auth, no key.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Cutoff</span><span class="v">latest stored game</span><span class="d">Months that closed before it are skipped outright.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Normalize</span><span class="v">parse + drop</span><span class="d">Variants, unknown results and custom start positions are dropped, not raised.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Upsert</span><span class="v">one row per perspective</span><span class="d">Keyed <code>uuid:username</code>, so a game between two tracked players stores once per side.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Classify</span><span class="v">deepest ECO match</span><span class="d">Replayed against an in-memory book built from the vendored lichess database.</span></div>
+    </div>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Idempotent by construction <span class="tag">re-runnable</span></h3>
+        <p>The write is an upsert, so a repeat sync refreshes rather than duplicates —
+        which is what makes a full re-fetch a safe way to backfill a column added
+        after the games were stored.</p>
+      </div>
+      <div class="card">
+        <h3>Classification rides ingestion</h3>
+        <p>Opening lookup is a cheap in-memory hash of positions, so it happens at
+        ingest instead of becoming a second pass. Unmatched games simply stay
+        unclassified.</p>
+      </div>
+      <div class="card">
+        <h3>Ingestion stores nothing</h3>
+        <p>It fetches and parses into domain objects and yields them a month at a time.
+        It does not know a database exists — the API layer writes.</p>
+      </div>
+    </div>
+    <p class="note">
+      Openings book: 3,808 ECO lines from the pinned <span class="mono">lichess-org/chess-openings</span>
+      submodule · classification reads the first 30 plies · retries back off on 429/502/503.
+    </p>
+  </div>
+</section>
+
+<!-- 6 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Data flow 2 of 3</p>
+    <h2>Analyze <span class="thin">— a long job behind a fast request</span></h2>
+    <div class="flow">
+      <div class="node"><span class="k">Request</span><span class="v">POST &rarr; 202</span><span class="d">Returns immediately with <code>queued</code> and <code>remaining</code>. Never blocks.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Select</span><span class="v">what needs analysis</span><span class="d">No analysis row, shallower than current depth, or an older analysis version.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node hot"><span class="k">Pool</span><span class="v">N Stockfish workers</span><span class="d">Each game checks out an idle engine process; a wedged worker is killed and retired.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Judge</span><span class="v">cp loss per move</span><span class="d">Eval delta from the mover's side, judged against injected thresholds.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Persist</span><span class="v">one analysis row</span><span class="d">Stamped with the analysis version; aggregates pre-derived so stats never re-parse it.</span></div>
+    </div>
+    <p class="lede" style="margin-top:1.4em">
+      In parallel, the browser holds an SSE stream: a snapshot on connect, then
+      per-position progress and per-game completion, ending in <code>run_done</code>.
+      Losing the stream does not stop the run — the UI says so and offers to re-attach.
+    </p>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Reproducible on purpose</h3>
+        <p>Every search starts a fresh game token, so carried transposition state cannot
+        make an evaluation depend on search history. An eval is a pure function of
+        position, depth and binary — worth ~4% of speed, and the reason re-analysis agrees
+        with itself.</p>
+      </div>
+      <div class="card">
+        <h3>Versioned, so re-analysis is free to trigger</h3>
+        <p>Bumping the analysis version — or raising the configured depth — marks every
+        stored row stale through the ordinary "needs analysis" query. No migration,
+        no new endpoint.</p>
+      </div>
+      <div class="card">
+        <h3>Degrades, doesn't refuse</h3>
+        <p>A missing Stockfish binary is not fatal at startup: analysis and live eval
+        answer 503 with a build hint, while sync, stats, reports and coaching keep working.</p>
+      </div>
+    </div>
+    <p class="note">
+      Defaults: depth 16 · 2 workers · 100 newest games per run · one run per player at a time
+      · thresholds 50 / 100 / 200 cp for inaccuracy / mistake / blunder.
+    </p>
+  </div>
+</section>
+
+<!-- 7 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Data flow 3 of 3</p>
+    <h2>Coach <span class="thin">— from stored evaluations to written advice</span></h2>
+    <div class="flow">
+      <div class="node"><span class="k">Trigger</span><span class="v">user asks</span><span class="d">Never a background job. The cache is checked first and a hit costs nothing.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Aggregate</span><span class="v">build_report</span><span class="d">Two lists over the same filters: analyzed games, and every stored game in scope.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Render</span><span class="v">markdown prompt</span><span class="d">A fixed template. Snapshot-tested, and shown to the user with a copy button.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node hot"><span class="k">Generate</span><span class="v">provider + engine tool</span><span class="d">Agentic when the pool is up, so cited lines can be verified; single-turn when it isn't.</span></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node"><span class="k">Post-process</span><span class="v">mint the links, cache</span><span class="d">Citation handles become real deep links before anything is stored.</span></div>
+    </div>
+    <ul class="bullets">
+      <li><strong>The prompt is a product surface, not an implementation detail.</strong>
+        <span>The UI shows the exact text that was sent, so template changes are
+        snapshot-tested and carry a version.</span></li>
+      <li><strong>Both the prompt and the advice are cached together</strong>
+        <span>— keyed on player, agent, prompt version, window and time control, so
+        two coaches never share a row and a reworded template never serves stale advice.</span></li>
+      <li><strong>Coverage is stated, never implied.</strong>
+        <span>When analysis covers less than the requested scope, the prompt says so and
+        names which figures the shortfall touches — and the UI flags advice whose
+        coverage has since been overtaken.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The deterministic layer</p>
+    <h2>The model narrates. It never computes.</h2>
+    <p class="lede">
+      <code>build_report</code> is pure Python aggregation over stored analyses — the
+      largest component in the backend, and almost none of it is LLM plumbing. Everything
+      the coach says traces back to a number produced here, because a model will narrate
+      whatever it is handed without complaint.
+    </p>
+    <div class="split">
+      <div>
+        <h3>Volume &mdash; every stored game in scope</h3>
+        <ul class="yes">
+          <li>Win/loss record, colour split, opposition strength</li>
+          <li>Ratings and their dated peaks per time control</li>
+          <li>Monthly game counts, streaks, how games actually ended</li>
+          <li>Opening repertoire counts</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Quality &mdash; the analyzed subset only</h3>
+        <ul class="yes">
+          <li>Loss per move, overall and by game phase</li>
+          <li>Judgment counts, error patterns, turning points</li>
+          <li>Per-opening loss columns and blunder rates</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cols cols-3">
+      <div class="card accent">
+        <h3>Two lists, two denominators</h3>
+        <p>Computing everything over the analyzed subset made a partly-analyzed
+        archive report a "current rating" from whichever game the engine happened to
+        reach last. Ratings and records need no engine, so they may not be restricted to it.</p>
+      </div>
+      <div class="card">
+        <h3>Move-weighted, never a mean of means</h3>
+        <p>Every loss figure is total loss ÷ total moves. Averaging per-game averages
+        makes a 15-move loss weigh as much as a 90-move grind — and drags every endgame
+        figure toward zero for players who rarely reach one.</p>
+      </div>
+      <div class="card">
+        <h3>Absent is not zero</h3>
+        <p>A phase never reached reports <code>None</code>, not <code>0.0</code> — which
+        would be indistinguishable from flawless play. Every phase carries its own move
+        count so a thin sample is visible rather than inferred.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 ------------------------------------------------------------- -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Prompt flows</p>
+    <h2>Four LLM surfaces, one component</h2>
+    <div class="cols cols-4">
+      <div class="card">
+        <h3>Coaching brief</h3>
+        <p><strong>In:</strong> the whole report over a window.<br>
+        <strong>Out:</strong> one markdown brief, written to the student, naming a single
+        biggest lever rather than a flat list.<br>
+        <strong>Cached</strong> on player + agent + prompt version + scope.</p>
+      </div>
+      <div class="card">
+        <h3>Player profile</h3>
+        <p><strong>In:</strong> compact facts projected from the report, over a time
+        control's full history.<br>
+        <strong>Out:</strong> a few sentences about the student, written in the third
+        person for another coach to read.<br>
+        <strong>Stored</strong> per player per time control.</p>
+      </div>
+      <div class="card">
+        <h3>Move explanation</h3>
+        <p><strong>In:</strong> one ply's context, live candidate lines, and the stored
+        profile block.<br>
+        <strong>Out:</strong> streamed prose on why the move cost what it cost.<br>
+        <strong>Cached</strong> on game + ply + agent.</p>
+      </div>
+      <div class="card">
+        <h3>Chat</h3>
+        <p><strong>In:</strong> a scope seed (one game, or the whole report) plus four
+        read-only tools.<br>
+        <strong>Out:</strong> a streamed reply, persisted before the terminal event.<br>
+        <strong>Transcript</strong> is the source of truth.</p>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><strong>The profile is the reuse payoff.</strong>
+        <span>Who-is-this-student used to be re-derived by every feature that spoke to them.
+        Now it is computed once and embedded as one ~250-token block at the top of the
+        other prompts — one place to improve it.</span></li>
+      <li><strong>Cached output becomes conversation history, not context.</strong>
+        <span>Opening a chat after reading an explanation prepends that explanation as the
+        first assistant turn, so the thread continues from what the student just read.</span></li>
+      <li><strong>A fifth surface deliberately uses no model at all.</strong>
+        <span>Dashboard highlights — blunders and brilliancies — are static analysis over
+        stored evaluations, kept out of the report so the prompt doesn't grow thousands of rows.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Anatomy of a prompt</p>
+    <h2>Data first, instructions last<span class="thin"> — always in that order</span></h2>
+    <div class="stack">
+      <div class="layer opt">
+        <span class="lbl">Profile block <em>(optional)</em></span>
+        <span class="txt">Who the student is, in ~250 tokens. Facts one line each, then the
+        stored narrative — block-quoted, so a heading inside it cannot forge a section
+        boundary in the host prompt.</span>
+      </div>
+      <div class="layer">
+        <span class="lbl">Scope</span>
+        <span class="txt">The student, the window requested versus the span actually covered,
+        and coverage as "N of M games" — with an explicit caveat when analysis falls short.</span>
+      </div>
+      <div class="layer">
+        <span class="lbl">Data sections</span>
+        <span class="txt">Recent form, phase table with denominators, monthly trend, milestones,
+        how games end, the repertoire split by colour, error patterns, turning points with
+        their FENs. Rendered by shared functions, so the brief, the profile prompt and the
+        chat seed cannot drift apart.</span>
+      </div>
+      <div class="layer last">
+        <span class="lbl">Instruction block</span>
+        <span class="txt">The only place that says what to produce — which is why one persona
+        can serve several artifacts.</span>
+      </div>
+    </div>
+    <div class="cols cols-2">
+      <div class="card">
+        <h3>Rules the data cannot enforce</h3>
+        <p><strong>Register:</strong> the brief is written to the student in the second person,
+        while the data describes them in the third.
+        <strong>Attribution:</strong> an opening is only the student's if it appears under
+        "systems the student chose" — never advise dropping a line they merely face.
+        <strong>Honesty:</strong> say when the data does not support a conclusion instead of
+        filling the section anyway.</p>
+      </div>
+      <div class="card">
+        <h3>One scale, one name</h3>
+        <p>Every loss figure is in <strong>pawns</strong>, and no template says "ACPL" anywhere.
+        The acronym once expanded to one scale and redefined the figure as another: the same
+        opening read 5.16 in the brief and 516 in the dashboard. Conversion now happens only
+        where a string is produced, and a test asserts the data half of every template is clean.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Persona</p>
+    <h2>One coach, three artifacts<span class="thin"> — and one genuine exception</span></h2>
+    <p class="lede">
+      A single provider carries a single system prompt that serves the brief, the profile
+      narrative and move explanations alike. So the persona names none of them: it
+      establishes the coach, states that the figures it is handed are already computed,
+      and defers <em>what to write</em> to the instruction block each template ends with.
+    </p>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Why not one persona each?</h3>
+        <p>A persona saying "write the coaching brief" misdirects the other two. A move
+        explanation is not a brief and re-averages nothing; the narrative is a briefing
+        <em>about</em> the student, for another coach — which such a persona would flatly
+        contradict.</p>
+      </div>
+      <div class="card">
+        <h3>Chat gets its own</h3>
+        <p>Its instructions arrive once in the seed rather than in a block at the end,
+        and every turn after the first is a conversation rather than a request for a
+        finished piece. That is a real difference, so it gets a real second persona.</p>
+      </div>
+      <div class="card">
+        <h3>Register is per document</h3>
+        <p>A first-draft narrative opened "You are a rapid player" — telling the
+        <em>reading coach</em> they were the rapid player. Person is now stated outright in
+        each instruction block rather than left for the data's headings to imply.</p>
+      </div>
+    </div>
+    <p class="note">
+      Chat's rule is <strong>stated versus recalled</strong>, not context versus tools: facts in the
+      seed are established and may be quoted, but any claim past them — another game, another
+      result — must come from a tool result in that conversation. Scoped any wider, the rule
+      would ban the briefing the model was just given.
+    </p>
+  </div>
+</section>
+
+<!-- 12 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Keeping the model honest</p>
+    <h2>Grounded, bounded, and unable to write a URL</h2>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Grounded <span class="tag">engine tool</span></h3>
+        <p>The engine reaches the model as an in-process MCP tool — <code>analyze_position(fen)</code>,
+        FEN in, candidate lines out. The brief's instructions require running it on the
+        turning points it cites and stating the actual refutation, not just naming a better move.
+        Rendered positions carry their FEN precisely because the tool takes one.</p>
+      </div>
+      <div class="card">
+        <h3>Bounded <span class="tag">budgets</span></h3>
+        <p>Eight agentic turns each for the brief, an explanation and a chat message — three
+        separate constants, tuned independently. The profile narrative runs one turn with no
+        tools at all: it summarizes aggregates and asserts no concrete lines, so there is nothing
+        to verify. Built-in shell, file and web tools are disabled everywhere.</p>
+      </div>
+      <div class="card">
+        <h3>Fenced <span class="tag">citations</span></h3>
+        <p>Game ids are UUID-plus-username strings; one mistyped character is a broken link.
+        So the model is offered short handles — <code>[g1]</code>, <code>[g2]</code> — and a
+        post-processing pass mints the URLs from the report itself.</p>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><strong>Every failure mode degrades soft.</strong>
+        <span>A model that ignores the citation rule yields a plain-text reference; an invented
+        handle renders as its own text; model-authored link definitions are stripped, so a handle
+        cannot be redefined from inside the advice.</span></li>
+      <li><strong>A spent budget is a message, not an error.</strong>
+        <span>The turn after the cap returns "finish your answer with what you have gathered
+        so far" as a tool result. The model wraps up in its own words instead of the run
+        dying mid-sentence.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The toolkit</p>
+    <h2>Four tools, all read-only<span class="thin"> — and none of them takes a username</span></h2>
+    <div class="toolgrid">
+      <div class="th">Tool</div>
+      <div class="th">Available in</div>
+      <div class="th">Takes</div>
+      <div class="th">Returns (rendered by the coach, not the caller)</div>
+
+      <div class="tn">analyze_position</div>
+      <div class="ta">brief · explanation · chat<br><em>only when the engine pool is up</em></div>
+      <div class="tt">a FEN</div>
+      <div class="tr">One row per candidate line —<br>
+        <span class="mono">1. depth 16, +0.42: Nf3 d5 Bg5 …</span></div>
+
+      <div class="tn">find_games</div>
+      <div class="ta">chat</div>
+      <div class="tt">opponent, opening, result, time class, date range, limit
+        <em>(default 10, capped at 25)</em></div>
+      <div class="tr">Compact rows, id last —<br>
+        <span class="mono">2026-06-14, white vs marko77 (1482 vs 1531), loss, blitz, London System — id …</span></div>
+
+      <div class="tn">get_game</div>
+      <div class="ta">chat</div>
+      <div class="tt">a game id, as returned by <span class="mono">find_games</span></div>
+      <div class="tr">Identity, then every move in SAN — with judgment and eval in pawns
+        shown only at inaccuracies and worse</div>
+
+      <div class="tn">get_opening_stats</div>
+      <div class="ta">chat</div>
+      <div class="tt"><em>nothing at all</em></div>
+      <div class="tr">The repertoire: one row per opening per colour — the student's own move
+        order, the line as played, chosen or faced, the record, loss per move</div>
+    </div>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>Scope is structural, not asked for</h3>
+        <p>The toolkit is built per message, already bound to one player. The model passes
+        filters; it cannot pass a username. <span class="mono">get_game</span> refuses another
+        player's game even when handed its id directly.</p>
+      </div>
+      <div class="card">
+        <h3>Two windows, on purpose</h3>
+        <p><span class="mono">get_opening_stats</span> takes no parameters and always uses the
+        thread's own window. <span class="mono">find_games</span> lets the model choose its own —
+        because that is how a student asks: about one opponent, or one month.</p>
+      </div>
+      <div class="card">
+        <h3>What is <em>not</em> there</h3>
+        <p>No write tools. No raw SQL tool, now or later. No built-in shell, file or web tools —
+        disabled on every provider path. And the profile narrative gets no tools at all: one
+        turn, nothing to verify.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">How it plays out</p>
+    <h2>One chat turn, end to end</h2>
+    <div class="chatwrap">
+      <div class="chat">
+        <div class="seedline">Thread opened at <strong>report scope</strong> — the seed already
+          holds this student's ratings, record, repertoire and turning points</div>
+        <div class="msg student"><span class="who">Student</span>
+          Why do I keep losing with the London?</div>
+        <div class="tool"><b>looking up the repertoire</b>
+          <span class="ret">get_opening_stats{} &rarr; white, London System (D02, chosen):
+          1.d4 2.Nf3 3.Bf4, 34g, 41%, opening avg loss 0.38, game avg loss 1.12
+          (pawns per move)</span></div>
+        <div class="tool"><b>looking up games</b>
+          <span class="ret">find_games{opening:&nbsp;"London", result:&nbsp;"loss", limit:&nbsp;5}
+          &rarr; 2026-06-14, white vs marko77 (1482 vs 1531), loss, blitz … id&nbsp;a3f…</span></div>
+        <div class="tool"><b>looking up game a3f…</b>
+          <span class="ret">get_game{game_id:&nbsp;"a3f…"} &rarr; Moves (evals in pawns; only
+          inaccuracies and worse annotated): 1.d4 1…d5 2.Nf3 … 21.Qh5 (blunder, −3.10) …</span></div>
+        <div class="tool"><b>engine: analyzing r1bq1rk1/pp3ppp/…</b>
+          <span class="ret">analyze_position{fen:&nbsp;"r1bq1rk1/…"} &rarr;
+          1. depth 16, −3.10: Nxe5 dxe5 Qxe5 Bf6</span></div>
+        <div class="msg coach"><span class="who">Coach</span>
+          Your London itself is fine — 0.38 pawns a move through the opening is not what is
+          costing you these games. The pattern is what happens once Black hits back in the
+          centre. In <u>your game against marko77</u>, 21.Qh5 allowed Nxe5, and the engine
+          has Black three pawns up straight after it. That is a middlegame habit, not an
+          opening choice.</div>
+      </div>
+      <div class="chatnotes">
+        <h3>What just happened</h3>
+        <ul>
+          <li><strong>The seed was quotable; everything else was not.</strong> The repertoire
+            figure could have come from the briefing — the specific game, its moves and its
+            refutation had to come from tool results in this conversation.</li>
+          <li><strong>Four calls, out of a budget of eight.</strong> Each one is a turn; the
+            model chose the sequence, not the app.</li>
+          <li><strong>The link id came from <span class="mono">find_games</span>.</strong>
+            Chat has no link-minting pass, so a game reference is only legitimate if a tool
+            returned its id — never recalled from memory.</li>
+          <li><strong>Pawns throughout, idea before number.</strong> The tool results name the
+            unit themselves, because they land mid-conversation with no header above them.</li>
+          <li><strong>Then it is persisted.</strong> The pair of messages and the provider's new
+            resume token are written before the terminal event reaches the browser.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">
+      <strong>Blue lines are what the student watches stream past; grey lines are what the
+      model actually receives.</strong> Illustrative, not a captured session — but the tool
+      names, arguments, result formats and style rules are the real ones.
+    </p>
+  </div>
+</section>
+
+<!-- 15 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The provider seam</p>
+    <h2>Three methods stand between the app and any model</h2>
+    <div class="flow">
+      <div class="node"><span class="k">complete</span><span class="v">prompt &rarr; text</span><span class="d">The coaching brief and the profile narrative. Agentic when an analyst is injected, one-shot when not.</span></div>
+      <span class="arrow">&nbsp;</span>
+      <div class="node"><span class="k">explain</span><span class="v">prompt &rarr; event stream</span><span class="d">Text and tool events, forwarded verbatim as SSE.</span></div>
+      <span class="arrow">&nbsp;</span>
+      <div class="node"><span class="k">chat</span><span class="v">history + message &rarr; stream</span><span class="d">Stateless by contract, with an opaque resume token as an optimization.</span></div>
+    </div>
+    <div class="pill-row">
+      <span class="pill on">claude-agent-sdk — shipped, default</span>
+      <span class="pill on">github-copilot — shipped</span>
+      <span class="pill off">anthropic — designed, not selectable</span>
+      <span class="pill off">azure-foundry — designed, not selectable</span>
+    </div>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>No API keys</h3>
+        <p>Both shipped providers ride a local CLI login — a Claude Code session or a
+        GitHub Copilot seat. Authentication and billing sit with the user's existing
+        subscription; the app holds no secret. Keyed providers are the reason the seam exists,
+        not a prerequisite for using it.</p>
+      </div>
+      <div class="card">
+        <h3>Unbuilt means unconfigurable</h3>
+        <p>The provider type lists implemented providers only, so naming a planned one fails
+        at config load rather than mid-request. An exhaustiveness check in the factory makes
+        the type-checker complain if the two ever drift apart.</p>
+      </div>
+      <div class="card">
+        <h3>Resume is an optimization</h3>
+        <p>A provider may resume a warm session it named; it must be able to replay the stored
+        transcript instead. A resume that fails before any output falls back silently — one that
+        fails mid-stream surfaces as an error, because a silent restart would contradict what the
+        student already saw.</p>
+      </div>
+    </div>
+    <p class="note">
+      Several coaches can be configured at once and picked in the UI. Models are pinned
+      explicitly, not tracked through a floating alias — cached advice is keyed by agent id,
+      so a model changing behind a stable id would let two models share one cache row.
+    </p>
+  </div>
+</section>
+
+<!-- 16 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">The cost model</p>
+    <h2>Engine time is free. Model calls are not.</h2>
+    <p class="lede">
+      That one sentence governs the whole backlog. Analysis can be generous — run it over
+      the archive, re-run it when the method changes. Every LLM call, by contrast, is
+      bounded by explicit user intent and written down so it never happens twice.
+    </p>
+    <div class="cols cols-2">
+      <div class="card">
+        <h3>What the caches key on</h3>
+        <dl class="kv" style="margin-top:0.7em">
+          <dt>Advice</dt><dd>player + agent + prompt version + window + time control</dd>
+          <dt>Explanation</dt><dd>game + ply + agent</dd>
+          <dt>Narrative</dt><dd>player + time control — never the window</dd>
+          <dt>Analysis</dt><dd>game id, stamped with depth and analysis version</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h3>Two version constants, two jobs</h3>
+        <p><strong>The prompt version is a cache key.</strong> Rewording the brief invalidates
+        old advice rather than serving it against a template that no longer exists.</p>
+        <p style="margin-top:0.5em"><strong>The profile version is row metadata.</strong> It flags
+        a stored narrative as stale in the UI and must never silently re-bill — the narrative is
+        expensive and meant to be durable.</p>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><strong>Window keys would strand the durable artifact.</strong>
+        <span>A "last 30 days" boundary moves every midnight, so keying the narrative on it
+        would mint a fresh key overnight and orphan every stored row. Time control is stable —
+        and a 2100 bullet player and their 1500 rapid self really are different students.</span></li>
+      <li><strong>The gaps are written down, not papered over.</strong>
+        <span>Analysis staleness keys on depth and version but not on the configurable
+        thresholds; the explanation cache carries no prompt version. Both are recorded as
+        findings with designs attached — regeneration stays the user's explicit choice.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">Constraints and non-goals</p>
+    <h2>What this system deliberately is not</h2>
+    <div class="split">
+      <div>
+        <h3>Accepted constraints</h3>
+        <ul class="no">
+          <li><strong>Single-user and loopback-only.</strong> No auth, no ownership boundary,
+            no rate limiting, no spend ceiling — named as prerequisites for a network
+            deployment rather than built speculatively.</li>
+          <li><strong>One process, in-memory run state.</strong> A restart loses in-flight run
+            tracking; finished analyses are already durable.</li>
+          <li><strong>chess.com only, standard chess only.</strong> Variants and custom start
+            positions are dropped with a warning.</li>
+          <li><strong>GPL-3.0-or-later.</strong> python-chess is copyleft and imported directly,
+            so the assembled backend already was a combined work; the licence states what was
+            true rather than leaving a permissive label on it.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Considered, then declined</h3>
+        <ul class="no">
+          <li><strong>A normalized, game-neutral database.</strong> Priced at about a week, mostly
+            in storage and its tests; perspective ids cost one string and buy the same thing while
+            tracked players rarely meet.</li>
+          <li><strong>A job queue or worker process.</strong> Background asyncio tasks in the API
+            process, cancelled cleanly on shutdown, are enough at this scale.</li>
+          <li><strong>An ORM.</strong> Stdlib sqlite3, hand-written SQL, numbered migrations.</li>
+          <li><strong>Streaming the coaching brief.</strong> It returns one JSON blob; only
+            explanations and chat stream.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">
+      Known and scheduled rather than hidden: migrations are not failure-atomic, the opening
+      phase is still a flat 20-ply cutoff pending book-exit refinement, and single-PV stored
+      analyses cannot tell whether a safe alternative existed — so a few merely-strong sacrifices
+      are awarded as brilliant. Each is an entry on the backlog with a design, not a surprise.
+    </p>
+  </div>
+</section>
+
+<!-- 18 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">How it was built</p>
+    <h2>Docs first, then one agent per component</h2>
+    <p class="lede">
+      The first five commits are documentation — the proposal and a build plan per component —
+      and the sixth is the first line of code. That order is the method, not an accident: an
+      agent that starts cold needs a written contract to work against, not a codebase to
+      infer one from.
+    </p>
+    <div class="cols cols-3">
+      <div class="card">
+        <h3>One sub-agent per component</h3>
+        <p>Eight component agents, each pinned to its own doc, scope and boundary rules.
+        Independent single-component tasks run in parallel — they touch disjoint directories
+        by construction. Work that spans components stays in the main session, where the
+        contract change is decided and documented first.</p>
+      </div>
+      <div class="card">
+        <h3>A ninth agent that only reads</h3>
+        <p>A read-only boundary reviewer checks a diff against the guidelines and the component
+        docs — imports, typing, error discipline, docs drift. It reports; fixes go back to the
+        owning component. No agent grades its own work.</p>
+      </div>
+      <div class="card">
+        <h3>Docs have three levels of authority</h3>
+        <p>A live backlog, designs written up but not built, and an archive that is history —
+        never citable as current behaviour, never a plan to resurrect. That rule is what keeps a
+        fast-moving project's own history from becoming a source of false claims.</p>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><strong>One local command <em>is</em> the CI gate.</strong>
+        <span><code>make check</code> runs the same ruff, pyright, import-linter and pytest chain
+        the pipeline runs, so a green local run means a green pipeline.</span></li>
+      <li><strong>CI touches no network, no real model, and no engine.</strong>
+        <span>Recorded fixtures and stubs only; the real-engine test is opt-in and skips when the
+        submodule is absent. A domain or interface change must update its component doc in the
+        same commit.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 ------------------------------------------------------------ -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">By the numbers</p>
+    <h2>Shape of the system</h2>
+    <div class="stats">
+      <div class="stat"><div class="num">8</div><div class="lab">components — six leaves, one composition root, one frontend</div></div>
+      <div class="stat"><div class="num">2</div><div class="lab">import-linter contracts holding the whole architecture</div></div>
+      <div class="stat"><div class="num">21</div><div class="lab">HTTP routes, four of them Server-Sent Event streams</div></div>
+      <div class="stat"><div class="num">7</div><div class="lab">SQLite tables · 11 numbered migrations</div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="num">30</div><div class="lab">domain models + 4 shared constants — the entire shared surface</div></div>
+      <div class="stat"><div class="num">46%</div><div class="lab">of the backend is the coach — and nearly all of it is deterministic Python</div></div>
+      <div class="stat"><div class="num">1.2&times;</div><div class="lab">more backend test code than backend product code</div></div>
+      <div class="stat"><div class="num">10</div><div class="lab">calendar days from empty repository to this system</div></div>
+    </div>
+    <div class="cols cols-2" style="margin-top:1.4em">
+      <div class="card">
+        <h3>Engine defaults</h3>
+        <p>Depth 16 · 2 worker processes · 100 games per run · 5 candidate lines for live eval
+        and the coach's tool (batch analysis stays single-PV) · 300 s per position before a
+        worker is judged wedged, killed and retired.</p>
+      </div>
+      <div class="card">
+        <h3>Model budgets</h3>
+        <p>8 agentic turns each for brief, explanation and chat message · 1 turn and no tools for
+        the profile narrative · 4 read-only chat tools · 40 messages per thread · ~250 tokens
+        for the embedded student profile.</p>
+      </div>
+    </div>
+    <p class="note">
+      Sources: <span class="mono">docs/README.md</span> for the architecture,
+      <span class="mono">docs/GUIDELINES.md</span> for the engineering rules, and
+      <span class="mono">docs/01</span>–<span class="mono">08</span> for one build plan per component.
+    </p>
+  </div>
+</section>
+
+<div class="chrome">
+  <span class="deck-name">AI Chess Coach — Architecture Overview</span>
+  <span class="spacer"></span>
+  <button id="prev" type="button" aria-label="Previous slide">&larr;</button>
+  <span class="counter"><span id="cur">1</span> / <span id="total">19</span></span>
+  <button id="next" type="button" aria-label="Next slide">&rarr;</button>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var progress = document.getElementById('progress');
+  var cur = document.getElementById('cur');
+  document.getElementById('total').textContent = String(slides.length);
+  var i = 0;
+
+  function show(n, push) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === i); });
+    cur.textContent = String(i + 1);
+    progress.style.width = ((i + 1) / slides.length * 100) + '%';
+    if (push !== false) {
+      history.replaceState(null, '', '#' + (i + 1));
+    }
+  }
+
+  function fromHash() {
+    var n = parseInt((location.hash || '').slice(1), 10);
+    show(isNaN(n) ? 0 : n - 1, false);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown':
+        show(i + 1); e.preventDefault(); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+        show(i - 1); e.preventDefault(); break;
+      case 'Home': show(0); e.preventDefault(); break;
+      case 'End': show(slides.length - 1); e.preventDefault(); break;
+      case 'f': case 'F':
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+        break;
+    }
+  });
+
+  document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+  document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+  window.addEventListener('hashchange', fromHash);
+
+  fromHash();
+})();
+</script>
+
+</body>
+</html>

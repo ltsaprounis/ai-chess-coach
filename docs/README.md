@@ -10,7 +10,7 @@ API layer is the only module that composes them, and everything else
 communicates through the shared domain types and plain function
 interfaces.
 
-Two directories hold work that is not a component:
+Three directories hold work that is not a component:
 
 - [future-improvements/](future-improvements/) — designs evaluated
   but not built, each with its reasoning: deliberately deferred, or
@@ -21,6 +21,14 @@ Two directories hold work that is not a component:
   that are closed out, kept for their measurements and reasoning.
   Nothing here describes current plans; anything they left open was
   handed to `future-improvements/` or to a component doc first.
+- [presentations/](presentations/) — self-contained HTML decks that
+  explain the project to an audience. They restate what the docs
+  below already say; the docs are the source of truth, so a deck is
+  refreshed from them rather than cited as a contract.
+  [architecture-overview.html](presentations/architecture-overview.html)
+  covers the system map, the three data flows, the prompt flows, the
+  coach's tool surface with a worked chat turn, and the design
+  decisions behind them.
 
 The backend is Python end to end; TypeScript appears only in the
 `web/` frontend.
