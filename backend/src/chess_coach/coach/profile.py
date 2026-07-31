@@ -168,12 +168,13 @@ def _profile_comparisons(report: PlayerReport) -> list[Comparison]:
                 losses=family.losses,
                 draws=family.draws,
             )
+            side = "White" if color == "white" else "Black"
             pairs.append(
                 ComparisonInput(
-                    label=f"{family.label} ({color})",
+                    label=f"{family.label} as {side}",
                     left_label="in this system",
                     left=family_record,
-                    right_label=f"their other games as {color}",
+                    right_label=f"their other games as {side}",
                     right=_without(color_record, family_record),
                 )
             )

@@ -38,9 +38,12 @@ from chess_coach.coach import (
     build_move_context,
     build_profile,
     build_report,
+    build_trajectory,
+    profile_window,
     render_explain_prompt,
     render_profile_prompt,
     render_prompt,
+    window_spans_level_change,
 )
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
@@ -967,22 +970,45 @@ def _load_profile_facts(
     stored one, if any. An unknown player has no stored games, so this is
     simply the profile of an empty report, mirroring `/report`.
     """
-    games = list_analyzed_games(
+    # Pass one: every stored game in the caller's scope. Light rows (no
+    # PGN), and they carry both things only the *unwindowed* archive can
+    # answer -- where the student's current level begins, and where they
+    # are heading (docs/06-coach.md, "Window", "Trajectory").
+    archive = list_game_summaries(
         db, username, since=since, until=until, time_class=time_class
     )
-    all_games = list_game_summaries(
-        db, username, since=since, until=until, time_class=time_class
+    trajectory = build_trajectory(archive)
+    archive_report = build_report(username, [], all_games=archive)
+    level_since = profile_window(archive_report.months)
+    spans_change = window_spans_level_change(archive_report.months, level_since)
+
+    # Pass two, narrowed to that level. The bound only ever tightens the
+    # caller's own window, never widens it: a request for last month must
+    # not come back covering six.
+    outcome_since = (
+        max(x for x in (since, level_since) if x is not None)
+        if (since is not None or level_since is not None)
+        else None
+    )
+
+    games = list_analyzed_games(
+        db, username, since=outcome_since, until=until, time_class=time_class
+    )
+    all_games = (
+        archive
+        if outcome_since is None
+        else [g for g in archive if g.end_time >= outcome_since]
     )
     report = build_report(
         username,
         games,
         all_games=all_games,
         time_class=time_class,
-        requested_since=since,
+        requested_since=outcome_since,
         requested_until=until,
         games_in_scope=len(all_games),
     )
-    return build_profile(report)
+    return build_profile(report, trajectory=trajectory, spans_level_change=spans_change)
 
 
 @router.get("/players/{username}/profile")

@@ -580,8 +580,15 @@ def _best_win(games: list[_VolumeGame]) -> BestWin | None:
     1,925 reference rapid games the student faced someone 50+ points
     stronger nine times and never beat one.
     """
+    # More than the opposition band above, not merely one point: inside
+    # +/-50 the two players are the same strength by this report's own
+    # definition, so "beat someone 7 points higher" is a milestone about
+    # nothing. On the reference rapid archive the largest upset is
+    # exactly that +7, and None is the right answer there.
     wins = [
-        g for g in games if g.result == "win" and g.opponent_rating > g.player_rating
+        g
+        for g in games
+        if g.result == "win" and g.opponent_rating - g.player_rating > _OPPONENT_BAND
     ]
     if not wins:
         return None

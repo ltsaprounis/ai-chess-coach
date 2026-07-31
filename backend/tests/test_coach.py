@@ -1046,7 +1046,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v4"
+    assert PROFILE_PROMPT_VERSION == "profile-v5"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -1297,8 +1297,8 @@ def test_render_profile_prompt_briefs_the_coach_in_the_third_person() -> None:
     profile = build_profile(build_report("testuser", scenario_games()))
     prompt = render_profile_prompt(profile)
 
-    assert 'never address the reader as "you"' in prompt
-    assert "third person" in prompt
+    assert 'Never address the reader as "you"' in prompt
+    assert "Third person" in prompt
     assert "address the student directly" not in prompt
 
 
@@ -3162,10 +3162,18 @@ def test_build_profile_copies_the_milestones_verbatim() -> None:
     assert profile.terminations == report.terminations
 
 
-def test_profile_prompt_reads_the_after_loss_score_against_the_overall_one() -> None:
-    """The figure means nothing alone: 50% after a loss is bad only next
-    to a better overall score, so the comparison is rendered, not left
-    for the model to find."""
+def test_profile_prompt_leaves_the_after_loss_split_to_the_verdicted_section() -> None:
+    """The profile has a "Splits" section that states this comparison
+    against a *matched* baseline and with a verdict, so the milestone
+    line is gone from this document alone (docs/06-coach.md, "Reading a
+    comparison").
+
+    Rendering both would put the raw gap above the judgement of it, and
+    a model handed "48% after a loss against 52% overall" as a milestone
+    narrates it whatever the section below says -- which is exactly what
+    the first live narrative did. The report brief has no Splits section
+    and keeps the line.
+    """
     day = 1_780_000_000
     report = _volume_report(
         [
@@ -3176,10 +3184,13 @@ def test_profile_prompt_reads_the_after_loss_score_against_the_overall_one() -> 
         ]
     )
 
-    prompt = render_profile_prompt(build_profile(report))
+    profile_prompt = render_profile_prompt(build_profile(report))
+    brief = render_prompt(report)
 
-    assert "- After a loss: 0% (1g) in the next game of the same sitting" in prompt
-    assert "against 50% (4g) overall" in prompt
+    assert "- After a loss:" not in profile_prompt
+    assert "- By color:" not in profile_prompt
+    assert "- After a loss: 0% (1g) in the next game of the same sitting" in brief
+    assert "against 50% (4g) overall" in brief
 
 
 def test_profile_prompt_renders_the_dated_peak_and_the_milestones() -> None:
@@ -3191,7 +3202,10 @@ def test_profile_prompt_renders_the_dated_peak_and_the_milestones() -> None:
     assert peak.rating_max_at is not None
     assert f"{peak.rating_max} on " in prompt
     assert "## Milestones and tendencies" in prompt
-    assert "- Best win: beat a " in prompt
+    # Gap first: the gap is the achievement, where "beat a 1559" only
+    # says the student was once rated about that themselves
+    # (docs/06-coach.md, "Trajectory").
+    assert "- Biggest upset: beat someone " in prompt
     assert "## How games end" in prompt
 
 

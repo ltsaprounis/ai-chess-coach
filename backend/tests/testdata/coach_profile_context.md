@@ -4,8 +4,8 @@
 - Recent form (last 30 days): 1.34 pawns lost per move, 3.4% blunders over 8 analyzed games -- against 1.07 pawns over the whole span
 - Trend: 2026-03 1451 → 2026-06 1598 (4 months)
 - How they lose: 8 losses -- resigned 50%, timeout 38%, checkmated 12%
-- Chosen systems: White Queen's Pawn Game (1.d4 2.Bf4 3.e3) -- 6g, 58%; Black Pirc Defense (1...d6 2...Nf6 3...g6) -- 6g, 58%
-- Faced lines: White Englund Gambit Complex (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) -- 5g, 40%
+- Chosen systems: White Queen's Pawn Game (1.d4 2.Bf4 3.e3) -- 6g, 58%, 0.14 pawns/move out of the opening; Black Pirc Defense (1...d6 2...Nf6 3...g6) -- 6g, 58%, 0.15 pawns/move out of the opening
+- Faced lines: White Englund Gambit Complex (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) -- 5g, 40%, 5.16 pawns/move out of the opening
 - Errors: Back-rank vulnerability (2); Walked into a forced mate (2)
 
 Coach's read:
