@@ -164,6 +164,13 @@ an explain tool loop. Unblocks users without a Claude Code login.
 
 ## Housekeeping worth scheduling
 
+- **Prompt hygiene pass**: an audit of the five templates as they
+  actually render (2026-07-31) found seven defects, two of which
+  change what the coach says today — the embedded profile block labels
+  pawns as centipawns, and the chat instructions forbid the model from
+  using the seed they arrive with. All agreed for fixing in one pass,
+  written up with evidence and order in
+  [prompt-hygiene.md](future-improvements/prompt-hygiene.md).
 - **Prompt-version the explanation cache**: cached explanations keep
   the style of the prompt that made them (bit us this week). A
   `prompt_version` column lets the UI badge stale ones instead of

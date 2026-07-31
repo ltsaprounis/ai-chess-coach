@@ -37,9 +37,10 @@ def build_profile(report: PlayerReport) -> PlayerProfile:
     the stored narrative when one exists.
 
     Total over an empty report: every field here is either a direct copy
-    of a report field (already `[]`/`0`/`0.0` for a report with no
-    analyzed games) or a rollup over `report.openings` (already `[]`), so
-    no branch below needs an explicit empty-report special case.
+    of a report field (already `[]`/`{}`/`None`/`0`/`0.0` for a report
+    with no analyzed games) or a rollup over a report list that is
+    already `[]`, so no branch below needs an explicit empty-report
+    special case.
     """
     return PlayerProfile(
         username=report.username,
@@ -63,6 +64,19 @@ def build_profile(report: PlayerReport) -> PlayerProfile:
         time_classes=report.time_classes,
         months=report.months[-_MONTHS_CAP:],  # already oldest-first; slice keeps it so
         periods=report.periods,
+        # Milestones and splits: direct copies, since the report already
+        # computed them (docs/06-coach.md, "Milestones"). None is capped
+        # -- the two records are single rows, and `terminations` is
+        # bounded by chess.com's own result-code vocabulary at a handful
+        # of rows. Slicing it would be worse than not: the renderer sums
+        # each result's rows to state "62 losses: ...", and a capped list
+        # would make that total disagree with the record above it.
+        record=report.record,
+        color_records=report.color_records,
+        best_win=report.best_win,
+        streaks=report.streaks,
+        opponents=report.opponents,
+        terminations=report.terminations,
         openings=_profile_openings(report),
         error_patterns=report.error_patterns,
         narrative=None,

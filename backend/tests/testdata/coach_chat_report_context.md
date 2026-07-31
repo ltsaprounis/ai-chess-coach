@@ -5,13 +5,20 @@
 - Requested: 2026-01-01 to 2026-07-27
 - Window: 2026-03-27 to 2026-06-07
 - Coverage: 19 of 30 games in scope are analyzed
-- Note: the other 11 games in scope are not engine-analyzed; every figure below describes only the analyzed span.
+- Note: the other 11 games in scope are not engine-analyzed. Ratings, records, milestones, how games end and the repertoire's game counts cover every game in scope; ACPL, blunder rates, error patterns and turning points cover the analyzed ones only.
 - Scope: all time controls
 - Analyzed: 19 games
-- Blitz: 11 games, rating 1455 → 1496 (range 1451-1496)
-- Rapid: 6 games, rating 1560 → 1598 (range 1552-1598)
-- Bullet: 2 games, rating 1468 → 1483 (range 1468-1483)
+- Blitz: 11 games, rating 1455 → 1496 (range 1451-1496; peak 1496 on 2026-06-04)
+- Rapid: 6 games, rating 1560 → 1598 (range 1552-1598; peak 1598 on 2026-06-07)
+- Bullet: 2 games, rating 1468 → 1483 (range 1468-1483; peak 1483 on 2026-06-01)
 - Opposition: avg rating diff -2; 40% (5g) vs stronger, 62% (8g) vs similar, 50% (6g) vs weaker
+
+## Recent form
+*(Windows are nested and end at the most recent game, so each wider row contains the narrower ones.)*
+| Window | Games | Score | Rating | ACPL | Blunder % | Analyzed |
+|---|---|---|---|---|---|---|
+| last 30 days | 8 | 44% (8g) | 1598 | 1.34 | 3.4% | 8 |
+| whole span | 19 | 53% (19g) | 1598 | 1.07 | 2.6% | 19 |
 
 ## How the play breaks down
 | Phase | Moves | ACPL | Blunder % |
@@ -28,6 +35,12 @@ Overall 1.07 ACPL over 230 moves -- best 58.3% (134), good 29.1% (67), inaccurac
 | 2026-04 | 7 | 1466 | 0.23 | 2.3% |
 | 2026-05 | 6 | 1487 | 1.59 | 1.5% |
 | 2026-06 | 3 | 1598 | 0.35 | 5.7% |
+
+## Milestones
+*(Over every game in scope, analyzed or not -- none of these needs an engine.)*
+- Best win: beat hikaru (1638) on 2026-06-07, rated 1598 at the time (+40)
+- Streaks: last game was a win; longest runs 2 wins, 2 losses
+- By color: White 50% (13g); Black 58% (6g)
 
 ## How games end
 Losses 8: resigned 4, timeout 3, checkmated 1

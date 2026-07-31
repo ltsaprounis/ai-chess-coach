@@ -108,6 +108,25 @@ def render_profile_context(profile: PlayerProfile) -> str
 # it must never silently re-bill (docs/03-storage.md).
 PROFILE_PROMPT_VERSION: str
 
+# --- Milestones (see "Milestones" below) ---
+#
+# Volume-layer figures on PlayerReport, copied onto PlayerProfile:
+#
+#   TimeClassStats.rating_max_at / rating_min_at  # dated extremes
+#   PlayerReport.color_records: dict[Color, Record]
+#   PlayerReport.best_win: BestWin | None
+#   PlayerReport.streaks: StreakStats | None
+#
+# class BestWin(BaseModel):       # the strongest opponent beaten
+#     game_id: str; end_time: int; time_class: TimeClass; color: Color
+#     opponent: str; opponent_rating: int; player_rating: int
+#
+# class StreakStats(BaseModel):   # runs, and the rebound after a loss
+#     current_result: Result      # the run the newest game belongs to
+#     current_length: int
+#     longest_win: int; longest_loss: int
+#     after_loss: Record          # the next game of the same sitting
+
 # --- Move explanation (runs only on explicit user request — LLM
 # --- calls cost money; the API layer caches results in storage) ---
 
@@ -374,11 +393,17 @@ ones that had analysis, presented under a window line that made the
 shrunken span look like the request. When the caller supplies them,
 the prompt's student section states the requested window alongside the
 covered span, and renders coverage as "N of M games in scope"; when
-analysis covers less than the scope it adds an explicit caveat that
-the remaining games are unanalyzed and the quality figures describe
-only the analyzed span — which is what lets the instruction block's
+analysis covers less than the scope it adds an explicit caveat naming
+the remaining games — which is what lets the instruction block's
 honesty rule actually bite. With no scope information (`None`
 throughout) the section renders as it always did.
+
+The caveat **names which figures the shortfall touches**, rather than
+saying every figure below describes the analyzed span. That shorter
+wording was true when it was written and the next section made it
+false: ratings, records, milestones, terminations and the
+repertoire's game counts all cover every stored game. Left as it was,
+it told the model to discount the half of the brief that is complete.
 
 ### Volume and quality
 
@@ -434,11 +459,97 @@ Three choices worth stating:
   row, and showing both invites a narrative to read a difference that
   cannot exist.
 
-The profile prompt renders them as a table and its instructions lead
-with the most recent window carrying a real sample; the compact embed
-block renders one line — the narrowest window with analysis, against
-the whole-span figure — because the question other prompts need
-settled is just "better or worse than usual right now".
+All three data prompts render the table through one shared function
+(`_periods_section`, as `_trend_section` is shared for `months` — the
+table is register-free), and the report brief and profile prompt both
+instruct the model to lead with the most recent window carrying a
+real sample, in preference to a single month's row. The compact embed
+block renders one line instead — the narrowest window with analysis,
+against the whole-span figure — because the question other prompts
+need settled is just "better or worse than usual right now".
+
+The brief went a release without this: `periods` shipped with the
+profile and reached only the profile prompt, so every piece of
+`/coach` advice averaged the whole span flat while the profile
+narrative beside it led with the last 30 days.
+
+### Milestones
+
+Averages describe a student; milestones are what the student
+describes themselves by. "Peaked at 1723 last March and has been
+below it since", "beat a 1900 in May", "lost four in a row", "scores
+39% in the game right after a loss against 48% overall", "loses 38%
+of their losses on the clock" — none of these survives being averaged
+into an ACPL, and every one of them names a coaching problem or a
+piece of evidence a coach can hand back.
+
+All of it is **volume layer**, so all of it covers every stored game
+in scope, analyzed or not: beating a 1900 is a fact about the game,
+not about whether an engine has looked at it. Computing any of it over
+the analyzed subset would reproduce, one level down, the bug the
+volume/quality split exists to stamp out.
+
+Four rules worth stating, since each has a wrong-looking alternative:
+
+- **A peak is dated at the first game that reached it.** `max()` over
+  a chronological list returns the earliest extreme, which is when the
+  student got there — "peaked in March and has not passed it since" is
+  only true of the first date. Both extremes are extremes *of the
+  games in scope*, never chess.com's own all-time best, which the
+  archive does not carry.
+- **A run of one is not a run.** The current run is the run the most
+  recent game belongs to, where a run is consecutive games with the
+  same result (a draw is a run of draws, not a break in one). Both
+  renderers word a run of length one as the last game's result rather
+  than as "a 1-game winning run", which invites a reader to narrate
+  momentum that does not exist.
+- **The after-a-loss score is a comparison or it is nothing.** 39% is
+  bad only next to a better overall score, so `PlayerProfile.record`
+  rides beside it and every renderer states both. `after_loss` counts
+  each game whose immediately preceding game in scope was a loss
+  ended within two hours — the same sitting, which is where tilt shows
+  up. Chained losses each seed the next game, so a six-game slide
+  contributes five. On an archive with no back-to-back games it is
+  legitimately empty, and an empty record must read as "no sample",
+  never as a 0% score.
+- **Terminations reach the profile uncapped**, unlike every other list
+  it distills: the vocabulary is chess.com's own handful of result
+  codes, and a capped list would make the totals its renderers state
+  ("62 losses: …") disagree with the record above them.
+
+All three prompts render them: the report brief and the report-scope
+chat seed as a "Milestones" section, the profile prompt as
+"Milestones and tendencies", both above the shared "How games end"
+table.
+
+**Every milestone line is subject-free** — "Best win: beat marko77
+(1750) on…" — like every other line of the student section it sits
+beside. The report's *headings* are second person ("Systems you
+chose") because the brief is written to the student and a model
+copies the register it is given; an assertion with a verb is not a
+heading. The system prompt opens "You are a … coach", so "you beat
+marko77" briefly has two candidate referents where a label:value line
+has none, and nothing is gained by spending that ambiguity. The
+profile prompt keeps its third-person variants where a subject is
+unavoidable, for its own reason: that text is stored and re-read by
+another coach.
+
+Subject-free leaves the after-a-loss and color-split lines identical
+in both prompts, so there is one implementation of each, taking the
+fields rather than either container. Only two lines genuinely differ.
+
+The two that do: the profile's best-win line names **no opponent**,
+the report's does. The profile narrative is stored and pasted into
+other prompts where a game reference resolves to nothing, so its
+citation ban covers opponent handles; the brief's whole citation rule
+is "name the game by opponent and date", and a milestone the student
+cannot go and find is not a milestone. And the profile's streak line
+carries "their", where the report's needs no subject at all.
+
+The compact embed block takes **one** of them — how the student
+loses — because that is the only one that changes advice about a
+single move: "you were winning and lost on time" is a different
+lesson from "you were winning and blundered".
 
 ### Judgment counts carry their denominator
 
@@ -643,8 +754,11 @@ not.
 
 **Facts.** `build_profile(report)` distills an already-built
 `PlayerReport` into `domain.PlayerProfile`: rating and record per
-time class, the most recent months of trend, the recent-form
-`periods`, overall and per-phase quality, the repertoire as
+time class with the extremes dated, the most recent months of trend,
+the recent-form `periods`, overall and per-phase quality, the
+milestones (see "Milestones" above — `record`, `color_records`,
+`best_win`, `streaks`, `opponents`, `terminations`, all copied
+verbatim), the repertoire as
 `ProfileOpening` rows, and the tagged error patterns. Pure and free,
 recomputed on demand; the aggregation itself runs once, in
 `build_report` — the profile projects it and adds no second
@@ -662,8 +776,14 @@ Distillation rules:
   actually plays), faced rows by impact (what actually hurts them,
   the same games × win-rate-deficit sort the report tables use).
 - Every list is capped so the rendered block stays around 250
-  tokens; the exact caps are implementation detail, pinned by the
-  snapshot tests rather than stated here.
+  tokens, `terminations` excepted for the reason given under
+  "Milestones"; the exact caps are implementation detail, pinned by
+  the snapshot tests rather than stated here.
+- Fields added to `PlayerProfile` after the first release carry
+  empty-ish defaults, so a snapshot stored under an older shape still
+  parses. The embed paths read stored rows (see "Embedding"), and a
+  required new field would turn every one of them into a validation
+  error until the student paid to regenerate.
 
 **Narrative.** Three to five sentences of tendencies plus a short
 weakness list, every claim tied to a figure the facts state.

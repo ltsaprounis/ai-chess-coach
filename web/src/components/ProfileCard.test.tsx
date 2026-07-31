@@ -37,10 +37,21 @@ function profile(partial: Partial<PlayerProfile> = {}): PlayerProfile {
         rating_end: 1523,
         rating_min: 1380,
         rating_max: 1540,
+        rating_max_at: 1_710_000_000,
+        rating_min_at: 1_700_000_000,
       },
     ],
     months: [],
     periods: [],
+    record: { games: 42, wins: 20, losses: 15, draws: 7 },
+    color_records: {
+      white: { games: 22, wins: 12, losses: 8, draws: 2 },
+      black: { games: 20, wins: 8, losses: 7, draws: 5 },
+    },
+    best_win: null,
+    streaks: null,
+    opponents: null,
+    terminations: [],
     openings: [],
     error_patterns: [],
     narrative: null,
@@ -352,6 +363,141 @@ describe("ProfileCard", () => {
       });
       expect(html).toContain("—");
       expect(html).not.toContain("0.00");
+    });
+  });
+
+  // Volume-layer figures: they cover every game in scope, analyzed or
+  // not (docs/06-coach.md, "Milestones").
+  describe("milestones", () => {
+    const streaks = {
+      current_result: "loss" as const,
+      current_length: 3,
+      longest_win: 6,
+      longest_loss: 4,
+      after_loss: { games: 10, wins: 3, losses: 6, draws: 1 },
+    };
+
+    it("dates the rating peak beside the current rating", () => {
+      const html = render({ profile: profile() });
+      expect(html).toContain("peak 1540");
+      expect(html).toContain(
+        new Date(1_710_000_000 * 1000).toLocaleDateString(),
+      );
+      expect(html).toContain("(-17)"); // 1523 now, 1540 at the peak
+    });
+
+    it("omits the shortfall when the current rating is the peak", () => {
+      const html = render({
+        profile: profile({
+          time_classes: [
+            {
+              time_class: "rapid",
+              record: { games: 42, wins: 20, losses: 15, draws: 7 },
+              rating_start: 1400,
+              rating_end: 1540,
+              rating_min: 1380,
+              rating_max: 1540,
+              rating_max_at: 1_710_000_000,
+              rating_min_at: 1_700_000_000,
+            },
+          ],
+        }),
+      });
+      expect(html).toContain("peak 1540");
+      expect(html).not.toContain("(-");
+    });
+
+    it("deep-links the best win to its game", () => {
+      const html = render({
+        profile: profile({
+          best_win: {
+            game_id: "g-best",
+            end_time: 1_700_000_000,
+            time_class: "rapid",
+            color: "white",
+            opponent: "marko77",
+            opponent_rating: 1750,
+            player_rating: 1500,
+          },
+        }),
+      });
+      expect(html).toContain('href="/games/g-best"');
+      expect(html).toContain("beat marko77 (1750)");
+      expect(html).toContain("rated 1500 at the time");
+    });
+
+    it("reads the after-a-loss score against the overall one", () => {
+      const html = render({ profile: profile({ streaks }) });
+      expect(html).toContain("3-game losing run");
+      expect(html).toContain("longest 6 wins, 4 losses");
+      // 3.5/10 after a loss against 23.5/42 overall.
+      expect(html).toContain("35% over 10 games");
+      expect(html).toContain("56% overall");
+    });
+
+    it("omits the after-a-loss row with no such games, rather than showing 0%", () => {
+      const html = render({
+        profile: profile({
+          streaks: {
+            ...streaks,
+            after_loss: { games: 0, wins: 0, losses: 0, draws: 0 },
+          },
+        }),
+      });
+      expect(html).toContain("3-game losing run");
+      expect(html).not.toContain("After a loss");
+    });
+
+    it("splits the score by side and states how losses end", () => {
+      const html = render({
+        profile: profile({
+          terminations: [
+            { result: "loss", termination: "timeout", games: 12 },
+            { result: "loss", termination: "resigned", games: 8 },
+          ],
+        }),
+      });
+      expect(html).toContain("White 59% (22)"); // (12 + 2/2) of 22
+      expect(html).toContain("Black 53% (20)");
+      expect(html).toContain("timeout 60%");
+      expect(html).toContain("resigned 40%");
+    });
+
+    // Matchmaking keeps nearly every game inside the "similar" band, so
+    // on a real archive the other two rest on a handful of games —
+    // "stronger 0%" without its denominator reads as a verdict.
+    it("carries the sample size on every opposition band", () => {
+      const html = render({
+        profile: profile({
+          opponents: {
+            avg_rating_diff: 1.4,
+            vs_stronger: { games: 6, wins: 0, losses: 6, draws: 0 },
+            vs_similar: { games: 1062, wins: 511, losses: 492, draws: 59 },
+            vs_weaker: { games: 5, wins: 4, losses: 1, draws: 0 },
+          },
+        }),
+      });
+      expect(html).toContain("stronger 0% (6)");
+      expect(html).toContain("similar 51% (1062)");
+      expect(html).toContain("weaker 80% (5)");
+    });
+
+    it("omits the losing breakdown when one cause covers every loss", () => {
+      const html = render({
+        profile: profile({
+          terminations: [
+            { result: "loss", termination: "resigned", games: 15 },
+          ],
+        }),
+      });
+      expect(html).not.toContain("How you lose");
+    });
+
+    it("drops the whole section when no milestone has data", () => {
+      const html = render({
+        profile: profile({ color_records: {}, terminations: [] }),
+      });
+      expect(html).not.toContain("Milestones");
     });
   });
 

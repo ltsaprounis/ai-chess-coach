@@ -3,11 +3,11 @@
 Covering their games (all time controls): 19 games, 2026-03-27 to 2026-06-07 (all 19 games analyzed).
 
 ## Ratings
-| Time class | Score | Rating |
-|---|---|---|
-| Blitz | 50% (11g) | 1455 → 1496 (range 1451-1496) |
-| Rapid | 58% (6g) | 1560 → 1598 (range 1552-1598) |
-| Bullet | 50% (2g) | 1468 → 1483 (range 1468-1483) |
+| Time class | Score | Rating | Peak |
+|---|---|---|---|
+| Blitz | 50% (11g) | 1455 → 1496 (range 1451-1496) | 1496 on 2026-06-04 |
+| Rapid | 58% (6g) | 1560 → 1598 (range 1552-1598) | 1598 on 2026-06-07 |
+| Bullet | 50% (2g) | 1468 → 1483 (range 1468-1483) | 1483 on 2026-06-01 |
 
 ## Recent form
 *(Windows are nested and end at the most recent game, so each wider row contains the narrower ones.)*
@@ -31,6 +31,18 @@ Overall 1.07 ACPL over 230 moves -- best 58.3% (134), good 29.1% (67), inaccurac
 | 2026-04 | 7 | 1466 | 0.23 | 2.3% |
 | 2026-05 | 6 | 1487 | 1.59 | 1.5% |
 | 2026-06 | 3 | 1598 | 0.35 | 5.7% |
+
+## Milestones and tendencies
+*(All over every game in scope, analyzed or not -- none of these needs an engine.)*
+- Best win: beat a 1638 on 2026-06-07, rated 1598 at the time (+40)
+- Streaks: their last game was a win; longest runs 2 wins, 2 losses
+- By color: White 50% (13g); Black 58% (6g)
+- Opposition: avg rating diff -2; 40% (5g) vs stronger, 62% (8g) vs similar, 50% (6g) vs weaker
+
+## How games end
+Losses 8: resigned 4, timeout 3, checkmated 1
+Draws 2: agreed 1, repetition 1
+Wins 9
 
 ## Repertoire
 
@@ -57,6 +69,7 @@ Write the player's narrative now, following these rules:
 - **Scope.** The facts above cover one time control, named in the header. Say which one when you characterize the student, and never generalize the figures to their whole game -- a rapid profile is not a description of their bullet play.
 - **Two denominators.** Ratings, records and repertoire counts cover every game in scope; ACPL, blunder rates and error patterns cover only the analyzed subset, whose size the header states. Never present the analyzed sample as the student's whole history, and if coverage is thin, say the quality read is provisional.
 - **Recent form first.** Where the recent-form windows disagree with the all-time figures, lead with the most recent window that has a real sample and say which way it is moving -- how the student plays now matters more than their average over years. Ignore a window whose analyzed count is too small to carry a conclusion.
+- **Milestones are evidence, not decoration.** The rating peak with its date, the best win, the streaks, the after-a-loss score, the color split and how games end are all facts about every game in scope. Use the ones that say something -- sitting well below a peak reached long ago, a worse score in the game right after a loss, a lopsided White/Black split, or a large share of losses on the clock are each a coaching problem with a name. Ignore the ones that do not, and never read a split whose sample is a handful of games as a tendency.
 - **Register.** Write for a club player's coach, not a fellow engine: pawns, never centipawns, and the idea before the number.
 - **Evidence.** Every claim must tie to a figure stated above -- a rating, an ACPL, a blunder rate, a repertoire score, an error-pattern count. Never assert a tendency the facts do not support.
 - **No invented lines.** Do not assert a concrete variation, opening trap, or line of play beyond what the facts state -- these are aggregates, not annotated games, and there is no engine here to verify a claimed line.

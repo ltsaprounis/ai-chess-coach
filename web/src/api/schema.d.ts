@@ -469,6 +469,42 @@ export interface components {
             remaining: number;
         };
         /**
+         * BestWin
+         * @description The strongest opponent the player beat in scope.
+         *
+         *     A milestone, not an aggregate: the one game a student actually
+         *     remembers, and the only figure in a profile that says the ceiling
+         *     is higher than the average. Volume-layer — beating a 1900 is a fact
+         *     about the game, not about whether an engine has looked at it — so
+         *     it is drawn from every stored game, analyzed or not.
+         *
+         *     Carries the game's identity for the same reason `CriticalPosition`
+         *     does: the UI deep-links it (`/games/{id}`) and a coach can name the
+         *     opponent and date rather than "one of your games".
+         */
+        BestWin: {
+            /** Game Id */
+            game_id: string;
+            /** End Time */
+            end_time: number;
+            /**
+             * Time Class
+             * @enum {string}
+             */
+            time_class: "bullet" | "blitz" | "rapid" | "daily";
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "white" | "black";
+            /** Opponent */
+            opponent: string;
+            /** Opponent Rating */
+            opponent_rating: number;
+            /** Player Rating */
+            player_rating: number;
+        };
+        /**
          * BookMove
          * @description One book continuation out of a position (docs/05-openings.md).
          *
@@ -1186,6 +1222,30 @@ export interface components {
              * @default []
              */
             periods: components["schemas"]["PeriodStats"][];
+            /**
+             * @default {
+             *       "games": 0,
+             *       "wins": 0,
+             *       "losses": 0,
+             *       "draws": 0
+             *     }
+             */
+            record: components["schemas"]["Record"];
+            /**
+             * Color Records
+             * @default {}
+             */
+            color_records: {
+                [key: string]: components["schemas"]["Record"];
+            };
+            best_win?: components["schemas"]["BestWin"] | null;
+            streaks?: components["schemas"]["StreakStats"] | null;
+            opponents?: components["schemas"]["OpponentStats"] | null;
+            /**
+             * Terminations
+             * @default []
+             */
+            terminations: components["schemas"]["TerminationStats"][];
             /** Openings */
             openings: components["schemas"]["ProfileOpening"][];
             /** Error Patterns */
@@ -1200,7 +1260,8 @@ export interface components {
          *     Two layers with two different denominators (docs/06-coach.md,
          *     "Volume and quality"). **Volume** — `record`, `time_classes` and
          *     their ratings, `months` game counts, `terminations`, `opponents`,
-         *     and the repertoire's `games`/win-loss columns — describes every
+         *     `color_records`, `best_win`, `streaks`, and the repertoire's
+         *     `games`/win-loss columns — describes every
          *     stored game in scope. **Quality** — `overall_acpl`,
          *     `judgment_counts`, `phases`, `error_patterns`, `critical_positions`,
          *     the ACPL columns, and `months` ACPL/blunder rate — describes the
@@ -1257,6 +1318,15 @@ export interface components {
             /** Terminations */
             terminations: components["schemas"]["TerminationStats"][];
             opponents: components["schemas"]["OpponentStats"] | null;
+            /**
+             * Color Records
+             * @default {}
+             */
+            color_records: {
+                [key: string]: components["schemas"]["Record"];
+            };
+            best_win?: components["schemas"]["BestWin"] | null;
+            streaks?: components["schemas"]["StreakStats"] | null;
             /** Openings */
             openings: components["schemas"]["OpeningStats"][];
             /** Error Patterns */
@@ -1404,6 +1474,39 @@ export interface components {
             analyzed: number;
             root: components["schemas"]["RepertoireNode"];
         };
+        /**
+         * StreakStats
+         * @description Runs and rebounds — what the volume layer knows about momentum.
+         *
+         *     Two questions no lifetime average answers. **Are they on a run
+         *     right now**: `current_*` describe the run the most recent game in
+         *     scope belongs to, where a run is consecutive games with the same
+         *     result (a draw is a run of draws, not a break in one), and
+         *     `longest_*` are the longest such runs anywhere in scope. **Do they
+         *     tilt**: `after_loss` is the record over games played in the same
+         *     sitting as, and immediately after, a loss — set against the
+         *     player's overall record it is the difference between "lost six
+         *     today" and "lost one, then lost five chasing it".
+         *
+         *     `after_loss` is a strict subset of `record`, and its own `games`
+         *     is the denominator: on a correspondence archive, or one with no
+         *     back-to-back games at all, it is legitimately empty and must read
+         *     as "no sample", never as a 0% score.
+         */
+        StreakStats: {
+            /**
+             * Current Result
+             * @enum {string}
+             */
+            current_result: "win" | "loss" | "draw";
+            /** Current Length */
+            current_length: number;
+            /** Longest Win */
+            longest_win: number;
+            /** Longest Loss */
+            longest_loss: number;
+            after_loss: components["schemas"]["Record"];
+        };
         /** SyncResult */
         SyncResult: {
             /** Games Synced */
@@ -1427,6 +1530,13 @@ export interface components {
         /**
          * TimeClassStats
          * @description Play and rating movement within one time control.
+         *
+         *     The extremes carry their dates: "peaked at 1723" is trivia,
+         *     "peaked at 1723 last March and has been below it since" is the
+         *     fact a student measures themselves against. Both are the extreme
+         *     *of the games in scope* — the archive stored here, not chess.com's
+         *     own all-time best — and both are stamped at the **first** game that
+         *     reached the value, since a peak is when they got there.
          */
         TimeClassStats: {
             /**
@@ -1443,6 +1553,10 @@ export interface components {
             rating_min: number;
             /** Rating Max */
             rating_max: number;
+            /** Rating Max At */
+            rating_max_at?: number | null;
+            /** Rating Min At */
+            rating_min_at?: number | null;
         };
         /** ValidationError */
         ValidationError: {

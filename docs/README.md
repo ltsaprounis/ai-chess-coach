@@ -168,11 +168,15 @@ class PlayerReport(BaseModel):
     record: Record; overall_acpl: float
     phases: dict[Phase, PhaseStats]
     judgment_counts: dict[Judgment, int]
-    time_classes: list[TimeClassStats]   # rating movement per control
+    time_classes: list[TimeClassStats]   # rating movement per control,
+                                         # each extreme dated
     months: list[MonthStats]             # games/rating/ACPL/blunder %
     periods: list[PeriodStats]           # trailing recent-form windows
     terminations: list[TerminationStats] # how games actually ended
     opponents: OpponentStats | None      # score vs stronger/weaker
+    color_records: dict[Color, Record]   # score as White / as Black
+    best_win: BestWin | None             # strongest opponent beaten
+    streaks: StreakStats | None          # runs + the after-a-loss score
     openings: list[OpeningStats]
     error_patterns: list[ErrorPattern]   # tagged deterministically
     critical_positions: list[CriticalPosition]  # turning points
@@ -180,7 +184,7 @@ class PlayerReport(BaseModel):
 
 Composites elided above for brevity (`CriticalPosition`,
 `TimeClassStats`, `MonthStats`, `PeriodStats`, `OpponentStats`,
-`TerminationStats`,
+`TerminationStats`, `BestWin`, `StreakStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
 `RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`,
 `PlayerProfile`, `ProfileOpening`) also

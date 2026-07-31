@@ -196,15 +196,28 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    guessing.
 
    It shows the free facts `build_profile` distills — rating and
-   games per time class, overall ACPL in pawns plus blunder share,
+   games per time class, each tile carrying the **dated peak** and
+   how far below it the current rating sits, overall ACPL in pawns
+   plus blunder share,
    the **recent-form windows** (last 30/90 days against the whole
    span, rendered only when there is more than one row to compare),
-   the top chosen systems and faced problem lines per color, and
+   a **Milestones** table, the top chosen systems and faced problem
+   lines per color, and
    recurring error patterns with counts and a deep-linked example
    (`/games/{id}?ply=`). A coverage line states both denominators —
    "ratings, records and repertoire cover all N games; quality
    figures cover the M analyzed" — since the two genuinely differ on
    a partly-analyzed archive.
+
+   The Milestones table is the volume layer's own findings
+   (docs/06-coach.md, "Milestones"): the best win deep-linked to its
+   game, the current and longest runs, the after-a-loss score against
+   the overall one, the White/Black split, the opposition split, and
+   how losses end. Every row is built individually and the empty ones
+   dropped — a student with no win yet has no "Best win" row rather
+   than a dash — and the whole section disappears when none has data.
+   It says out loud that it covers every game in scope, analyzed or
+   not, since the coverage line above it is about the quality figures.
 
    Once one exists, the stored narrative renders as markdown under a
    "The coach's read on {username} in {scope}" header labelled with
@@ -235,7 +248,9 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
 
    Pure formatting/partitioning helpers (`isProfileStale`,
    `scopeLabel`, `hasPartialCoverage`, `formatPawns`, `blunderShare`,
-   `openingsFor`, `errorExampleLabel`/`errorExampleHref`) live in
+   `openingsFor`, `scorePercent`, `formatGameDate`, `peakLabel`,
+   `peakGap`, `streakLabel`, `terminationShares`,
+   `errorExampleLabel`/`errorExampleHref`) live in
    `playerProfile.ts`, unit-tested apart from the component,
    mirroring `highlights.ts` beside the Dashboard.
 

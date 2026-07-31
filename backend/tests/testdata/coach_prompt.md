@@ -5,13 +5,20 @@
 - Requested: 2026-01-01 to 2026-07-27
 - Window: 2026-03-27 to 2026-06-07
 - Coverage: 19 of 30 games in scope are analyzed
-- Note: the other 11 games in scope are not engine-analyzed; every figure below describes only the analyzed span.
+- Note: the other 11 games in scope are not engine-analyzed. Ratings, records, milestones, how games end and the repertoire's game counts cover every game in scope; ACPL, blunder rates, error patterns and turning points cover the analyzed ones only.
 - Scope: all time controls
 - Analyzed: 19 games
-- Blitz: 11 games, rating 1455 → 1496 (range 1451-1496)
-- Rapid: 6 games, rating 1560 → 1598 (range 1552-1598)
-- Bullet: 2 games, rating 1468 → 1483 (range 1468-1483)
+- Blitz: 11 games, rating 1455 → 1496 (range 1451-1496; peak 1496 on 2026-06-04)
+- Rapid: 6 games, rating 1560 → 1598 (range 1552-1598; peak 1598 on 2026-06-07)
+- Bullet: 2 games, rating 1468 → 1483 (range 1468-1483; peak 1483 on 2026-06-01)
 - Opposition: avg rating diff -2; 40% (5g) vs stronger, 62% (8g) vs similar, 50% (6g) vs weaker
+
+## Recent form
+*(Windows are nested and end at the most recent game, so each wider row contains the narrower ones.)*
+| Window | Games | Score | Rating | ACPL | Blunder % | Analyzed |
+|---|---|---|---|---|---|---|
+| last 30 days | 8 | 44% (8g) | 1598 | 1.34 | 3.4% | 8 |
+| whole span | 19 | 53% (19g) | 1598 | 1.07 | 2.6% | 19 |
 
 ## How the play breaks down
 | Phase | Moves | ACPL | Blunder % |
@@ -28,6 +35,12 @@ Overall 1.07 ACPL over 230 moves -- best 58.3% (134), good 29.1% (67), inaccurac
 | 2026-04 | 7 | 1466 | 0.23 | 2.3% |
 | 2026-05 | 6 | 1487 | 1.59 | 1.5% |
 | 2026-06 | 3 | 1598 | 0.35 | 5.7% |
+
+## Milestones
+*(Over every game in scope, analyzed or not -- none of these needs an engine.)*
+- Best win: beat hikaru (1638) on 2026-06-07, rated 1598 at the time (+40)
+- Streaks: last game was a win; longest runs 2 wins, 2 losses
+- By color: White 50% (13g); Black 58% (6g)
 
 ## How games end
 Losses 8: resigned 4, timeout 3, checkmated 1
@@ -101,6 +114,8 @@ Write the coaching brief now, following these rules:
 - **Attribution.** An opening is the student's own only where the repertoire lists it under their color in "Systems you chose". Never advise dropping a line from the "What you face" table -- recommend a response to it instead.
 - **Citation.** Game first, move second: name the game by opponent and date at its first citation, then give the move in notation as the link, e.g. "In your game against marko77 on June 14, [26...Nb6][g3] ...", written through the entry's `cite` handle. Never a raw URL, never an invented handle, never a list position or table row. Later references to an already-cited game may shorten (e.g. "that marko77 game"). The opening name appears only as coaching content, never as the identifier; state the time class only when the report mixes time controls (the student section's scope line says which) and omit it otherwise.
 - **One biggest lever.** Open with the single change most likely to raise this student's results, not a flat list of co-equal weaknesses. Order everything else by impact behind it.
+- **Recent form first.** Where the recent-form windows disagree with the whole-span figures, lead with the most recent window that has a real analyzed sample and say which way it is moving -- how they play now matters more than their average over years. Ignore a window whose analyzed count is too small to carry a conclusion, and prefer these windows to a single month's row, which swings on one bad game.
+- **Milestones are evidence.** The dated rating peak, the best win, the streaks, the score in the game right after a loss, the White/Black split and how games end are facts about every game in scope, not just the analyzed ones. Use the ones that say something -- sitting well below a peak reached long ago, a worse score right after a loss, a lopsided color split, a large share of losses on the clock each name a problem worth a paragraph -- and ignore the rest. Never read a split resting on a handful of games as a tendency: each carries its own game count, so check it first.
 - **Honesty.** If the data does not support a conclusion -- too few games, no sample past the floor -- say so plainly instead of filling the section anyway.
 - **Verification.** When the `analyze_position` tool is available: for each turning point the brief features, run the tool on that entry's FEN and state the refutation -- what the played move loses to, not just the better move's name -- and check any other concrete line before asserting it. Never present an unverified variation as fact.
 - **Plan.** Close with a two-week training plan sized to the time controls and volume shown above, not a generic study list.
