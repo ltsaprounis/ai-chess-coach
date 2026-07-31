@@ -1029,14 +1029,24 @@ Recency is the clearest case: it was a bullet ("lead with the most
 recent window"), and it is now the *window*, which is where it
 belongs. A fact the data enforces needs no rule.
 
-**Generation is agentic** from `profile-v5`. `complete` takes the
-`ChatToolkit` rather than a bare analyst, so the run can read the
-repertoire, pull games and check a position before asserting
-anything — the same mechanics the report brief has had since it
-gained the engine tool, and the reason the brief is the best text
-this system produces. The facts block is the starting point, not the
-limit: it exists so the run does not spend turns re-deriving, badly,
-what aggregation already computed correctly.
+**Generation is designed to be agentic**, and the template is ready
+for it: `render_profile_prompt(profile, has_tools=...)` swaps one
+clause between "the facts are everything you have" and "use the tools
+to check anything the summary rests on". A tool-less run told to use
+tools either invents the lookups or spends its turn explaining that
+it cannot, which is why the clause is conditional rather than
+aspirational — the same shape, and the same reason, as
+`render_explain_prompt`'s profile clause.
+
+**The seam itself is not built.** `complete` still takes a bare
+`PositionAnalystFn`, so today every caller passes `has_tools=False`
+and the narrative is one turn. Widening it to the `ChatToolkit` — the
+mechanics the report brief has had since it gained the engine tool,
+and the reason the brief is the best text this system produces — is
+the next step, and it is a `CoachProvider` change both providers must
+implement. Once it lands the facts block becomes the starting point
+rather than the limit: it exists so the run does not spend turns
+re-deriving, badly, what aggregation already computed correctly.
 
 One risk comes with the tools and is worth stating where the rule
 lives: **a run that slices the data itself produces comparisons with

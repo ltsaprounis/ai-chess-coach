@@ -1347,9 +1347,7 @@ _PROFILE_INSTRUCTIONS = (
     "them next. It gets pasted into other sessions as context when that "
     "coach explains a move or answers a question, so write what would "
     "actually change the advice.\n\n"
-    "The facts above are computed and correct -- your starting point, "
-    "not your limit. Use the tools to check anything the summary rests "
-    "on, and to find what the aggregates cannot show.\n\n"
+    "{facts_clause}\n\n"
     "Four rules, all because this text is stored and reused elsewhere:\n"
     "- Third person, about the student, to a coach. Never address the "
     'reader as "you" -- they are the coach, not the player.\n'
@@ -1368,14 +1366,36 @@ _PROFILE_INSTRUCTIONS = (
     "something it can."
 )
 
+# The one clause that depends on how the run is actually executed. A
+# prompt that says "use the tools" to a run with no tools is worse than
+# one that never mentions them: the model either invents the lookups it
+# was told to do, or spends its turn saying it cannot. Same conditional
+# shape as `_explain_instructions`, and for the same reason.
+_PROFILE_FACTS_ONLY = (
+    "The facts above are everything you have -- there are no tools on "
+    "this run, so write only what they support and say so where they "
+    "run out."
+)
+_PROFILE_FACTS_WITH_TOOLS = (
+    "The facts above are computed and correct -- your starting point, "
+    "not your limit. Use the tools to check anything the summary rests "
+    "on, and to find what the aggregates cannot show."
+)
 
-def render_profile_prompt(profile: PlayerProfile) -> str:
+
+def render_profile_prompt(profile: PlayerProfile, *, has_tools: bool = False) -> str:
     """The narrative-generation prompt (docs/06-coach.md, "Player
     profile"): the facts -- fuller than `render_profile_context`, e.g. a
     full months table rather than one compact trend line -- followed by
-    instructions asking for 3-5 sentences of tendencies plus a short
-    weakness list, every claim tied to a figure stated in the facts.
+    instructions stating what the text is *for* and the four rules
+    nothing else can supply.
+
+    `has_tools` says whether this run can actually look anything up. It
+    changes exactly one clause: telling a tool-less run to "use the
+    tools" makes the model either invent the lookups it was told to do
+    or spend its turn explaining that it cannot.
     """
+    facts_clause = _PROFILE_FACTS_WITH_TOOLS if has_tools else _PROFILE_FACTS_ONLY
     sections = [
         _profile_intro(profile),
         _profile_trajectory_section(profile),
@@ -1388,7 +1408,7 @@ def render_profile_prompt(profile: PlayerProfile) -> str:
         _terminations_section(profile.terminations),
         _profile_repertoire_section(profile),
         _profile_error_patterns_section(profile),
-        _PROFILE_INSTRUCTIONS,
+        _PROFILE_INSTRUCTIONS.format(facts_clause=facts_clause),
     ]
     return "\n\n".join(section for section in sections if section)
 

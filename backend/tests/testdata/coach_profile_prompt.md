@@ -69,7 +69,7 @@ Systems the student chose:
 ## Instructions
 Write a short profile of this student for the coach who works with them next. It gets pasted into other sessions as context when that coach explains a move or answers a question, so write what would actually change the advice.
 
-The facts above are computed and correct -- your starting point, not your limit. Use the tools to check anything the summary rests on, and to find what the aggregates cannot show.
+The facts above are everything you have -- there are no tools on this run, so write only what they support and say so where they run out.
 
 Four rules, all because this text is stored and reused elsewhere:
 - Third person, about the student, to a coach. Never address the reader as "you" -- they are the coach, not the player.
