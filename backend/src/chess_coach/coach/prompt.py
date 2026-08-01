@@ -79,7 +79,7 @@ PROMPT_VERSION = "2026-07-one-register-one-unit"
 # embed also block-quotes the narrative, so the second is belt and
 # braces. The templates stopped saying "ACPL" at the same time (see
 # docs/06-coach.md, "Units"), so nothing here models the habit either.
-PROFILE_PROMPT_VERSION = "profile-v8"
+PROFILE_PROMPT_VERSION = "profile-v9"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -1365,7 +1365,7 @@ _PROFILE_INSTRUCTIONS = (
     "reader is a coach and can see it. If a sentence could be deleted "
     "without losing information, delete it.\n\n"
     "{facts_clause}\n\n"
-    "Six rules, all because this text is stored and reused elsewhere:\n"
+    "Seven rules, all because this text is stored and reused elsewhere:\n"
     "- Third person, about the student, to a coach. Never address the "
     'reader as "you" -- they are the coach, not the player.\n'
     "- No game citations, dates, opponents, links or handles. They "
@@ -1373,6 +1373,11 @@ _PROFILE_INSTRUCTIONS = (
     "- No markdown headings (`#`, `##`). This text is pasted *inside* "
     "another prompt's sections, where a heading of your own reads as "
     "starting a new one.\n"
+    "- A claim about the position itself -- a structure, a plan, why a "
+    "line is awkward -- is either verified or not made. The facts are "
+    "aggregates; the move sequences printed beside them are the only "
+    "concrete lines you have, and they are frequently the "
+    "counterexample to a guess.\n"
     "- Every figure covers the same games as the facts above, including "
     "anything a tool returns. State a count only when you have it from "
     "the facts or a tool -- never rolled up in your head from rows.\n"

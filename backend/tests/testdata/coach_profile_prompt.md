@@ -73,10 +73,11 @@ Write a short profile of this student for the coach who works with them next. It
 
 The facts above are everything you have -- there are no tools on this run, so write only what they support and say so where they run out.
 
-Six rules, all because this text is stored and reused elsewhere:
+Seven rules, all because this text is stored and reused elsewhere:
 - Third person, about the student, to a coach. Never address the reader as "you" -- they are the coach, not the player.
 - No game citations, dates, opponents, links or handles. They resolve to nothing where this lands.
 - No markdown headings (`#`, `##`). This text is pasted *inside* another prompt's sections, where a heading of your own reads as starting a new one.
+- A claim about the position itself -- a structure, a plan, why a line is awkward -- is either verified or not made. The facts are aggregates; the move sequences printed beside them are the only concrete lines you have, and they are frequently the counterexample to a guess.
 - Every figure covers the same games as the facts above, including anything a tool returns. State a count only when you have it from the facts or a tool -- never rolled up in your head from rows.
 - An observation from reading individual games is an example, never a tendency. Say how many games you looked at, and do not turn it into a trait -- collapsing in three sampled endings is three endings, not a temperament.
 - Spell every unit out -- "1.30 pawns a move", never "1.30 ACPL" or any other acronym. Nothing here defines one, and neither do the prompts this lands in.

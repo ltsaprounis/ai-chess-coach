@@ -1046,7 +1046,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v8"
+    assert PROFILE_PROMPT_VERSION == "profile-v9"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -1082,6 +1082,14 @@ def test_profile_instructions_bound_the_length_the_embed_pays_for() -> None:
     # the tools opened (docs/06-coach.md, "Narrative").
     assert "never a tendency" in instructions
     assert "how many games you looked at" in instructions
+    # The live profile-v8 narrative asserted that the London setup was
+    # "unreachable" against the English Defense, with the facts block's
+    # own line for that row reading 1.d4 b6 2.Bf4 Bb7 3.e3 e6 -- the
+    # London setup, played in 8 of those 9 games. Nothing else covers a
+    # positional claim: the comparison guard covers differences, the
+    # denominator rule covers counts.
+    assert "either verified or not made" in instructions
+    assert "counterexample to a guess" in instructions
 
 
 def test_build_profile_copies_report_scalars_and_denominators() -> None:

@@ -1109,6 +1109,22 @@ nothing else can supply:
   explaining its significance to a reader who is a coach and can see
   it. The rule is density rather than a shape, since a shape
   prescription is what the rework removed.
+- **A positional claim is checked or not made.** Cutting the old
+  "no invented lines" bullet in `profile-v5` was a mistake: it was
+  filed as a shape constraint the purpose statement implies, and it
+  was factual discipline — the only rule standing between the
+  narrative and invented chess content. Nothing else covers it, since
+  the comparison guard covers differences and the denominator rule
+  covers counts. The live `profile-v8` narrative duly explained that
+  the London setup was "unreachable" against the English Defense,
+  with the facts block's own line for that row reading
+  `1.d4 b6 2.Bf4 Bb7 3.e3 e6` — the London setup, played in 8 of
+  those 9 games. The rule returns in the form the toolkit now makes
+  possible: verify it or do not assert it — where the tools clause
+  says the run has tools, that means the engine; where it says it has
+  none, it means do not assert. The bullet also points at where the
+  answer usually already is, since the move sequences printed beside
+  the aggregates are frequently the counterexample to a guess.
 - **A comparison marked "within noise" is not a tendency.**
 
 Everything cut was either a shape constraint the purpose statement
