@@ -1488,7 +1488,7 @@ export interface components {
             narrative_games_now?: number | null;
             /**
              * Prompt Version
-             * @default profile-v7
+             * @default profile-v10
              */
             prompt_version: string;
         };
