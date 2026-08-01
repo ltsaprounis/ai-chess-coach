@@ -1139,11 +1139,23 @@ The facts block is then the starting point and not the limit: it
 exists so the run does not spend turns re-deriving, badly, what
 aggregation already computed correctly.
 
-The toolkit the API hands it is **unwindowed**, unlike the facts
-beside it. The narrative is generated over the control's whole
-history and stored under that scope alone (see "Why time control keys
-it"), so a tool that could only see the profile's level window would
-contradict the text it is helping write.
+The toolkit the API hands it is scoped to **the same window as the
+facts**. It was unwindowed at first, on the reasoning that the
+narrative covers the control's whole history — which confused the
+storage *key* (time control alone, see "Why time control keys it")
+with the scope of what the text describes. The narrative describes the
+windowed facts, so an unwindowed tool answers a different question
+from the one the document is about.
+
+That is not theoretical: live, `get_opening_stats` returned a 484-game
+London over the whole 1,925-game archive into a narrative whose every
+other figure covered 1,158, and `compare_groups` returned a 968-game
+White split beside a facts block stating 576 — two colour splits in
+one document. **One document, one denominator.** It is the same
+volume/quality denominator defect the report layer already fixed,
+reappearing one level up in the seam between the facts and the tools,
+and worth checking for whenever a new tool is added: the guard covers
+*comparisons*, and nothing else covers bare *counts*.
 
 One risk comes with the tools and is worth stating where the rule
 lives: **a run that slices the data itself produces comparisons with

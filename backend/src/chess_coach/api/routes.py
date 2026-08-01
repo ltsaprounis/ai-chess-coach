@@ -1120,15 +1120,20 @@ async def regenerate_player_profile(
     # it was handed. It is the same read-only toolkit chat uses -- the
     # engine analyst rides along on it when the pool is up, and the
     # narrative simply does not ask for positions when it is not.
-    # Unwindowed, like the narrative it serves: the profile's own facts
-    # are level-scoped, but the narrative is generated over the control's
-    # whole history and stored under that scope alone, so a tool that
-    # could only see the window would contradict the text it is helping
-    # write (docs/06-coach.md, "Why time control keys it").
+    # Scoped to the same window as the facts (docs/06-coach.md, "Reading
+    # a comparison"). This was unwindowed at first on the reasoning that
+    # the narrative covers the control's whole history -- which confused
+    # the storage *key* (time control alone) with the content's scope.
+    # The narrative describes the windowed facts, so an unwindowed tool
+    # answers a different question from the one the document is about:
+    # get_opening_stats returned a 484-game London over 1,925 games into
+    # a narrative whose every other figure covered 1,158, and
+    # compare_groups returned a 968-game White split beside a facts block
+    # stating 576. One document, one denominator.
     toolkit: ChatToolkit = ApiChatToolkit(
         db,
         user,
-        since=None,
+        since=facts.window_start,
         until=None,
         time_class=time_class,
         analyst=_build_analyst(pool, cfg) if pool is not None else None,

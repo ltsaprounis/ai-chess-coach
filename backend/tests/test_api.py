@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import chess_coach.api.app as app_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
+from chess_coach.api.chat import ApiChatToolkit
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
     PROFILE_PROMPT_VERSION,
@@ -1855,6 +1856,31 @@ def test_profile_post_runs_agentically_with_the_full_toolkit(
     prompt = provider.prompts[-1]
     assert "Use the tools to check anything the summary rests on" in prompt
     assert "there are no tools on this run" not in prompt
+
+
+def test_profile_post_scopes_the_toolkit_to_the_facts_window(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """One document, one denominator (docs/06-coach.md, "Reading a
+    comparison").
+
+    The toolkit was unwindowed at first, on the reasoning that the
+    narrative covers the control's whole history -- which confused the
+    storage key with the content's scope. Live, `get_opening_stats`
+    returned a 484-game London over the whole 1,925-game archive into a
+    narrative whose every other figure covered 1,158, and
+    `compare_groups` handed back a 968-game White split beside a facts
+    block stating 576.
+    """
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+
+    post(client, "/api/players/testuser/profile", json={})
+
+    toolkit = provider.complete_toolkits[-1]
+    assert isinstance(toolkit, ApiChatToolkit)
+    facts = get(client, "/api/players/testuser/profile", params={}).json()["profile"]
+    assert toolkit._since == facts["window_start"]  # pyright: ignore[reportPrivateUsage]
 
 
 def test_profile_post_persists_and_a_subsequent_get_sees_it(
