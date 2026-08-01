@@ -236,6 +236,7 @@ describe("ProfileCard", () => {
               right_label: "every other game",
               right: { games: 778, wins: 391, losses: 343, draws: 44 },
               gap: -4.8,
+              baseline: 0,
               resolution: 6.1,
               significant: false,
             },
@@ -246,6 +247,28 @@ describe("ProfileCard", () => {
       expect(html).toContain("within noise");
       expect(html).not.toContain("sigma");
       expect(html).not.toContain("6.1");
+    });
+
+    it("says an edge is normal when the split has a baseline", () => {
+      const html = render({
+        profile: profile({
+          comparisons: [
+            {
+              label: "By color",
+              left_label: "as White",
+              left: { games: 576, wins: 294, losses: 249, draws: 33 },
+              right_label: "as Black",
+              right: { games: 582, wins: 270, losses: 280, draws: 32 },
+              gap: 4.8,
+              baseline: 4,
+              resolution: 5.7,
+              significant: false,
+            },
+          ],
+        }),
+      });
+      expect(html).toContain("within noise");
+      expect(html).toContain("4-point edge is normal");
     });
 
     it("drops a split too thin to measure rather than labelling it", () => {
@@ -259,6 +282,7 @@ describe("ProfileCard", () => {
               right_label: "every other game",
               right: { games: 41, wins: 20, losses: 14, draws: 7 },
               gap: -50,
+              baseline: 0,
               resolution: 0,
               significant: false,
             },

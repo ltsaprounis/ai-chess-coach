@@ -7,7 +7,7 @@ any semantic, including the repertoire family rollup, which is shared
 with the report prompt through `chess_coach.coach.repertoire`.
 """
 
-from chess_coach.coach.comparisons import build_comparisons
+from chess_coach.coach.comparisons import WHITE_ADVANTAGE_POINTS, build_comparisons
 from chess_coach.coach.repertoire import (
     REPERTOIRE_SAMPLE_FLOOR,
     FacedFamily,
@@ -145,6 +145,11 @@ def _profile_comparisons(report: PlayerReport) -> list[Comparison]:
                 left=white,
                 right_label="as Black",
                 right=black,
+                # Not against zero: White scores better than Black for
+                # everyone, so a zero null asks whether this student is
+                # a chess player (docs/06-coach.md, "Reading a
+                # comparison").
+                baseline=WHITE_ADVANTAGE_POINTS,
             )
         )
 

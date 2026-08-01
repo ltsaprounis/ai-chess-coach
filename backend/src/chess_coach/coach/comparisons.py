@@ -32,6 +32,20 @@ COMPARISON_FDR = 0.05
 # where "1.58 sigma" is not.
 _RESOLUTION_SIGMAS = 2.0
 
+# The gap the colour split is tested *against*, in percentage points.
+# White scores better than Black for every player alive -- roughly 4-6
+# points at amateur online level -- so testing a colour gap against zero
+# asks whether this student is a chess player, and answers yes once the
+# sample is large enough. A round, documented choice like
+# `_OPPONENT_BAND`: 4 is the conservative end of the observed range, so
+# the test still fires on a genuinely odd split (a student worse as
+# White, or a gap two or three times normal) without flagging the base
+# rate. On the reference archive the observed gap is 4.8 points over
+# ~580 games a side, which is the base rate and reads as noise either
+# way -- but at ~1,400 games a side it would have cleared a zero null
+# and been reported as this student's personal weakness.
+WHITE_ADVANTAGE_POINTS = 4.0
+
 
 def build_comparisons(pairs: list[ComparisonInput]) -> list[Comparison]:
     """Gaps, resolutions and BH-adjusted verdicts, in the order given.
@@ -60,6 +74,9 @@ def _measure(pair: ComparisonInput) -> tuple[Comparison, float | None]:
     gap = 0.0
     if left_score is not None and right_score is not None:
         gap = (left_score - right_score) * 100
+    # What is actually tested is how far the gap runs past what the null
+    # already expects -- zero for almost everything, but not for colour.
+    excess = gap - pair.baseline
 
     se = None
     if left_var is not None and right_var is not None:
@@ -76,12 +93,13 @@ def _measure(pair: ComparisonInput) -> tuple[Comparison, float | None]:
         right_label=pair.right_label,
         right=pair.right,
         gap=round(gap, 1),
+        baseline=pair.baseline,
         resolution=round(_RESOLUTION_SIGMAS * se, 1) if se else 0.0,
         significant=False,
     )
     if se is None or se == 0.0:
         return row, None
-    return row, _two_sided_p(abs(gap) / se)
+    return row, _two_sided_p(abs(excess) / se)
 
 
 def _two_sided_p(z: float) -> float:

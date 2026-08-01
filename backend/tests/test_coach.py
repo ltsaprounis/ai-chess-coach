@@ -1046,7 +1046,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v6"
+    assert PROFILE_PROMPT_VERSION == "profile-v7"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 

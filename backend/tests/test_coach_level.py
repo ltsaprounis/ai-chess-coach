@@ -13,6 +13,7 @@ from chess_coach.coach import (
     profile_window,
     window_spans_level_change,
 )
+from chess_coach.coach.comparisons import WHITE_ADVANTAGE_POINTS
 from chess_coach.domain import ComparisonInput, GameSummary, MonthStats, Record
 from tests.factories import make_game, summarize
 
@@ -251,6 +252,61 @@ def test_an_unmeasurable_bucket_keeps_its_gap_and_never_signifies() -> None:
 
     assert rows[0].measurable is False
     assert rows[0].significant is False
+
+
+def test_the_colour_split_is_tested_against_the_normal_white_edge() -> None:
+    """White scores better than Black for every player alive, so testing
+    a colour gap against zero asks whether this student is a chess
+    player -- and answers yes as soon as the sample is large enough.
+
+    The reference archive's 4.8-point gap over ~580 games a side is the
+    base rate. At 5,000 games a side it is the same base rate, but a
+    zero null would by then call it a real difference and license the
+    narrative to build a weakness on it.
+    """
+    # ~54% against ~49%: the normal edge, at a sample no colour split
+    # will ever reach in practice.
+    white = record(2500, 300, 2200)
+    black = record(2250, 300, 2450)
+
+    with_baseline = build_comparisons(
+        [
+            ComparisonInput(
+                label="By color",
+                left_label="as White",
+                left=white,
+                right_label="as Black",
+                right=black,
+                baseline=WHITE_ADVANTAGE_POINTS,
+            )
+        ]
+    )
+    against_zero = build_comparisons([pair("By color", white, black)])
+
+    assert against_zero[0].significant is True  # the defect, if unguarded
+    assert with_baseline[0].significant is False
+    # The gap itself is unchanged -- only what it is measured against.
+    assert with_baseline[0].gap == against_zero[0].gap
+    assert with_baseline[0].excess < with_baseline[0].gap
+
+
+def test_a_colour_split_far_past_the_normal_edge_still_fires() -> None:
+    """The baseline must not make the comparison unfalsifiable: a
+    student genuinely much worse as Black is what it exists to find."""
+    rows = build_comparisons(
+        [
+            ComparisonInput(
+                label="By color",
+                left_label="as White",
+                left=record(340, 20, 140),
+                right_label="as Black",
+                right=record(160, 20, 320),
+                baseline=WHITE_ADVANTAGE_POINTS,
+            )
+        ]
+    )
+
+    assert rows[0].significant is True
 
 
 def test_an_empty_family_is_empty() -> None:

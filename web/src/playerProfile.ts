@@ -47,7 +47,14 @@ export function deltaOver(
  *  (docs/06-coach.md, "Reading a comparison"). Unmeasurable splits are
  *  filtered out by `measurableComparisons` rather than labelled. */
 export function comparisonVerdict(c: ProfileComparison): string {
-  return c.significant ? "a real difference" : "within noise";
+  const verdict = c.significant ? "a real difference" : "within noise";
+  // A split with a baseline is not tested against zero, and a reader who
+  // assumes it is misreads both verdicts: "within noise" looks like "no
+  // difference" where it means "no more than everyone has"
+  // (docs/06-coach.md, "Reading a comparison").
+  return c.baseline
+    ? `${verdict} · a ${Math.round(c.baseline)}-point edge is normal`
+    : verdict;
 }
 
 /** Only the splits that could actually be measured. An unmeasurable one

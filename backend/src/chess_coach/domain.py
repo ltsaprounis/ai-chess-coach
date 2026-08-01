@@ -627,6 +627,11 @@ class ComparisonInput(BaseModel):
     left: Record
     right_label: str  # "not after a loss"
     right: Record
+    # The gap expected under the null, in percentage points. Zero for
+    # almost everything -- but not for colour, where White scores better
+    # than Black for every player alive, so a difference of zero would be
+    # the anomaly (docs/06-coach.md, "Reading a comparison").
+    baseline: float = 0.0
 
 
 class Comparison(BaseModel):
@@ -645,8 +650,15 @@ class Comparison(BaseModel):
     right_label: str
     right: Record
     gap: float  # percentage points, left score - right score
+    baseline: float = 0.0  # the gap expected under the null
     resolution: float  # +/- points; 2 standard errors of the gap
     significant: bool  # survived the BH step-up
+
+    @property
+    def excess(self) -> float:
+        """How far the gap runs past what the null already expects --
+        the quantity actually tested."""
+        return round(self.gap - self.baseline, 1)
 
     @property
     def measurable(self) -> bool:

@@ -79,7 +79,7 @@ PROMPT_VERSION = "2026-07-one-register-one-unit"
 # embed also block-quotes the narrative, so the second is belt and
 # braces. The templates stopped saying "ACPL" at the same time (see
 # docs/06-coach.md, "Units"), so nothing here models the habit either.
-PROFILE_PROMPT_VERSION = "profile-v6"
+PROFILE_PROMPT_VERSION = "profile-v7"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -1219,6 +1219,15 @@ def _comparison_line(c: Comparison) -> str:
         f"- {c.label}: {_score_line(c.left)} {c.left_label}, against "
         f"{_score_line(c.right)} {c.right_label}"
     )
+    # A comparison with a baseline is not tested against zero, and a
+    # reader who assumes it is will misread both verdicts: "within
+    # noise" would look like "no difference" where it means "no more
+    # than everyone has", and "a real difference" like any gap at all.
+    if c.baseline:
+        body += (
+            f" (a {c.baseline:.0f}-point edge is normal for everyone and "
+            "is already allowed for)"
+        )
     if c.significant:
         return f"{body} -- a real difference"
     return f"{body} -- within noise, not a tendency"

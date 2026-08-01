@@ -764,6 +764,11 @@ export interface components {
             right: components["schemas"]["Record"];
             /** Gap */
             gap: number;
+            /**
+             * Baseline
+             * @default 0
+             */
+            baseline: number;
             /** Resolution */
             resolution: number;
             /** Significant */
@@ -1483,7 +1488,7 @@ export interface components {
             narrative_games_now?: number | null;
             /**
              * Prompt Version
-             * @default profile-v5
+             * @default profile-v7
              */
             prompt_version: string;
         };

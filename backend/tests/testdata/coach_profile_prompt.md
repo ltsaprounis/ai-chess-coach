@@ -40,7 +40,7 @@ Overall 1.07 pawns lost per move over 230 moves -- best 58.3% (134), good 29.1% 
 
 ## Splits
 *(Each compares two groups of the student's own games. A split marked "within noise" is a difference this many games cannot distinguish from chance -- it is not a tendency and must not be reported as one.)*
-- By color: 50% (13g) as White, against 58% (6g) as Black -- within noise, not a tendency
+- By color: 50% (13g) as White, against 58% (6g) as Black (a 4-point edge is normal for everyone and is already allowed for) -- within noise, not a tendency
 - Queen's Pawn Game as White: 58% (6g) in this system, against 43% (7g) their other games as White -- within noise, not a tendency
 
 ## How games end

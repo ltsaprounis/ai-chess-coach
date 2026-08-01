@@ -940,6 +940,21 @@ resolution, and a verdict. The rules:
   per-game variance is computed from the bucket's W/D/L rather than
   assumed Bernoulli — `Record` carries everything needed, which is why
   no new aggregation is required to produce any of this.
+- **Zero is not always the neutral point.** `ComparisonInput.baseline`
+  is the gap the null already expects, and the test is on how far the
+  observed gap runs past it. It is zero for everything except colour,
+  where White scores better than Black for every player alive —
+  roughly 4–6 points at amateur online level. Testing a colour gap
+  against zero therefore asks whether the student is a chess player,
+  and answers yes as soon as the sample is large enough:
+  `WHITE_ADVANTAGE_POINTS = 4.0` is a round documented choice like
+  `_OPPONENT_BAND`, at the conservative end of that range so a
+  genuinely odd split still fires. On the reference archive the gap is
+  4.8 points over ~580 games a side and reads as noise either way —
+  but at ~1,400 a side a zero null would have called the base rate
+  this student's personal weakness. Both renderers say the edge is
+  allowed for, since "within noise" against a baseline means "no more
+  than everyone has", not "no difference".
 - **Benjamini–Hochberg across the profile's whole family.** A profile
   makes up to fourteen of these comparisons; at an unadjusted 2σ that
   is 0.6 expected false positives per profile, so the guard would
