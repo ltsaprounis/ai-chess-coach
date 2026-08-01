@@ -79,7 +79,7 @@ PROMPT_VERSION = "2026-07-one-register-one-unit"
 # embed also block-quotes the narrative, so the second is belt and
 # braces. The templates stopped saying "ACPL" at the same time (see
 # docs/06-coach.md, "Units"), so nothing here models the habit either.
-PROFILE_PROMPT_VERSION = "profile-v5"
+PROFILE_PROMPT_VERSION = "profile-v6"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -1347,8 +1347,16 @@ _PROFILE_INSTRUCTIONS = (
     "them next. It gets pasted into other sessions as context when that "
     "coach explains a move or answers a question, so write what would "
     "actually change the advice.\n\n"
+    "**Dense, not polished. Around 200 words.** This is context another "
+    "prompt pastes in, not an essay -- it is read for what it says, "
+    "never for how it reads. Every sentence must carry a fact or a "
+    "consequence the coach would act on. Cut transitions, cut any "
+    "sentence whose only job is to introduce the next one, and never "
+    "explain the significance of a figure you have just given: the "
+    "reader is a coach and can see it. If a sentence could be deleted "
+    "without losing information, delete it.\n\n"
     "{facts_clause}\n\n"
-    "Four rules, all because this text is stored and reused elsewhere:\n"
+    "Five rules, all because this text is stored and reused elsewhere:\n"
     "- Third person, about the student, to a coach. Never address the "
     'reader as "you" -- they are the coach, not the player.\n'
     "- No game citations, dates, opponents, links or handles. They "
@@ -1356,6 +1364,10 @@ _PROFILE_INSTRUCTIONS = (
     "- No markdown headings (`#`, `##`). This text is pasted *inside* "
     "another prompt's sections, where a heading of your own reads as "
     "starting a new one.\n"
+    "- An observation from reading individual games is an example, "
+    "never a tendency. Say how many games you looked at, and do not "
+    "turn it into a trait -- collapsing in three sampled endings is "
+    "three endings, not a temperament.\n"
     '- Spell every unit out -- "1.30 pawns a move", never "1.30 ACPL" '
     "or any other acronym. Nothing here defines one, and neither do the "
     "prompts this lands in.\n\n"

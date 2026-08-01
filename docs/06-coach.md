@@ -1072,6 +1072,23 @@ nothing else can supply:
   bounds whatever arrives, the rule stops it arriving.
 - **Spell every unit out** — "1.30 pawns a move", never "1.30 ACPL",
   per "Units" below.
+- **An observation from reading games is an example, never a
+  tendency**, and says how many games it rests on. `compare_groups`
+  guards differences *between buckets*; it says nothing about
+  inference drawn from reading individual games, which is the second
+  path the tools opened. The first live narrative walked down it,
+  reading a few collapsed endgames as "a composure/reset issue" — an
+  unguarded psychological claim, two paragraphs above its own correct
+  statement that there is no measurable tilt effect.
+- **Dense, not polished, around 200 words.** The first live narrative
+  ran to 619 words — about 950 tokens — which the embed then pastes
+  into every explain prompt and every game-scope chat message, against
+  a block documented at roughly 250. Dropping "three to five
+  sentences" removed the only bound on length, and the model spent the
+  room on connective tissue: every figure acquired a sentence
+  explaining its significance to a reader who is a coach and can see
+  it. The rule is density rather than a shape, since a shape
+  prescription is what the rework removed.
 - **A comparison marked "within noise" is not a tendency.**
 
 Everything cut was either a shape constraint the purpose statement

@@ -69,12 +69,15 @@ Systems the student chose:
 ## Instructions
 Write a short profile of this student for the coach who works with them next. It gets pasted into other sessions as context when that coach explains a move or answers a question, so write what would actually change the advice.
 
+**Dense, not polished. Around 200 words.** This is context another prompt pastes in, not an essay -- it is read for what it says, never for how it reads. Every sentence must carry a fact or a consequence the coach would act on. Cut transitions, cut any sentence whose only job is to introduce the next one, and never explain the significance of a figure you have just given: the reader is a coach and can see it. If a sentence could be deleted without losing information, delete it.
+
 The facts above are everything you have -- there are no tools on this run, so write only what they support and say so where they run out.
 
-Four rules, all because this text is stored and reused elsewhere:
+Five rules, all because this text is stored and reused elsewhere:
 - Third person, about the student, to a coach. Never address the reader as "you" -- they are the coach, not the player.
 - No game citations, dates, opponents, links or handles. They resolve to nothing where this lands.
 - No markdown headings (`#`, `##`). This text is pasted *inside* another prompt's sections, where a heading of your own reads as starting a new one.
+- An observation from reading individual games is an example, never a tendency. Say how many games you looked at, and do not turn it into a trait -- collapsing in three sampled endings is three endings, not a temperament.
 - Spell every unit out -- "1.30 pawns a move", never "1.30 ACPL" or any other acronym. Nothing here defines one, and neither do the prompts this lands in.
 
 A comparison marked "within noise" is not a tendency. Do not name it as a weakness, do not call it "worth watching", and do not soften it into a passing mention -- the honest statement is that the data cannot tell, and the sentence is better spent on something it can.

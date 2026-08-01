@@ -1046,7 +1046,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v5"
+    assert PROFILE_PROMPT_VERSION == "profile-v6"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -1062,6 +1062,26 @@ def test_profile_instructions_constrain_what_the_embed_cannot_fix() -> None:
 
     assert '"1.30 ACPL"' in instructions  # named as the thing not to write
     assert "markdown headings" in instructions
+
+
+def test_profile_instructions_bound_the_length_the_embed_pays_for() -> None:
+    """The first live profile-v5 narrative ran to 619 words -- about 950
+    tokens, which `render_profile_context` then pastes into every explain
+    prompt and every game-scope chat message, against a block documented
+    at roughly 250. Dropping "three to five sentences" from the
+    instructions removed the only thing bounding it, and the model spent
+    the room on connective tissue rather than facts.
+    """
+    prompt = render_profile_prompt(build_profile(build_report("testuser", [])))
+    instructions = prompt.split("## Instructions")[1]
+
+    assert "200 words" in instructions
+    assert "deleted without losing information" in instructions
+    # The guard covers comparisons between buckets; it says nothing
+    # about inference drawn from reading games, which is the second path
+    # the tools opened (docs/06-coach.md, "Narrative").
+    assert "never a tendency" in instructions
+    assert "how many games you looked at" in instructions
 
 
 def test_build_profile_copies_report_scalars_and_denominators() -> None:
