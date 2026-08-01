@@ -123,7 +123,9 @@ COMPARISON_FDR: float      # 0.05, the Benjamini-Hochberg level
 # and both denominators (see "Narrative").
 def render_profile_prompt(profile: PlayerProfile) -> str
 
-# The ~250-token block other prompts embed at the top: a header
+# The compact block other prompts embed at the top -- ~420 tokens of
+# facts, ~750 with a narrative attached, measured on a real profile
+# (see "Embedding"): a header
 # naming the student and the profile's time control, coverage when
 # partial, the facts one line each, then the narrative as the coach's
 # read when present, block-quoted. Quality figures spell their unit
@@ -1016,10 +1018,13 @@ Distillation rules:
   families per color: chosen rows by games played (what the player
   actually plays), faced rows by impact (what actually hurts them,
   the same games × win-rate-deficit sort the report tables use).
-- Every list is capped so the rendered block stays around 250
-  tokens, `terminations` excepted for the reason given under
-  "Milestones"; the exact caps are implementation detail, pinned by
-  the snapshot tests rather than stated here.
+- Every list is capped to hold the rendered block down,
+  `terminations` excepted for the reason given under "Milestones";
+  the exact caps are implementation detail, pinned by the snapshot
+  tests rather than stated here. The block was ~250 tokens when the
+  profile shipped and is ~420 now, the trajectory line being most of
+  the growth — worth knowing before adding another, since this is
+  paid on every explain call and every chat message, not once.
 - Fields added to `PlayerProfile` after the first release carry
   empty-ish defaults, so a snapshot stored under an older shape still
   parses. The embed paths read stored rows (see "Embedding"), and a
@@ -1083,7 +1088,7 @@ nothing else can supply:
 - **Dense, not polished, around 200 words.** The first live narrative
   ran to 619 words — about 950 tokens — which the embed then pastes
   into every explain prompt and every game-scope chat message, against
-  a block documented at roughly 250. Dropping "three to five
+  a facts block that is itself ~420. Dropping "three to five
   sentences" removed the only bound on length, and the model spent the
   room on connective tissue: every figure acquired a sentence
   explaining its significance to a reader who is a coach and can see
