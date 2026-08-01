@@ -1046,7 +1046,7 @@ def test_append_game_links_degrades_but_appends_nothing_with_no_citable_games() 
 
 
 def test_profile_prompt_version_is_independent_of_prompt_version() -> None:
-    assert PROFILE_PROMPT_VERSION == "profile-v4"
+    assert PROFILE_PROMPT_VERSION == "profile-v10"
     assert PROFILE_PROMPT_VERSION != PROMPT_VERSION
 
 
@@ -1062,6 +1062,34 @@ def test_profile_instructions_constrain_what_the_embed_cannot_fix() -> None:
 
     assert '"1.30 ACPL"' in instructions  # named as the thing not to write
     assert "markdown headings" in instructions
+
+
+def test_profile_instructions_bound_the_length_the_embed_pays_for() -> None:
+    """The first live profile-v5 narrative ran to 619 words -- about 950
+    tokens, which `render_profile_context` then pastes into every explain
+    prompt and every game-scope chat message, against a block documented
+    at roughly 250. Dropping "three to five sentences" from the
+    instructions removed the only thing bounding it, and the model spent
+    the room on connective tissue rather than facts.
+    """
+    prompt = render_profile_prompt(build_profile(build_report("testuser", [])))
+    instructions = prompt.split("## Instructions")[1]
+
+    assert "200 words" in instructions
+    assert "deleted without losing information" in instructions
+    # The guard covers comparisons between buckets; it says nothing
+    # about inference drawn from reading games, which is the second path
+    # the tools opened (docs/06-coach.md, "Narrative").
+    assert "never a tendency" in instructions
+    assert "how many games you looked at" in instructions
+    # The live profile-v8 narrative asserted that the London setup was
+    # "unreachable" against the English Defense, with the facts block's
+    # own line for that row reading 1.d4 b6 2.Bf4 Bb7 3.e3 e6 -- the
+    # London setup, played in 8 of those 9 games. Nothing else covers a
+    # positional claim: the comparison guard covers differences, the
+    # denominator rule covers counts.
+    assert "either verified or not made" in instructions
+    assert "counterexample to a guess" in instructions
 
 
 def test_build_profile_copies_report_scalars_and_denominators() -> None:
@@ -1297,8 +1325,8 @@ def test_render_profile_prompt_briefs_the_coach_in_the_third_person() -> None:
     profile = build_profile(build_report("testuser", scenario_games()))
     prompt = render_profile_prompt(profile)
 
-    assert 'never address the reader as "you"' in prompt
-    assert "third person" in prompt
+    assert 'Never address the reader as "you"' in prompt
+    assert "Third person" in prompt
     assert "address the student directly" not in prompt
 
 
@@ -1511,8 +1539,14 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
 ) -> None:
     """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
     complete() reuses explain()'s MCP-wrapped tool mechanics under the
-    report turn budget, and text across the whole tool loop -- before and
-    after an engine call -- concatenates into the returned advice.
+    report turn budget.
+
+    The returned advice is what the model wrote *after* its last engine
+    call (docs/06-coach.md, "Providers"). This test used to assert the
+    whole tool loop concatenated, which is how "I'll verify the key
+    turning points I plan to feature before writing." ended up glued to
+    the front of a live coaching brief -- with no separator, since the
+    join is on the empty string.
     """
     captured: dict[str, object] = {}
 
@@ -1557,9 +1591,7 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
     provider = create_provider(LlmConfig())
     advice = await provider.complete("write the report", stub_analyst)
 
-    assert (
-        advice == "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
-    )
+    assert advice == "Confirmed: Nxe5 wins the exchange."
     options = captured["options"]
     assert isinstance(options, ClaudeAgentOptions)
     # The engine tool is the only tool on offer, under the report budget --
@@ -1570,6 +1602,103 @@ async def test_agent_sdk_provider_complete_with_analyst_runs_agentically(
     mcp_servers = options.mcp_servers
     assert isinstance(mcp_servers, dict)
     assert "engine" in mcp_servers
+
+
+async def test_agent_sdk_provider_complete_drops_narration_before_every_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live regression (docs/06-coach.md, "Providers"): a model that
+    narrates before each of two engine calls shipped a brief opening
+    "I'll verify the key turning points I plan to feature before
+    writing.Let me get the concrete refutations...# Coaching brief" --
+    two preambles and the document, joined on the empty string.
+
+    Every tool call clears, not just the first: one clear would have left
+    the second preamble in place.
+    """
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            for narration in (
+                "I'll verify the key turning points I plan to feature before writing.",
+                "Let me get the concrete refutations for the moves I'll feature.",
+            ):
+                yield AssistantMessage(
+                    content=[TextBlock(text=narration)], model="claude-opus-4-8"
+                )
+                yield AssistantMessage(
+                    content=[
+                        ToolUseBlock(
+                            id="t",
+                            name="mcp__engine__analyze_position",
+                            input={"fen": "fen"},
+                        )
+                    ],
+                    model="claude-opus-4-8",
+                )
+            yield AssistantMessage(
+                content=[TextBlock(text="# Coaching brief\nStart here: ...")],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1,
+                is_error=False, num_turns=3, session_id="s",
+            )  # fmt: skip
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == "# Coaching brief\nStart here: ..."
+
+
+async def test_agent_sdk_provider_complete_falls_back_when_nothing_follows_a_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run whose budget expires mid-tool-loop leaves nothing collected
+    once the narration is dropped, so the existing fall-through to the
+    run's own final message carries it (docs/06-coach.md, "Providers").
+    Without that path this would raise instead of returning the answer
+    the SDK already has.
+    """
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="Let me check that line.")],
+                model="claude-opus-4-8",
+            )
+            yield AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="t1",
+                        name="mcp__engine__analyze_position",
+                        input={"fen": "fen"},
+                    )
+                ],
+                model="claude-opus-4-8",
+            )
+            yield ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1,
+                is_error=False, num_turns=2, session_id="s",
+                result="# Coaching brief\nWhat the run did produce.",
+            )  # fmt: skip
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    advice = await provider.complete("write the report", stub_analyst)
+
+    assert advice == "# Coaching brief\nWhat the run did produce."
 
 
 async def test_agent_sdk_provider_complete_without_analyst_stays_single_turn(
@@ -2171,13 +2300,15 @@ async def test_copilot_provider_complete_raises_on_empty_output(
         await provider.complete("coach me")
 
 
-async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
+async def test_copilot_provider_complete_with_analyst_keeps_only_the_final_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """docs/archive/fixes-2026-07/04-report-engine-tool.md: given an analyst,
-    complete() registers analyze_position exactly as explain() does, and
-    text either side of an engine call concatenates into the returned
-    advice."""
+    complete() registers analyze_position exactly as explain() does.
+
+    The advice is what the model wrote after its last engine call, the
+    same rule ClaudeAgentSdkProvider.complete() applies to a
+    ToolUseBlock (docs/06-coach.md, "Providers")."""
     captured: dict[str, object] = {}
     script = [
         ("text", "Let's verify the critical line. "),
@@ -2192,9 +2323,7 @@ async def test_copilot_provider_complete_with_analyst_concatenates_tool_loop(
     provider = create_provider(LlmConfig(provider="github-copilot"))
     advice = await provider.complete("write the report", stub_analyst)
 
-    assert advice == (
-        "Let's verify the critical line. Confirmed: Nxe5 wins the exchange."
-    )
+    assert advice == "Confirmed: Nxe5 wins the exchange."
     # The engine tool is the only tool on offer -- same lockdown as explain().
     available_tools = captured["available_tools"]
     assert isinstance(available_tools, ToolSet)
@@ -2260,10 +2389,16 @@ async def test_copilot_provider_complete_runaway_tool_calls_cut_the_run_off(
     # adapted to complete()'s collection shape: instead of explain()'s
     # queue-based drain sentinel, the runaway branch sets the idle event
     # directly, so `await idle.wait()` returns and the `async with` blocks
-    # disconnect the session -- text collected before the runaway stands.
+    # disconnect the session.
     # No "idle" step is scripted at all: if the implementation failed to
     # set the event on the runaway call, this would hang instead of pass,
     # so the timeout wrapper turns that failure mode into a clean failure.
+    #
+    # This run wrote nothing after any tool call, so once the narration is
+    # dropped (docs/06-coach.md, "Providers") there is no answer at all --
+    # and unlike ClaudeAgentSdkProvider there is no run-level final message
+    # to fall through to. Raising is the honest outcome: returning "Let's
+    # check a few lines." as a coaching brief would be worse than an error.
     max_engine_calls = 8  # _REPORT_MAX_TURNS
     captured: dict[str, object] = {}
     script = [
@@ -2277,11 +2412,11 @@ async def test_copilot_provider_complete_runaway_tool_calls_cut_the_run_off(
     )
 
     provider = create_provider(LlmConfig(provider="github-copilot"))
-    advice = await asyncio.wait_for(
-        provider.complete("write the report", stub_analyst), timeout=5
-    )
+    with pytest.raises(CoachProviderError, match="returned no text"):
+        await asyncio.wait_for(
+            provider.complete("write the report", stub_analyst), timeout=5
+        )
 
-    assert advice == "Let's check a few lines."
     tool_results = cast("list[ToolResult]", captured["tool_results"])
     assert len(tool_results) == max_engine_calls + 2
     assert "budget" in tool_results[-1].text_result_for_llm
@@ -2552,6 +2687,12 @@ def _partly_analyzed() -> tuple[list[AnalyzedGame], list[GameSummary]]:
             time_class="blitz",
             end_time=1_781_000_000 + i,
             player_rating=1500,
+            # Above the player, so these count as upsets -- `best_win`
+            # is the biggest upset, not the highest-rated opponent
+            # (docs/06-coach.md, "Trajectory"). The fixture's point is
+            # that an unanalyzed win still reaches the milestones; it
+            # needs a win that qualifies as one.
+            opponent_rating=1560 + i,
         )
         for i in range(2)
     ]
@@ -2844,9 +2985,15 @@ def test_rating_peak_is_dated_at_the_first_game_that_reached_it() -> None:
     assert report.time_classes[0].rating_max_at == first
 
 
-def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
+def test_best_win_is_the_biggest_upset_not_the_highest_rated_opponent() -> None:
     """Losses to stronger players are not milestones, and the winner is
-    picked on the opponent's rating, not the player's own."""
+    picked on the rating *gap*, not the opponent's rating
+    (docs/06-coach.md, "Trajectory").
+
+    Here the two disagree: the 1750 is 250 above the student, the 1900
+    only 150, so picking on the opponent's rating alone -- what this
+    did before -- would name the wrong game.
+    """
     day = 1_780_000_000
     report = _volume_report(
         [
@@ -2872,11 +3019,21 @@ def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
                 opponent="weaker",
                 opponent_rating=1400,
             ),
+            # A higher-rated opponent beaten, but from a higher rating
+            # too -- a smaller upset than g-best.
+            _volume(
+                "g-higher-rated",
+                result="win",
+                end_time=day + 3 * _DAY,
+                opponent="highest",
+                opponent_rating=1900,
+                player_rating=1750,
+            ),
         ]
     )
 
     assert report.best_win is not None
-    assert report.best_win.game_id == "g-best"
+    assert report.best_win.game_id == "g-best"  # +250, not the 1900 at +150
     assert report.best_win.opponent == "strongest"
     assert report.best_win.opponent_rating == 1750
     assert report.best_win.player_rating == 1500
@@ -2885,6 +3042,30 @@ def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
 def test_best_win_is_none_without_a_win() -> None:
     report = _volume_report([_volume("g-1", result="loss", end_time=1_780_000_000)])
 
+    assert report.best_win is None
+
+
+def test_best_win_is_none_on_a_rating_matched_archive() -> None:
+    """Common and correct (docs/06-coach.md, "Trajectory"): chess.com
+    pairs by rating, so on the reference rapid archive the largest upset
+    over 1,925 games is +7 -- inside the band where the two players are
+    the same strength by this report's own definition, and a milestone
+    about nothing."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume(
+                f"g-{i}",
+                result="win",
+                end_time=day + i * _DAY,
+                opponent_rating=1507,
+                player_rating=1500,
+            )
+            for i in range(5)
+        ]
+    )
+
+    assert report.record.wins == 5
     assert report.best_win is None
 
 
@@ -3049,10 +3230,18 @@ def test_build_profile_copies_the_milestones_verbatim() -> None:
     assert profile.terminations == report.terminations
 
 
-def test_profile_prompt_reads_the_after_loss_score_against_the_overall_one() -> None:
-    """The figure means nothing alone: 50% after a loss is bad only next
-    to a better overall score, so the comparison is rendered, not left
-    for the model to find."""
+def test_profile_prompt_leaves_the_after_loss_split_to_the_verdicted_section() -> None:
+    """The profile has a "Splits" section that states this comparison
+    against a *matched* baseline and with a verdict, so the milestone
+    line is gone from this document alone (docs/06-coach.md, "Reading a
+    comparison").
+
+    Rendering both would put the raw gap above the judgement of it, and
+    a model handed "48% after a loss against 52% overall" as a milestone
+    narrates it whatever the section below says -- which is exactly what
+    the first live narrative did. The report brief has no Splits section
+    and keeps the line.
+    """
     day = 1_780_000_000
     report = _volume_report(
         [
@@ -3063,10 +3252,13 @@ def test_profile_prompt_reads_the_after_loss_score_against_the_overall_one() -> 
         ]
     )
 
-    prompt = render_profile_prompt(build_profile(report))
+    profile_prompt = render_profile_prompt(build_profile(report))
+    brief = render_prompt(report)
 
-    assert "- After a loss: 0% (1g) in the next game of the same sitting" in prompt
-    assert "against 50% (4g) overall" in prompt
+    assert "- After a loss:" not in profile_prompt
+    assert "- By color:" not in profile_prompt
+    assert "- After a loss: 0% (1g) in the next game of the same sitting" in brief
+    assert "against 50% (4g) overall" in brief
 
 
 def test_profile_prompt_renders_the_dated_peak_and_the_milestones() -> None:
@@ -3078,7 +3270,10 @@ def test_profile_prompt_renders_the_dated_peak_and_the_milestones() -> None:
     assert peak.rating_max_at is not None
     assert f"{peak.rating_max} on " in prompt
     assert "## Milestones and tendencies" in prompt
-    assert "- Best win: beat a " in prompt
+    # Gap first: the gap is the achievement, where "beat a 1559" only
+    # says the student was once rated about that themselves
+    # (docs/06-coach.md, "Trajectory").
+    assert "- Biggest upset: beat someone " in prompt
     assert "## How games end" in prompt
 
 

@@ -1,6 +1,6 @@
 # Player profile -- testuser
 *(Losses are in pawns per move -- 0.35 means the average move gave up about a third of a pawn; lower is better. Every figure below is move-weighted over the games covered.)*
-Covering their games (all time controls): 19 games, 2026-03-27 to 2026-06-07 (all 19 games analyzed).
+Covering their games (all time controls) at their current level: 19 games, 2026-03-27 to 2026-06-07 (all 19 games analyzed).
 
 ## Ratings
 | Time class | Score | Rating | Peak |
@@ -34,10 +34,14 @@ Overall 1.07 pawns lost per move over 230 moves -- best 58.3% (134), good 29.1% 
 
 ## Milestones and tendencies
 *(All over every game in scope, analyzed or not -- none of these needs an engine.)*
-- Best win: beat a 1638 on 2026-06-07, rated 1598 at the time (+40)
+- Biggest upset: beat someone 120 points higher, a 1607 on 2026-05-29 while rated 1487
 - Streaks: their last game was a win; longest runs 2 wins, 2 losses
-- By color: White 50% (13g); Black 58% (6g)
 - Opposition: avg rating diff -2; 40% (5g) vs stronger, 62% (8g) vs similar, 50% (6g) vs weaker
+
+## Splits
+*(Each compares two groups of the student's own games. A split marked "within noise" is a difference this many games cannot distinguish from chance -- it is not a tendency and must not be reported as one.)*
+- By color: 50% (13g) as White, against 58% (6g) as Black (a 4-point edge is normal for everyone and is already allowed for) -- within noise, not a tendency
+- Queen's Pawn Game as White: 58% (6g) in this system, against 43% (7g) their other games as White -- within noise, not a tendency
 
 ## How games end
 Losses 8: resigned 4, timeout 3, checkmated 1
@@ -46,15 +50,15 @@ Wins 9
 
 ## Repertoire
 
-### As White
+### As White (11 of 13 games in these lines)
 Systems the student chose:
-- Queen's Pawn Game (1.d4 2.Bf4 3.e3) -- 6g, 58%
+- Queen's Pawn Game (1.d4 2.Bf4 3.e3) -- 6g, 58%, 0.14 pawns/move out of the opening
 What they face as White:
-- Englund Gambit Complex (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) -- 5g, 40%
+- Englund Gambit Complex (1.d4 e5 2.dxe5 Nc6 3.Nf3 Qe7) -- 5g, 40%, 5.16 pawns/move out of the opening
 
-### As Black
+### As Black (6 of 6 games in these lines)
 Systems the student chose:
-- Pirc Defense (1...d6 2...Nf6 3...g6) -- 6g, 58%
+- Pirc Defense (1...d6 2...Nf6 3...g6) -- 6g, 58%, 0.15 pawns/move out of the opening
 
 ## Recurring error patterns
 | Pattern | Count | % of blunders |
@@ -63,16 +67,19 @@ Systems the student chose:
 | Walked into a forced mate | 2 | 33.3% |
 
 ## Instructions
-Write the player's narrative now, following these rules:
-- **Length and shape.** Three to five sentences describing this student's tendencies, then a short list of weaknesses -- a handful of bullets, not an essay.
-- **Audience.** You are briefing a chess coach about a student they are about to work with -- you are not talking to the student. Write about them in the third person, by name or as "this student"; never address the reader as "you". This text is stored and pasted into other prompts, where the reader is another coach: a narrative that opens "You are a rapid player" tells that coach they are the rapid player.
-- **Scope.** The facts above cover one time control, named in the header. Say which one when you characterize the student, and never generalize the figures to their whole game -- a rapid profile is not a description of their bullet play.
-- **Two denominators.** Ratings, records and repertoire counts cover every game in scope; average loss, blunder rates and error patterns cover only the analyzed subset, whose size the header states. Never present the analyzed sample as the student's whole history, and if coverage is thin, say the quality read is provisional.
-- **Recent form first.** Where the recent-form windows disagree with the all-time figures, lead with the most recent window that has a real sample and say which way it is moving -- how the student plays now matters more than their average over years. Ignore a window whose analyzed count is too small to carry a conclusion.
-- **Milestones are evidence, not decoration.** The rating peak with its date, the best win, the streaks, the after-a-loss score, the color split and how games end are all facts about every game in scope. Use the ones that say something -- sitting well below a peak reached long ago, a worse score in the game right after a loss, a lopsided White/Black split, or a large share of losses on the clock are each a coaching problem with a name. Ignore the ones that do not, and never read a split whose sample is a handful of games as a tendency.
-- **Register.** Write for a club player's coach, not a fellow engine: pawns, never centipawns, and the idea before the number. Spell the unit out where the number is -- "1.30 pawns a move", never "1.30 ACPL" or any other acronym. Nothing here defines one, and what you write is stored and pasted into prompts that define nothing either, where a reader has no way to tell the figure is not centipawns.
-- **Plain prose only.** Sentences and the bullet list, and no markdown headings (`#`, `##`) anywhere -- this text is pasted *inside* another prompt's sections, and a heading of your own would read there as starting a new one.
-- **Evidence.** Every claim must tie to a figure stated above -- a rating, an average loss, a blunder rate, a repertoire score, an error-pattern count. Never assert a tendency the facts do not support.
-- **No invented lines.** Do not assert a concrete variation, opening trap, or line of play beyond what the facts state -- these are aggregates, not annotated games, and there is no engine here to verify a claimed line.
-- **No game citations.** Never reference a specific game, date, or opponent, and never write a link or handle of any kind -- this text is stored and reused inside other prompts, where a game reference could not be resolved into a link or checked.
-- **Honesty.** If a section's sample is too thin to support a claim, say so or omit it rather than filling space.
+Write a short profile of this student for the coach who works with them next. It gets pasted into other sessions as context when that coach explains a move or answers a question, so write what would actually change the advice.
+
+**Dense, not polished. Around 200 words.** This is context another prompt pastes in, not an essay -- it is read for what it says, never for how it reads. Every sentence must carry a fact or a consequence the coach would act on. Cut transitions, cut any sentence whose only job is to introduce the next one, and never explain the significance of a figure you have just given: the reader is a coach and can see it. If a sentence could be deleted without losing information, delete it.
+
+The facts above are everything you have -- there are no tools on this run, so write only what they support and say so where they run out.
+
+Seven rules, all because this text is stored and reused elsewhere:
+- Third person, about the student, to a coach. Never address the reader as "you" -- they are the coach, not the player.
+- No game citations, dates, opponents, links or handles. They resolve to nothing where this lands.
+- No markdown headings (`#`, `##`). This text is pasted *inside* another prompt's sections, where a heading of your own reads as starting a new one.
+- A claim about the position itself -- a structure, a plan, why a line is awkward -- is either verified or not made. The facts are aggregates; the move sequences printed beside them are the only concrete lines you have, and they are frequently the counterexample to a guess.
+- Every figure covers the same games as the facts above, including anything a tool returns. State a count only when you have it from the facts or a tool -- never rolled up in your head from rows.
+- An observation from reading individual games is an example, never a tendency. Say how many games you looked at, and do not turn it into a trait -- collapsing in three sampled endings is three endings, not a temperament.
+- Spell every unit out -- "1.30 pawns a move", never "1.30 ACPL" or any other acronym. Nothing here defines one, and neither do the prompts this lands in.
+
+A comparison marked "within noise" is not a tendency. Do not name it as a weakness, do not call it "worth watching", and do not soften it into a passing mention -- the honest statement is that the data cannot tell, and the sentence is better spent on something it can.

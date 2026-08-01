@@ -276,6 +276,12 @@ class MonthStats(BaseModel):
     month: str  # "2026-07"
     games: int
     rating_end: int | None  # last rating seen that month
+    # The month's median rating, which is what the profile window's
+    # drift rule compares (docs/06-coach.md, "Window") -- `rating_end`
+    # is one game's outcome and swings with it, and a boundary decided
+    # by a single game is not a boundary. Defaulted for snapshots
+    # written before the column existed.
+    rating_median: int | None = None
     acpl: float | None  # centipawns per player move
     blunder_rate: float | None  # blunders ÷ player moves
 
@@ -462,6 +468,14 @@ class PlayerReport(BaseModel):
     player_moves: int  # the denominator for judgment_counts
     window_start: int | None  # epoch seconds of the oldest game covered
     window_end: int | None  # epoch seconds of the newest
+    # The same bounds over the *analyzed* subset alone. Volume and
+    # quality have two denominators (above) and, on a partly-analyzed
+    # archive, two spans: an engine that has only reached this year's
+    # games makes "average loss over the whole span" a claim about this
+    # year wearing two years' clothes. Defaulted so stored snapshots
+    # written before the fields existed still parse.
+    analyzed_window_start: int | None = None
+    analyzed_window_end: int | None = None
     time_class: TimeClass | None  # the filter applied; None = all mixed
     # The scope the caller asked for, as opposed to what analysis covers:
     # requested_* are the window bounds of the request (None = unbounded)
@@ -493,6 +507,167 @@ class PlayerReport(BaseModel):
     critical_positions: list[CriticalPosition]
 
 
+class RatingDelta(BaseModel):
+    """Rating movement over one trailing span (docs/06-coach.md,
+    "Trajectory").
+
+    `games` rides along because a delta over three games and a delta
+    over three hundred are different claims, and the renderers say so.
+    """
+
+    days: int  # 30, 90, 180, 365
+    rating_then: int
+    delta: int  # rating_now - rating_then
+    games: int  # games played inside the span
+
+
+class Drawdown(BaseModel):
+    """The largest peak-to-trough fall in the archive, with its
+    recovery (docs/06-coach.md, "Trajectory").
+
+    A window is a stationarity assumption and a drawdown is the
+    opposite, so this is reported as its own fact rather than left for
+    whichever window happens to contain it. `record` covers the fall
+    itself; `since_record` covers everything after the trough, which is
+    what makes "clawed back" or "still down there" sayable.
+    """
+
+    peak: int
+    peak_at: int  # epoch seconds of the first game reaching the peak
+    trough: int
+    trough_at: int
+    record: Record  # how they scored through the fall
+    since_record: Record  # every game after the trough
+    recovered: bool  # the rating has since reached the peak again
+
+    @property
+    def depth(self) -> int:
+        """Negative: the fall in rating points."""
+        return self.trough - self.peak
+
+
+class RatingTrajectory(BaseModel):
+    """Where the student is heading, over the **full** archive
+    (docs/06-coach.md, "Trajectory") — never the profile window, whose
+    whole job is to hold the level roughly constant.
+
+    A coach's first question is the direction, and averages cannot
+    answer it: on a student who has gone 185 to 1479 the archive mean
+    describes nobody, while "up 443 points in a year" describes them
+    exactly.
+    """
+
+    rating_now: int
+    deltas: list[RatingDelta] = []  # ascending by days
+    rating_max: int
+    rating_max_at: int
+    rating_min: int
+    rating_min_at: int
+    games: int  # the whole archive in this control
+    window_start: int | None = None  # the full archive's own span
+    window_end: int | None = None
+    drawdown: Drawdown | None = None  # None when the curve only rises
+
+    def delta(self, days: int) -> RatingDelta | None:
+        return next((d for d in self.deltas if d.days == days), None)
+
+    @property
+    def improving(self) -> bool:
+        """True unless both the 90- and 365-day deltas are <= 0.
+
+        The peak gap is only a headline for a student who is not
+        improving (docs/06-coach.md, "Trajectory"): "95 below peak" on
+        someone up 443 on the year is a misread, and it is the one the
+        first live narrative made. A student with neither delta yet
+        measured counts as improving, so the gap stays suppressed
+        rather than being asserted on no evidence.
+        """
+        long_deltas = [d.delta for d in self.deltas if d.days in (90, 365)]
+        return not long_deltas or any(d > 0 for d in long_deltas)
+
+
+class ComparisonGroup(BaseModel):
+    """A group of games named for a comparison (docs/06-coach.md,
+    "Reading a comparison").
+
+    Every field is a property fixed **before** the game was played.
+    There is deliberately no `result` and no rating band: selecting
+    games on the thing being measured is what makes a +/-100 rating
+    window delete drawdowns and a win-rate-conditioned bucket
+    manufacture tilt. `find_games` keeps its `result` filter, because
+    it answers "show me games" rather than "is this a tendency".
+
+    All-None means "every game in scope", which is what `within`
+    defaults to.
+    """
+
+    color: Color | None = None
+    opening: str | None = None  # case-insensitive name substring
+    time_class: TimeClass | None = None
+    since: int | None = None  # epoch seconds, inclusive
+    until: int | None = None  # epoch seconds, exclusive
+
+    def label(self) -> str:
+        """How the group reads in a rendered comparison row."""
+        parts: list[str] = []
+        if self.color is not None:
+            parts.append(f"as {self.color.capitalize()}")
+        if self.opening:
+            parts.append(f"in the {self.opening}")
+        if self.time_class is not None:
+            parts.append(f"in {self.time_class}")
+        return " ".join(parts) if parts else "in every game"
+
+
+class ComparisonInput(BaseModel):
+    """One matched pair of buckets, before the family is judged."""
+
+    label: str  # "Tilt", "By color", ...
+    left_label: str  # "after a loss"
+    left: Record
+    right_label: str  # "not after a loss"
+    right: Record
+    # The gap expected under the null, in percentage points. Zero for
+    # almost everything -- but not for colour, where White scores better
+    # than Black for every player alive, so a difference of zero would be
+    # the anomaly (docs/06-coach.md, "Reading a comparison").
+    baseline: float = 0.0
+
+
+class Comparison(BaseModel):
+    """Two disjoint buckets of the same games, with a verdict
+    (docs/06-coach.md, "Reading a comparison").
+
+    `significant` is decided over the profile's whole comparison family
+    by Benjamini-Hochberg, never per row, which is the entire point: a
+    profile makes up to eight of these before a narrative run asks
+    anything, and judging each on its own
+    manufactures roughly one spurious tendency every other student.
+    """
+
+    label: str
+    left_label: str
+    left: Record
+    right_label: str
+    right: Record
+    gap: float  # percentage points, left score - right score
+    baseline: float = 0.0  # the gap expected under the null
+    resolution: float  # +/- points; 2 standard errors of the gap
+    significant: bool  # survived the BH step-up
+
+    @property
+    def excess(self) -> float:
+        """How far the gap runs past what the null already expects --
+        the quantity actually tested."""
+        return round(self.gap - self.baseline, 1)
+
+    @property
+    def measurable(self) -> bool:
+        """False when either bucket is too small to have a variance at
+        all, in which case there is nothing to report either way."""
+        return self.left.games > 1 and self.right.games > 1
+
+
 class ProfileOpening(BaseModel):
     """One repertoire family in the player profile.
 
@@ -510,6 +685,15 @@ class ProfileOpening(BaseModel):
     games: int  # every stored game in the family — volume, not analysis
     score: float  # (wins + draws/2) / games, 0-1
     faced: bool
+    # Centipawns per move over this family's opening plies, and over
+    # every player move in its games. Quality layer, so both are None
+    # when no game in the family has been analyzed. Defaulted for
+    # snapshots stored before the columns existed -- without them the
+    # profile could not say that a student's Pirc costs 0.32 pawns a
+    # move out of the book against 0.23 in their London, which is the
+    # sharpest repertoire signal there is.
+    opening_acpl: float | None = None
+    avg_cp_loss: float | None = None
 
 
 class PlayerProfile(BaseModel):
@@ -566,6 +750,27 @@ class PlayerProfile(BaseModel):
     terminations: list[TerminationStats] = []
     openings: list[ProfileOpening]  # chosen + faced, capped per color
     error_patterns: list[ErrorPattern]
+    # The span the *analyzed* games cover, which is not the span above:
+    # `window_start`/`window_end` bound every stored game in scope,
+    # these bound the subset an engine has reached. Stating only a count
+    # ("1,158 of 1,925 analyzed") let the first live narrative call a
+    # seven-month quality figure the student's "whole span", because
+    # nothing said the analyzed games were all recent.
+    analyzed_window_start: int | None = None
+    analyzed_window_end: int | None = None
+    # Full-archive direction, deliberately outside the profile window
+    # (docs/06-coach.md, "Trajectory"). None on an archive too short to
+    # measure one.
+    trajectory: RatingTrajectory | None = None
+    # True when the window had to keep extending past the drift bound to
+    # reach a usable sample, so its outcome rates necessarily span a
+    # change in the student's level. Both renderers say so; a student
+    # mid-climb gets a caveat rather than a 40-game window.
+    window_spans_level_change: bool = False
+    # Matched bucket comparisons with BH verdicts (docs/06-coach.md,
+    # "Reading a comparison"). Empty on a profile with no sample to
+    # compare, and on snapshots stored before the family existed.
+    comparisons: list[Comparison] = []
     narrative: str | None = None  # stored LLM layer; None until generated
 
 

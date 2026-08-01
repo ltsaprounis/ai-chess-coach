@@ -39,6 +39,7 @@ from chess_coach.domain import (
     ChatMessage,
     CoachAgent,
     Color,
+    ComparisonGroup,
     EvalLine,
     Game,
     GameAnalysis,
@@ -91,6 +92,7 @@ class StubProvider:
         # One entry per `complete` call, so tests can see whether that
         # call carried a working analyst (pool up) or None (pool down).
         self.complete_analysts: list[PositionAnalystFn | None] = []
+        self.complete_toolkits: list[ChatToolkit | None] = []
         self.complete_error: CoachProviderError | None = None
         self.explain_calls = 0
         self.explain_error: CoachProviderError | None = None
@@ -98,6 +100,12 @@ class StubProvider:
         # route built (e.g. whether a stored player-profile block opened
         # it) without reaching into the SSE body.
         self.explain_prompts: list[str] = []
+        # Narration yielded *before* the engine call, as a real model
+        # emits when it says what it is about to check. It must stream to
+        # the panel but never reach the cached explanation
+        # (docs/06-coach.md, "Providers"); None keeps the default shape,
+        # where the tool event comes first and there is nothing to drop.
+        self.explain_narration: str | None = None
         # --- chat ---
         # One entry per `chat` call, so tests can inspect what seed/history/
         # provider_state the route built without reaching into the SSE body.
@@ -120,10 +128,17 @@ class StubProvider:
         self.chat_toolkit_probe: Callable[[ChatToolkit], Awaitable[None]] | None = None
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
         self.prompts.append(prompt)
         self.complete_analysts.append(analyst)
+        # One entry per call, so a test can assert the profile run got a
+        # toolkit (agentic) while the report run got a bare analyst.
+        self.complete_toolkits.append(toolkit)
         if self.complete_error is not None:
             raise self.complete_error
         return self.advice
@@ -133,6 +148,8 @@ class StubProvider:
     ) -> AsyncGenerator[ExplainEvent]:
         self.explain_calls += 1
         self.explain_prompts.append(prompt)
+        if self.explain_narration is not None:
+            yield ExplainEvent(type="text", text=self.explain_narration)
         # Calling the analyst once proves the API layer's engine-seam
         # wiring reaches this stub, without a real engine.
         lines = await analyst(chess.STARTING_FEN)
@@ -1817,6 +1834,57 @@ def test_profile_post_routes_to_the_requested_agent(
     assert body["profile"]["narrative"] == "advice from beta"
 
 
+def test_profile_post_runs_agentically_with_the_full_toolkit(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md, "Narrative": the narrative run gets the
+    read-only chat toolkit, so it can read the repertoire and pull games
+    rather than paraphrasing the aggregates it was handed -- and the
+    prompt says so, which is the whole point of the conditional clause.
+
+    Its scope is pinned by the test below, which is the opposite of what
+    this docstring claimed before d9580d7 reversed the decision.
+    """
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+
+    post(client, "/api/players/testuser/profile", json={})
+
+    assert provider.complete_toolkits[-1] is not None
+    prompt = provider.prompts[-1]
+    assert "Use the tools to check anything the summary rests on" in prompt
+    assert "there are no tools on this run" not in prompt
+
+
+def test_profile_post_scopes_the_toolkit_to_the_facts_window(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """One document, one denominator (docs/06-coach.md, "Reading a
+    comparison").
+
+    The toolkit was unwindowed at first, on the reasoning that the
+    narrative covers the control's whole history -- which confused the
+    storage key with the content's scope. Live, `get_opening_stats`
+    returned a 484-game London over the whole 1,925-game archive into a
+    narrative whose every other figure covered 1,158, and
+    `compare_groups` handed back a 968-game White split beside a facts
+    block stating 576.
+    """
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+
+    post(client, "/api/players/testuser/profile", json={})
+
+    toolkit = provider.complete_toolkits[-1]
+    assert toolkit is not None
+    facts = get(client, "/api/players/testuser/profile", params={}).json()["profile"]
+    # Through the seam, not the attribute: whatever the window turned
+    # out to be, a comparison the model asks for must count the same
+    # games the facts block states.
+    left, right = asyncio.run(toolkit.compare_games(ComparisonGroup()))
+    assert left.games + right.games == facts["games_in_scope"]
+
+
 def test_profile_post_persists_and_a_subsequent_get_sees_it(
     client: TestClient, db_path: Path, stub_registry: dict[str, object]
 ) -> None:
@@ -1989,6 +2057,32 @@ def test_explain_streams_then_caches_and_a_repeat_is_a_cache_hit(
     assert "event: text" not in repeat.text
     assert '"text":"This move loses a pawn."' in repeat.text
     assert provider.explain_calls == 1
+
+
+def test_explain_caches_only_the_text_after_the_last_engine_call(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """docs/06-coach.md, "Providers": text the model writes before a tool
+    call is it narrating its plan, not the explanation. It still streams
+    to the panel -- the student watches the coach work -- but the cached
+    text, which is what every later reader sees, starts after the last
+    engine call.
+    """
+    seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
+    provider = stub_provider(stub_registry, "claude")
+    provider.explain_narration = "Let me check the position after the move."
+
+    response = get(client, "/api/games/g-1/explain", params={"ply": "1"})
+    assert response.status_code == 200
+    body = response.text
+    # Streamed live, so the panel shows the coach working...
+    assert "Let me check the position after the move." in body
+    # ...but the done event -- the cached text -- carries the answer alone.
+    assert '"text":"This move loses a pawn."' in body
+
+    db = open_db(db_path)
+    assert get_explanation(db, "g-1", 1, "claude") == "This move loses a pawn."
+    db.close()
 
 
 def test_explain_refresh_bypasses_the_cache_and_regenerates(

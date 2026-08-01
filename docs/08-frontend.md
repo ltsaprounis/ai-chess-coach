@@ -198,24 +198,49 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    guessing.
 
    It shows the free facts `build_profile` distills — rating and
-   games per time class, each tile carrying the **dated peak** and
-   how far below it the current rating sits, overall average loss
-   plus blunder share,
+   games per time class, each tile carrying the **dated peak**, and
+   how far below it the current rating sits *only when the student
+   is not improving* (`isImproving`, mirroring the backend property
+   pydantic cannot serialize): "95 below peak" beside a trajectory
+   reading "+443 over the year" is the misread the profile rework
+   exists to remove, and the card must not be what reintroduces it.
+   Then a **Trajectory** block — deltas over 30/90/180/365 days and
+   the largest drawdown with its recovery, labelled as covering the
+   whole archive rather than the level window every other figure
+   here uses — overall average loss plus blunder share,
    the **recent-form windows** (last 30/90 days against the whole
    span, rendered only when there is more than one row to compare),
-   a **Milestones** table, the top chosen systems and faced problem
-   lines per color, and
+   a **Milestones** table, a **Splits** table (docs/06-coach.md,
+   "Reading a comparison": each row's verdict and never its
+   arithmetic, unmeasurable splits dropped rather than labelled, and
+   after-a-loss and by-color live *here* rather than in Milestones so
+   the raw gap never sits above the judgement of it), the top chosen
+   systems and faced problem lines per color with each family's
+   **opening loss**, and
    recurring error patterns with counts and a deep-linked example
    (`/games/{id}?ply=`). A coverage line states both denominators —
    "ratings, records and repertoire cover all N games; quality
    figures cover the M analyzed" — since the two genuinely differ on
    a partly-analyzed archive.
 
+   The staleness hint has two independent bases, and the card takes
+   `currentPromptVersion` for the second: the narrative's own
+   `games_covered` against the live count for its scope, and its
+   `prompt_version` against the one the backend would generate under
+   now. The second matters most exactly when the count has *not*
+   moved — a narrative written under an older template can contradict
+   the facts rendered above it — and its wording differs, since "you
+   now have N games" would be a lie in that case.
+
    The Milestones table is the volume layer's own findings
-   (docs/06-coach.md, "Milestones"): the best win deep-linked to its
-   game, the current and longest runs, the after-a-loss score against
-   the overall one, the White/Black split, the opposition split, and
-   how losses end. Every row is built individually and the empty ones
+   (docs/06-coach.md, "Milestones"): the **biggest upset** deep-linked
+   to its game and read gap-first (chess.com pairs by rating, so the
+   highest-rated opponent beaten is structurally the student's own
+   peak — absent entirely on an archive with no win over a
+   meaningfully higher-rated player, which is common), the current and
+   longest runs, the opposition split, and how losses end. After-a-loss
+   and the White/Black split are deliberately *not* here — they are
+   Splits rows, with verdicts. Every row is built individually and the empty ones
    dropped — a student with no win yet has no "Best win" row rather
    than a dash — and the whole section disappears when none has data.
    It says out loud that it covers every game in scope, analyzed or

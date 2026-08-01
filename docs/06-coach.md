@@ -86,8 +86,35 @@ PROMPT_VERSION: str
 # it, carrying through the report's `time_class` (the profile's own
 # scope and storage key) and both denominators. `narrative` stays
 # None here; the API layer attaches the stored narrative when one
-# exists.
-def build_profile(report: PlayerReport) -> PlayerProfile
+# exists. `trajectory` covers the full archive and is therefore
+# supplied by the caller, which is the only party holding the
+# unwindowed months (see "Window").
+def build_profile(report: PlayerReport, *,
+                  trajectory: RatingTrajectory | None = None,
+                  spans_level_change: bool = False) -> PlayerProfile
+
+# The profile window (see "Window"): the epoch second the outcome
+# layer should start at, given every month in the archive, oldest
+# first. None = no cut, the whole archive is one level. The API layer
+# calls this on the *unwindowed* month list, then re-queries with the
+# bound — the rule is a coach semantic, so it lives here rather than
+# in whichever caller happens to need it.
+def profile_window(months: list[MonthStats]) -> int | None
+
+# Full-archive direction, over the same unwindowed months plus the
+# volume rows the deltas and the drawdown are measured on. Pure.
+def build_trajectory(games: list[GameSummary]) -> RatingTrajectory | None
+
+# The profile's comparison family (see "Reading a comparison"):
+# matched buckets in, gaps and BH-adjusted verdicts out. Pure, and
+# takes only `Record`s — a bucket's W/D/L carries both its mean and
+# its exact variance, so no new aggregation is needed.
+def build_comparisons(pairs: list[ComparisonInput]) -> list[Comparison]
+
+WINDOW_DRIFT_POINTS: int   # 200
+WINDOW_MAX_MONTHS: int     # 12
+WINDOW_MIN_GAMES: int      # the sample floor that overrides drift
+COMPARISON_FDR: float      # 0.05, the Benjamini-Hochberg level
 
 # The narrative-generation prompt (snapshot-tested): the facts, plus
 # instructions asking for 3-5 sentences of tendencies and a short
@@ -96,7 +123,9 @@ def build_profile(report: PlayerReport) -> PlayerProfile
 # and both denominators (see "Narrative").
 def render_profile_prompt(profile: PlayerProfile) -> str
 
-# The ~250-token block other prompts embed at the top: a header
+# The compact block other prompts embed at the top -- ~420 tokens of
+# facts, ~750 with a narrative attached, measured on a real profile
+# (see "Embedding"): a header
 # naming the student and the profile's time control, coverage when
 # partial, the facts one line each, then the narrative as the coach's
 # read when present, block-quoted. Quality figures spell their unit
@@ -193,6 +222,15 @@ class ChatToolkit(Protocol):
                          limit: int = 10) -> list[GameSummary]
     async def get_game(self, game_id: str) -> GameDetail | None
     async def opening_stats(self) -> list[OpeningStats]
+    # The comparison guard, exposed so a run cannot obtain an unjudged
+    # percentage (see "Reading a comparison"). Returns the group's
+    # record and the rest of `within`, computed by subtraction -- the
+    # caller never supplies the other side. `prior_comparisons` seeds
+    # the BH family with whatever the profile already judged.
+    prior_comparisons: list[Comparison]
+    async def compare_games(self, group: ComparisonGroup,
+                            within: ComparisonGroup | None = None,
+                            ) -> tuple[Record, Record]
 
 # Scope seeds — deterministic templates, snapshot-tested like every
 # other prompt. `render_game_chat_context` raises ValueError when
@@ -221,8 +259,11 @@ def render_chat_prompt(history: list[ChatMessage],
 # `complete` takes an optional analyst: with one, the report run is
 # agentic — the analyst exposed as the same `analyze_position(fen)`
 # tool `explain` uses, under a small turn budget — so the model can
-# verify concrete lines before asserting them. With `None` it is
-# today's single turn, the fallback when no engine pool exists.
+# verify concrete lines before asserting them. `toolkit` widens that
+# to chat's whole read-only roster and is what the profile narrative
+# passes (see "Narrative"); it subsumes `analyst`, carrying one of
+# its own. With neither it is a single turn, the fallback when no
+# engine pool exists.
 # `chat` is stateless with an opaque resume token: each call carries
 # everything needed to answer from scratch (seed, stored transcript,
 # new message), and a provider MAY shortcut the replay by resuming a
@@ -235,7 +276,8 @@ def render_chat_prompt(history: list[ChatMessage],
 # the provider has nothing to resume).
 class CoachProvider(Protocol):
     async def complete(self, prompt: str,
-                       analyst: PositionAnalystFn | None = None) -> str
+                       analyst: PositionAnalystFn | None = None,
+                       *, toolkit: ChatToolkit | None = None) -> str
     def explain(self, prompt: str, analyst: PositionAnalystFn,
                 ) -> AsyncGenerator[ExplainEvent]
     def chat(self, *, system_context: str,
@@ -322,7 +364,13 @@ player has only ever faced.
 - They describe that representative line, not an invariant of the
   group: transpositions inside one (color, eco, name) can reach the
   same name by a different move order, so a row's `system` is the
-  commonest way the player got there, not the only one.
+  commonest way the player got there, not the only one. **The
+  `get_opening_stats` tool result says this at the top of every dump**,
+  because stating it only here was not enough: a live narrative read
+  `[1.e4 d6 2.d4 Nf6 3.Nc3 g6], 32g, 33%` as "32 games where White
+  played 2.d4" and reported a prep hole at 33%, where the real 2.d4
+  split is 46% over 153 games. A move sequence printed beside a count
+  reads as a filter unless something says otherwise.
 - `opening_moves` and `player_moves` carry the denominators behind the
   two ACPL columns, so a consumer rolling rows up can stay
   move-weighted (see below).
@@ -400,6 +448,13 @@ analysis covers less than the scope it adds an explicit caveat naming
 the remaining games — which is what lets the instruction block's
 honesty rule actually bite. With no scope information (`None`
 throughout) the section renders as it always did.
+
+A count alone was not enough. `PlayerReport.analyzed_window_start`/
+`_end` carry the analyzed subset's own **span** beside the scope's,
+because on the reference archive the volume layer ran 22 months while
+the engine had reached only the last seven — which let a narrative
+call a seven-month quality figure the student's "whole span". Both
+profile renderers state it.
 
 The caveat **names which figures the shortfall touches**, rather than
 saying every figure below describes the analyzed span. That shorter
@@ -824,6 +879,152 @@ storage's key for the narrative. It is deliberately the *only* scope
 the narrative carries — see "Narrative" below for why the window is
 not.
 
+**Window.** A profile's outcome rates cover the student's **current
+level**, not their whole archive. On a developing player the two are
+not close: the reference archive runs 185 → 1479 over 1,925 rapid
+games, so "54% overall" averages a beginner beating beginners with a
+1500 at equilibrium and describes neither.
+
+The window is selected on **time, never on rating**. Filtering games
+by a ±rating band is selection on the outcome — games played below
+the current rating are disproportionately the ones that were lost —
+and on the reference archive a ±100 band keeps 699 games at 52.9%
+while deleting 173 at 41.9%, erasing a real 245-point drawdown. The
+rating curve therefore picks one **cut point** and every game after
+it is kept.
+
+`profile_window(months)` walks back in whole months from the most
+recent, extending while `|median(month) − median(newest)| ≤ 200`, and
+stops at the first month that exceeds it. Guard rails, each closing a
+way the bare rule misreads:
+
+- **Minimum sample.** Below `WINDOW_MIN_GAMES` analyzed games the
+  window keeps extending regardless of drift, and the profile carries
+  `window_spans_level_change`, which both renderers state — a student
+  mid-climb gets an honest caveat instead of a 40-game window.
+- **Maximum span** of 12 months, so a settled player does not get a
+  five-year window across a changed opponent pool.
+- **Thin months** below 30 games cannot set the boundary; the median
+  is taken over a trailing 30-game window instead. Otherwise a
+  12-game month decides the scope of the whole profile.
+
+Only the outcome layer is windowed. **Trajectory covers the full
+archive** (below), because a window is a stationarity assumption and
+the thing trajectory exists to report is the opposite.
+
+**Trajectory.** Averages describe a student; direction is what a coach
+asks first. `RatingTrajectory` carries the rating now, the change over
+the last 30/90/180/365 days with the games behind each, both dated
+extremes, and the largest `Drawdown` — peak, trough, the record
+through the fall, and whether it has been recovered. Three rules:
+
+- **A drawdown is a field, not a window artifact.** A collapse from
+  1574 to 1329 in 23 days is exactly what a stationary window either
+  swallows or hides depending on where its edge lands. Reporting it
+  explicitly is the only way it survives either outcome.
+- **The peak gap is not a headline unless the trend agrees.** Renderers
+  suppress it as a lead unless the 90-day *and* 365-day deltas are both
+  ≤ 0. "95 below peak" on a student up 443 on the year is a misread,
+  and it is the one the first live narrative made.
+- **`best_win` is the biggest upset, not the highest-rated opponent.**
+  Because chess.com pairs by rating, "highest-rated opponent beaten"
+  is structurally the student's own peak — 1559 against a 1574 peak in
+  rapid, 1172 against 1162 in blitz — so it restates the ratings table
+  two rows above and, on a tight archive, names a *weaker* opponent.
+  The largest positive rating gap in a win is a different and genuinely
+  earned milestone (+117 in blitz, +169 in bullet). It is `None` when
+  no win in scope beat a higher-rated opponent, which on a
+  rating-matched archive is common and correct.
+
+**Reading a comparison.** Several profile figures are differences
+between two disjoint buckets of the same games — after-a-loss against
+not, White against Black, one opening family against the rest. These
+are noisy, and a prompt that hands a model the difference and calls it
+a coaching problem will get a coin flip narrated as a tendency; the
+first live narrative duly hedged one in as "worth watching".
+
+`Comparison` carries both buckets, the gap in percentage points, the
+resolution, and a verdict. The rules:
+
+- **Matched baselines.** After-a-loss is compared against games *not*
+  after a loss, never against the overall record, which counts the
+  after-loss games on both sides of its own comparison.
+- **The score's own variance.** A game scores 1 / ½ / 0, so the
+  per-game variance is computed from the bucket's W/D/L rather than
+  assumed Bernoulli — `Record` carries everything needed, which is why
+  no new aggregation is required to produce any of this.
+- **Zero is not always the neutral point.** `ComparisonInput.baseline`
+  is the gap the null already expects, and the test is on how far the
+  observed gap runs past it. It is zero for everything except colour,
+  where White scores better than Black for every player alive —
+  roughly 4–6 points at amateur online level. Testing a colour gap
+  against zero therefore asks whether the student is a chess player,
+  and answers yes as soon as the sample is large enough:
+  `WHITE_ADVANTAGE_POINTS = 4.0` is a round documented choice like
+  `_OPPONENT_BAND`, at the conservative end of that range so a
+  genuinely odd split still fires. On the reference archive the gap is
+  4.8 points over ~580 games a side and reads as noise either way —
+  but at ~1,400 a side a zero null would have called the base rate
+  this student's personal weakness. Both renderers say the edge is
+  allowed for, since "within noise" against a baseline means "no more
+  than everyone has", not "no difference".
+- **Benjamini–Hochberg across the profile's whole family.** A profile
+  makes up to eight of these comparisons — tilt, colour, and up to
+  three chosen opening families per colour — plus one for every
+  `compare_groups` call a narrative run makes, which is why the tool
+  reports the family size back. At an unadjusted 2σ that is roughly
+  one spurious tendency every two or three students before the run
+  asks anything at all. BH controls the false-discovery rate, which is
+  the right error to control here — a missed tendency costs a bullet, a fabricated one is
+  pasted into every later prompt.
+- **The verdict is rendered, the arithmetic is not.** Both renderers
+  state "within noise" or the plain difference; neither prints sigmas
+  or p-values, which are not this audience's vocabulary.
+
+**The guard is a tool, not only a rule.** A run with `find_games` can
+slice the archive itself, and a percentage it derives that way arrives
+outside the BH family with no verdict attached — the multiple
+comparisons problem, reintroduced through the back door by the same
+tools that make the narrative worth generating. So the comparison
+itself is a tool: `compare_groups` is the only way to obtain a
+difference, and everything it returns is already judged.
+
+Three properties make it a guard rather than a convenience:
+
+- **The other side is computed, never supplied.** The model names one
+  group and, optionally, the scope to read it against; the tool
+  subtracts to get the rest. Two free-form filters would let a run
+  compare a group against a set containing it — which is the
+  double-counting that made "48% after a loss against 52% overall"
+  understate its own gap.
+- **A group cannot be named by its outcome.** `ComparisonGroup` takes
+  colour, opening, time control and a date window — properties fixed
+  before the game was played. It deliberately has no `result` and no
+  rating band, because selecting games on the thing being measured is
+  what makes a ±100 rating window delete drawdowns and a
+  win-rate-conditioned bucket manufacture tilt. `find_games` keeps its
+  `result` filter; it answers "show me games", not "is this a
+  tendency".
+- **The family grows with the asking.** Each call is judged over every
+  comparison the profile already made *plus* every one this run has
+  requested, so a run that fishes raises its own bar. The result states
+  the family size, and it is the honest answer to "can I just ask
+  more ways": yes, and each answer gets harder to earn.
+
+A verdict can therefore change between calls, and that is correct: BH
+is a property of the family, so a later question genuinely does
+change what the first one supports.
+
+Tilt stays precomputed. It conditions on the *previous* game's result,
+which is not a property of the game being counted and so cannot be
+expressed as a group at all.
+
+The SE is closed-form Welch. A session-level block bootstrap over the
+reference archive (4,000 resamples, 239 sittings) puts the dependence
+inflation at 1.02×, so the closed form is used in production and stays
+deterministic; that measurement is the justification, recorded here
+rather than re-run.
+
 **Facts.** `build_profile(report)` distills an already-built
 `PlayerReport` into `domain.PlayerProfile`: rating and record per
 time class with the extremes dated, the most recent months of trend,
@@ -840,6 +1041,11 @@ with it: `games_covered` is the analyzed sample behind the quality
 figures, `games_in_scope` every stored game behind the volume ones.
 Distillation rules:
 
+- Repertoire rows carry `opening_acpl` and `avg_cp_loss` as well as
+  games and score. Score alone cannot tell a system won from even
+  positions from one survived out of the book — 48% at 0.32 pawns a
+  move is a different problem from 48% at 0.21 — and that contrast is
+  the sharpest repertoire signal the data holds.
 - Repertoire rows reuse the family rollup defined under "Repertoire"
   above — partition by `faced`, chosen rolled up by (color, system),
   faced by (color, name root), move-weighted throughout, the 5+ game
@@ -847,10 +1053,13 @@ Distillation rules:
   families per color: chosen rows by games played (what the player
   actually plays), faced rows by impact (what actually hurts them,
   the same games × win-rate-deficit sort the report tables use).
-- Every list is capped so the rendered block stays around 250
-  tokens, `terminations` excepted for the reason given under
-  "Milestones"; the exact caps are implementation detail, pinned by
-  the snapshot tests rather than stated here.
+- Every list is capped to hold the rendered block down,
+  `terminations` excepted for the reason given under "Milestones";
+  the exact caps are implementation detail, pinned by the snapshot
+  tests rather than stated here. The block was ~250 tokens when the
+  profile shipped and is ~420 now, the trajectory line being most of
+  the growth — worth knowing before adding another, since this is
+  paid on every explain call and every chat message, not once.
 - Fields added to `PlayerProfile` after the first release carry
   empty-ish defaults, so a snapshot stored under an older shape still
   parses. The embed paths read stored rows (see "Embedding"), and a
@@ -880,26 +1089,122 @@ person because a coach reads it, the brief second person because the
 student does. Their data reads the same way in both. The register
 otherwise matches explain: club player, pawns never centipawns.
 
-The instructions also carry the scope and both denominators into the
-text: name the time control, never generalize it to the student's
-whole game, never present the analyzed sample as their whole history,
-and lead with the most recent form window that has a real sample.
+**The instructions say what the text is for, and then get out of the
+way** (`profile-v5`). Until then they ran to twelve bullets
+prescribing shape, and never once said what the narrative was *for* —
+so the model optimized the only thing it had been given, and the
+repertoire, which no bullet named, lost the sentence budget in every
+run. Twelve rules could not make it mention the openings; one
+sentence of purpose does, because a text written to be *useful in
+another session* has to say what the student plays.
 
-**Two rules are about the trip, not the content** (both new in
-`profile-v4`). The narrative is written under one prompt and read
-under others, and each rule closes something that only goes wrong on
-the way: **spell every unit out** — "1.30 pawns a move", never "1.30
-ACPL", per "Units" below — and **no markdown headings**, since the
-text lands *inside* another prompt's sections where a heading of its
-own reads as starting a new one. The second is belt and braces beside
-the block quote the embed applies: quoting bounds whatever arrives,
-the rule stops it arriving.
+So the block now opens with the job — write the context that will be
+pasted in when another coach explains a move or answers a question,
+so write what would change the advice — and keeps only the rules
+nothing else can supply:
 
-Neither was worth a bump alone, and neither had to be: they were
-queued behind the first `PROFILE_PROMPT_VERSION` move and taken with
-it. A bump only flags stored narratives stale in the UI — it never
-re-bills on its own — so the standing rule is to bank cheap durable-
-text rules like these and spend one bump on the lot.
+- **Third person, to a coach.** The register rule above.
+- **No game citations, dates, opponents, links or handles.** They
+  resolve to nothing where this text lands.
+- **No markdown headings**, since it lands *inside* another prompt's
+  sections where a heading of its own reads as starting a new one.
+  Belt and braces beside the block quote the embed applies: quoting
+  bounds whatever arrives, the rule stops it arriving.
+- **Spell every unit out** — "1.30 pawns a move", never "1.30 ACPL",
+  per "Units" below.
+- **An observation from reading games is an example, never a
+  tendency**, and says how many games it rests on. `compare_groups`
+  guards differences *between buckets*; it says nothing about
+  inference drawn from reading individual games, which is the second
+  path the tools opened. The first live narrative walked down it,
+  reading a few collapsed endgames as "a composure/reset issue" — an
+  unguarded psychological claim, two paragraphs above its own correct
+  statement that there is no measurable tilt effect.
+- **Dense, not polished, around 200 words.** The first live narrative
+  ran to 619 words — about 950 tokens — which the embed then pastes
+  into every explain prompt and every game-scope chat message, against
+  a facts block that is itself ~420. Dropping "three to five
+  sentences" removed the only bound on length, and the model spent the
+  room on connective tissue: every figure acquired a sentence
+  explaining its significance to a reader who is a coach and can see
+  it. The rule is density rather than a shape, since a shape
+  prescription is what the rework removed.
+- **A positional claim is checked or not made.** Cutting the old
+  "no invented lines" bullet in `profile-v5` was a mistake: it was
+  filed as a shape constraint the purpose statement implies, and it
+  was factual discipline — the only rule standing between the
+  narrative and invented chess content. Nothing else covers it, since
+  the comparison guard covers differences and the denominator rule
+  covers counts. The live `profile-v8` narrative duly explained that
+  the London setup was "unreachable" against the English Defense,
+  with the facts block's own line for that row reading
+  `1.d4 b6 2.Bf4 Bb7 3.e3 e6` — the London setup, played in 8 of
+  those 9 games. The rule returns in the form the toolkit now makes
+  possible: verify it or do not assert it — where the tools clause
+  says the run has tools, that means the engine; where it says it has
+  none, it means do not assert. The bullet also points at where the
+  answer usually already is, since the move sequences printed beside
+  the aggregates are frequently the counterexample to a guess.
+- **A comparison marked "within noise" is not a tendency.**
+
+Everything cut was either a shape constraint the purpose statement
+implies, or an instruction to say something the facts already say.
+Recency is the clearest case: it was a bullet ("lead with the most
+recent window"), and it is now the *window*, which is where it
+belongs. A fact the data enforces needs no rule.
+
+**Generation is designed to be agentic**, and the template is ready
+for it: `render_profile_prompt(profile, has_tools=...)` swaps one
+clause between "the facts are everything you have" and "use the tools
+to check anything the summary rests on". A tool-less run told to use
+tools either invents the lookups or spends its turn explaining that
+it cannot, which is why the clause is conditional rather than
+aspirational — the same shape, and the same reason, as
+`render_explain_prompt`'s profile clause.
+
+`complete` therefore takes an optional `toolkit: ChatToolkit`
+alongside its analyst, and with one registers chat's whole read-only
+roster under `_REPORT_MAX_TURNS` — the same in-process MCP mechanics
+chat uses, and the same mechanics the report brief has had since it
+gained the engine tool, which is why the brief is the best text this
+system produces. A `toolkit` subsumes an `analyst`, since it carries
+one of its own; passing neither is still today's single turn, which
+is what every other `complete` caller does.
+
+The facts block is then the starting point and not the limit: it
+exists so the run does not spend turns re-deriving, badly, what
+aggregation already computed correctly.
+
+The toolkit the API hands it is scoped to **the same window as the
+facts**. It was unwindowed at first, on the reasoning that the
+narrative covers the control's whole history — which confused the
+storage *key* (time control alone, see "Why time control keys it")
+with the scope of what the text describes. The narrative describes the
+windowed facts, so an unwindowed tool answers a different question
+from the one the document is about.
+
+That is not theoretical: live, `get_opening_stats` returned a 484-game
+London over the whole 1,925-game archive into a narrative whose every
+other figure covered 1,158, and `compare_groups` returned a 968-game
+White split beside a facts block stating 576 — two colour splits in
+one document. **One document, one denominator.** It is the same
+volume/quality denominator defect the report layer already fixed,
+reappearing one level up in the seam between the facts and the tools,
+and worth checking for whenever a new tool is added: the guard covers
+*comparisons*, and nothing else covers bare *counts*.
+
+One risk comes with the tools and is worth stating where the rule
+lives: **a run that slices the data itself produces comparisons with
+no verdict attached**, which is the multiple-comparisons problem
+outside the BH family that "Reading a comparison" corrects for. The
+instruction covers it for now; the durable fix is to expose the
+comparison itself as a tool, so every difference the model can obtain
+already carries its verdict. Not built — recorded here so the next
+person to widen the toolkit does it in the right direction.
+
+A bump only flags stored narratives stale in the UI — it never
+re-bills on its own — so the standing rule is to bank cheap
+durable-text rules and spend one bump on the lot.
 
 Expensive, therefore stored: the API layer persists the narrative —
 beside the facts snapshot it described, the agent that wrote it, and
@@ -1058,6 +1363,26 @@ would contradict. Chat is the one genuine divergence and keeps its
 own persona (`CHAT_SYSTEM_PROMPT`): its instructions arrive in the
 seed, not in a block at the end, and the turns after the first are a
 conversation rather than a request for a finished piece.
+
+**The answer is what the model writes last.** Every agentic path —
+the report brief, chat, and the explain stream the API layer caches —
+collects assistant text as it arrives, and a model about to call a
+tool narrates first ("I'll verify the turning points before
+writing"). Left in, that narration was concatenated onto the front of
+the finished piece, without even a separator, on every run that used
+a tool. So **a tool call discards the text collected before it**:
+what the model writes after its last tool call is the answer, and an
+empty result falls through to the run's own final message exactly as
+before. Streaming is unaffected — the narration still reaches the UI
+as its own event, so the student watches the coach work; only the
+accumulated string, the one that gets cached and replayed into later
+prompts, drops it. Two details are not incidental. The Copilot
+providers clear on every call *except* a budget `cutoff`, which is
+salvaging a runaway run rather than returning a clean answer and
+keeps whatever text exists. And Copilot's chat clears inside the tool
+handler rather than where the caller drains the event queue, because
+text is accumulated at enqueue time: by the time a consumer dequeued
+the tool event, text belonging *after* it could already have arrived.
 
 - **v1 — `ClaudeAgentSdkProvider`** (default): `complete` runs
   `claude_agent_sdk.query(...)` with a coach system prompt that

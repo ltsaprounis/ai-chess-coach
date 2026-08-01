@@ -5,6 +5,7 @@ Mirrors test_coach.py's provider-stubbing patterns (the SDKs are stubbed;
 no real LLM ever runs).
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,12 +47,15 @@ from chess_coach.coach import (
 from chess_coach.coach.providers import PositionAnalystFn
 from chess_coach.domain import (
     ChatMessage,
+    Comparison,
+    ComparisonGroup,
     EvalLine,
     GameDetail,
     GameSummary,
     LlmConfig,
     Opening,
     OpeningStats,
+    Record,
     Result,
     TimeClass,
 )
@@ -245,14 +249,33 @@ class _StubChatToolkit:
         games: list[GameSummary] | None = None,
         game_detail: GameDetail | None = None,
         openings: list[OpeningStats] | None = None,
+        prior_comparisons: list[Comparison] | None = None,
+        # (group record, the rest) the compare tool should receive.
+        compare_result: tuple[Record, Record] | None = None,
     ) -> None:
         self.analyst = analyst
         self._games = games if games is not None else []
         self._game_detail = game_detail
         self._openings = openings if openings is not None else []
+        self.prior_comparisons = list(prior_comparisons or [])
+        self._compare_result = compare_result
+        # One entry per compare_games call, so a test can assert what the
+        # model actually asked for.
+        self.compare_calls: list[tuple[ComparisonGroup, ComparisonGroup | None]] = []
         self.find_games_calls: list[dict[str, object]] = []
         self.get_game_calls: list[str] = []
         self.opening_stats_calls = 0
+
+    async def compare_games(
+        self,
+        group: ComparisonGroup,
+        within: ComparisonGroup | None = None,
+    ) -> tuple[Record, Record]:
+        self.compare_calls.append((group, within))
+        if self._compare_result is not None:
+            return self._compare_result
+        empty = Record(games=0, wins=0, losses=0, draws=0)
+        return empty, empty
 
     async def find_games(
         self,
@@ -390,9 +413,14 @@ async def test_agent_sdk_provider_chat_streams_text_tool_then_done(
         ChatEvent(type="text", text="Let's check your games."),
         ChatEvent(type="tool", text="looking up games"),
         ChatEvent(type="text", text=" You've played hikaru twice."),
+        # The `done` text is what the model wrote after its last tool call
+        # (docs/06-coach.md, "Providers"). "Let's check your games." still
+        # streams as its own event -- the student watches the coach work --
+        # but it is narration, and the API persists this `done` text as the
+        # assistant turn and replays it into later prompts.
         ChatEvent(
             type="done",
-            text="Let's check your games. You've played hikaru twice.",
+            text="You've played hikaru twice.",
             provider_state="chat-session-1",
         ),
     ]
@@ -407,6 +435,7 @@ async def test_agent_sdk_provider_chat_streams_text_tool_then_done(
         "mcp__engine__find_games",
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
+        "mcp__engine__compare_groups",
     ]
     system_prompt = options.system_prompt
     assert isinstance(system_prompt, str)
@@ -453,6 +482,7 @@ async def test_agent_sdk_provider_chat_without_analyst_omits_analyze_tool(
         "mcp__engine__find_games",
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
+        "mcp__engine__compare_groups",
     ]
 
 
@@ -838,6 +868,290 @@ def _fake_chat_client(
     return factory
 
 
+async def test_agent_sdk_provider_complete_with_a_toolkit_offers_every_chat_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agentic narrative run (docs/06-coach.md, "Narrative"): given a
+    toolkit, complete() registers chat's whole read-only roster rather
+    than the engine tool alone, so the run can read the repertoire and
+    pull games instead of paraphrasing the aggregates it was handed.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_query(
+        *, prompt: str, options: ClaudeAgentOptions
+    ) -> AsyncIterator[object]:
+        captured["options"] = options
+
+        async def stream() -> AsyncIterator[object]:
+            yield AssistantMessage(
+                content=[TextBlock(text="This student plays the Pirc.")],
+                model="claude-opus-4-8",
+            )
+
+        return stream()
+
+    monkeypatch.setattr(providers_module, "query", fake_query)
+
+    provider = create_provider(LlmConfig())
+    toolkit = _StubChatToolkit(analyst=stub_analyst, games=[_sample_game_summary()])
+
+    narrative = await provider.complete("write the profile", toolkit=toolkit)
+
+    assert narrative == "This student plays the Pirc."
+    options = captured["options"]
+    assert isinstance(options, ClaudeAgentOptions)
+    allowed = options.allowed_tools
+    assert "mcp__engine__get_opening_stats" in allowed
+    assert "mcp__engine__find_games" in allowed
+    assert "mcp__engine__analyze_position" in allowed
+    # Built-in Claude Code tools stay locked out on every coach path.
+    assert options.tools == []
+
+
+def _compare_tool(
+    toolkit: _StubChatToolkit,
+) -> Callable[[dict[str, object]], Awaitable[str]]:
+    """The registered compare tool, invoked the way the SDK would.
+
+    Built **once** per test, because the BH ledger lives in the tool
+    closure -- one family per run is the whole point, and rebuilding the
+    roster between calls would silently reset it.
+    """
+    # Same convention as test_coach.py's threshold imports: reaching for
+    # the private builder is how a test drives the real registered
+    # handler without standing up an SDK session.
+    tools = providers_module._build_chat_tools(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit)
+    )
+    compare = next(t for t in tools if t.name == "compare_groups")
+
+    async def call(args: dict[str, object]) -> str:
+        result = await compare.handler(args)
+        blocks = cast("list[dict[str, str]]", result["content"])
+        return blocks[0]["text"]
+
+    return call
+
+
+async def _run_compare_tool(toolkit: _StubChatToolkit, args: dict[str, object]) -> str:
+    return await _compare_tool(toolkit)(args)
+
+
+async def test_opening_stats_says_its_moves_are_not_a_filter() -> None:
+    """docs/06-coach.md, "Repertoire": a row's moves are the group's
+    commonest line, not an invariant -- transpositions reach the same
+    name by other move orders.
+
+    Stating that only in the doc was not enough. A live narrative read
+    "[1.e4 d6 2.d4 Nf6 3.Nc3 g6], 32g, 33%" as "32 games where White
+    played 2.d4" and reported a prep hole at 33%, where the real 2.d4
+    split is 46% over 153 games. A move sequence printed beside a count
+    reads as a filter unless something says otherwise.
+    """
+    toolkit = _StubChatToolkit(
+        openings=[
+            OpeningStats(
+                eco="B07", name="Pirc Defense", color="black",
+                system="1...d6 2...Nf6 3...g6",
+                first_moves="1.e4 d6 2.d4 Nf6 3.Nc3 g6",
+                faced=False, games=32, wins=9, losses=20, draws=3,
+                analyzed_games=32, opening_moves=320, player_moves=1200,
+                opening_acpl=27.0, avg_cp_loss=170.0,
+            )
+        ]
+    )  # fmt: skip
+
+    # Same convention as test_coach.py's threshold imports: the private
+    # renderer is what the model actually reads.
+    text = await providers_module._call_opening_stats(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit)
+    )
+
+    assert "MOST COMMON line, not a filter" in text
+    assert "not only the games with those moves" in text
+    # The row itself is unchanged -- the figures were never wrong.
+    assert "32g, 33%" in text
+
+
+async def test_compare_tool_never_lets_the_caller_pick_the_other_side() -> None:
+    """docs/06-coach.md, "Reading a comparison": the model names one
+    group and the tool subtracts, so a run cannot compare a group
+    against a set that contains it -- the double counting that made
+    "48% after a loss against 52% overall" understate its own gap.
+    """
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=307, wins=140, losses=155, draws=12),
+            Record(games=275, wins=133, losses=130, draws=12),
+        )
+    )
+
+    text = await _run_compare_tool(
+        toolkit,
+        {"group": {"opening": "Pirc", "color": "black"}, "within": {"color": "black"}},
+    )
+
+    group, within = toolkit.compare_calls[0]
+    assert group.opening == "Pirc"
+    assert group.color == "black"
+    assert within is not None and within.color == "black"
+    assert "307 games" in text
+    assert "275 games" in text
+
+
+async def test_compare_tool_drops_a_result_filter_it_is_never_given() -> None:
+    """A group named by its outcome and then measured by its outcome
+    proves nothing -- the same defect as a +/-100 rating window. The
+    schema offers no `result`, and a model that passes one anyway must
+    not have it silently applied.
+    """
+    toolkit = _StubChatToolkit()
+
+    await _run_compare_tool(toolkit, {"group": {"color": "white", "result": "win"}})
+
+    group, _ = toolkit.compare_calls[0]
+    assert group.color == "white"
+    assert not hasattr(group, "result")
+
+
+async def test_compare_tool_states_the_verdict_and_never_the_arithmetic() -> None:
+    """The live tilt split: 4.8 points over 380 games against 778, which
+    is 1.6 standard errors. The verdict is stated; the sigma is not."""
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=380, wins=173, losses=186, draws=21),
+            Record(games=778, wins=391, losses=343, draws=44),
+        )
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"color": "white"}})
+
+    assert "WITHIN NOISE" in text
+    assert "not a tendency" in text.lower()
+    assert "sigma" not in text.lower()
+    assert "p-value" not in text.lower()
+
+
+async def test_compare_tool_family_grows_with_the_asking() -> None:
+    """Benjamini-Hochberg is a property of the family, so a run that
+    fishes raises its own bar -- and the result says how big the family
+    has become, which is the honest answer to "can I just ask fourteen
+    more ways"."""
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=380, wins=173, losses=186, draws=21),
+            Record(games=778, wins=391, losses=343, draws=44),
+        )
+    )
+
+    compare = _compare_tool(toolkit)
+    first = await compare({"group": {"color": "white"}})
+    second = await compare({"group": {"color": "black"}})
+
+    assert "0 other comparison(s)" in first
+    assert "1 other comparison(s)" in second
+
+
+async def test_compare_tool_family_includes_what_the_profile_already_judged() -> None:
+    """The facts block already states several splits; a question the run
+    asks is weighed alongside them, not in a family of its own."""
+    prior = [
+        Comparison(
+            label="Tilt",
+            left_label="after a loss",
+            left=Record(games=380, wins=173, losses=186, draws=21),
+            right_label="every other game",
+            right=Record(games=778, wins=391, losses=343, draws=44),
+            gap=-4.8,
+            resolution=6.1,
+            significant=False,
+        )
+    ]
+    toolkit = _StubChatToolkit(
+        prior_comparisons=prior,
+        compare_result=(
+            Record(games=100, wins=50, losses=45, draws=5),
+            Record(games=100, wins=48, losses=47, draws=5),
+        ),
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"color": "white"}})
+
+    assert "1 other comparison(s)" in text
+
+
+async def test_compare_tool_says_when_a_group_is_too_thin_to_compare() -> None:
+    toolkit = _StubChatToolkit(
+        compare_result=(
+            Record(games=1, wins=1, losses=0, draws=0),
+            Record(games=500, wins=250, losses=240, draws=10),
+        )
+    )
+
+    text = await _run_compare_tool(toolkit, {"group": {"opening": "Latvian"}})
+
+    assert "too few to compare" in text
+    assert "not a tendency" in text.lower()
+
+
+async def test_copilot_provider_complete_with_a_toolkit_offers_every_chat_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Copilot half of the agentic narrative run. Chat's tools report
+    progress onto a queue a streaming consumer drains and complete() has
+    no stream, so it runs its own drain task -- exercised here, along
+    with the roster, since the Claude path had three tests and this one
+    none.
+    """
+    captured: dict[str, object] = {}
+    script: list[_ScriptStep] = [("text", "This student plays the Pirc."), ("idle",)]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_chat_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    toolkit = _StubChatToolkit(analyst=stub_analyst, games=[_sample_game_summary()])
+
+    narrative = await provider.complete("write the profile", toolkit=toolkit)
+
+    assert narrative == "This student plays the Pirc."
+    available = cast("ToolSet", captured["create_available_tools"])
+    assert "custom:compare_groups" in available.to_list()
+    assert "custom:get_opening_stats" in available.to_list()
+    assert "custom:analyze_position" in available.to_list()
+
+
+async def test_copilot_provider_complete_leaves_no_task_behind_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUIDELINES.md: no fire-and-forget tasks. The drain task was
+    cancelled only on the success path, so every failed agentic run left
+    one suspended on `queue.get()` forever -- and a failed run is the
+    common case when the runtime is missing or not logged in.
+    """
+    before = len(asyncio.all_tasks())
+
+    class _Boom:
+        async def __aenter__(self) -> "_Boom":
+            raise RuntimeError("runtime missing")
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(providers_module, "CopilotClient", _Boom)
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    toolkit = _StubChatToolkit(analyst=stub_analyst)
+
+    with pytest.raises(CoachProviderError):
+        await provider.complete("write the profile", toolkit=toolkit)
+
+    # Let anything still scheduled run, then check nothing lingers.
+    await asyncio.sleep(0)
+    assert len(asyncio.all_tasks()) <= before
+
+
 async def test_copilot_provider_chat_streams_text_tool_then_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -870,9 +1184,12 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
         ChatEvent(type="text", text="Let's check your games."),
         ChatEvent(type="tool", text="looking up games"),
         ChatEvent(type="text", text=" You've played hikaru twice."),
+        # Narration before a tool call still streams, but is not the reply
+        # the API persists and replays (docs/06-coach.md, "Providers") --
+        # the same rule ClaudeAgentSdkProvider.chat() applies.
         ChatEvent(
             type="done",
-            text="Let's check your games. You've played hikaru twice.",
+            text="You've played hikaru twice.",
             provider_state="fresh-session",
         ),
     ]
@@ -896,7 +1213,7 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
     ]
 
 
-async def test_copilot_provider_chat_without_analyst_gets_three_tools(
+async def test_copilot_provider_chat_without_analyst_omits_only_the_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -919,6 +1236,7 @@ async def test_copilot_provider_chat_without_analyst_gets_three_tools(
     assert available_tools.to_list() == [
         "custom:find_games",
         "custom:get_game",
+        "custom:compare_groups",
         "custom:get_opening_stats",
     ]
 
@@ -1193,30 +1511,27 @@ async def test_copilot_provider_chat_runaway_tool_calls_cut_the_run_off(
 
     provider = create_provider(LlmConfig(provider="github-copilot"))
     toolkit = _StubChatToolkit(games=[_sample_game_summary()])
-    events = [
-        event
+    events: list[ChatEvent] = []
+    # This run never wrote anything after a tool call, so once the
+    # narration is dropped (docs/06-coach.md, "Providers") there is no
+    # reply to persist. Erroring is the honest end: the alternative
+    # stores "Let's check a few things." as a complete coach turn and
+    # replays it into every later message in the thread.
+    with pytest.raises(CoachProviderError, match="returned no text"):
         async for event in provider.chat(
             system_context="SEED", history=[], message="hi", toolkit=toolkit
-        )
-    ]
+        ):
+            events.append(event)
 
-    # The stream ends right after the in-budget tool events plus a final
-    # done carrying whatever text streamed before the cutoff -- the grace
-    # round produces no event, and the runaway call's drain sentinel cuts
-    # the loop off before the trailing text/idle steps are ever reached.
-    # The done carries NO provider_state: post-cutoff content lives in
-    # the torn-down session but not in the persisted text, so resuming
-    # it next turn would diverge from the stored transcript -- the
-    # cutoff path must force a replay.
+    # The narration and the in-budget tool events still streamed -- the
+    # grace round produces no event, and the runaway call's drain sentinel
+    # cuts the loop off before the trailing text/idle steps are reached, so
+    # the post-cutoff text never escapes.
     assert events[0] == ChatEvent(type="text", text="Let's check a few things.")
     tool_events = [e for e in events if e.type == "tool"]
     assert len(tool_events) == max_calls
-    assert events[-1] == ChatEvent(
-        type="done",
-        text="Let's check a few things.",
-        provider_state=None,
-    )
-    assert "Should never be yielded" not in events[-1].text
+    assert not [e for e in events if e.type == "done"]
+    assert not [e for e in events if "Should never be yielded" in e.text]
 
     assert captured["session_disconnected"] is True
     assert captured["client_stopped"] is True

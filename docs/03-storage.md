@@ -375,7 +375,7 @@ the whole archive uncapped
 (Game + optional analysis + opening) stays the full record;
 `GameFilters` is storage's own public parameter type:
 opening_eco (exact), opening_name_like (case-insensitive substring
-on the classified name), opponent (case-insensitive exact),
+on the classified name), opponent (case-insensitive exact), color,
 result, time_class, analyzed, since/until (epoch-second window,
 since inclusive, until exclusive — the same semantics every other
 windowed query here uses), and limit/offset paging. The name,
@@ -383,6 +383,16 @@ opponent and window filters exist for the coach chat toolkit's
 `find_games` tool (docs/future-improvements/coach-chat.md), which
 queries by what a student says — an opponent's name, an opening's
 name — rather than by ECO code.
+
+`game_record(db, username, filters) -> Record` counts W/D/L over the
+same filters, for the coach's comparison guard (docs/06-coach.md,
+"Reading a comparison"). One GROUP BY rather than three counts, and
+it returns a `Record` rather than a score because the coach computes
+both the mean and its variance from W/D/L — handing back a percentage
+would throw away the half it needs. Paging is ignored: a record is
+over the whole match, not a page of it. Both it and `list_games`
+build their WHERE from one shared clause builder, so a filter cannot
+come to mean two things.
 
 ## Dependencies
 

@@ -1,6 +1,7 @@
 """LLM providers behind the CoachProvider seam (docs/06-coach.md)."""
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
@@ -29,6 +30,7 @@ from copilot.session_events import (
 from copilot.tools import Tool, ToolInvocation, ToolResult
 from pydantic import BaseModel
 
+from chess_coach.coach.comparisons import build_comparisons
 from chess_coach.coach.prompt import (
     CHAT_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -37,11 +39,15 @@ from chess_coach.coach.prompt import (
 )
 from chess_coach.domain import (
     ChatMessage,
+    Comparison,
+    ComparisonGroup,
+    ComparisonInput,
     EvalLine,
     GameDetail,
     GameSummary,
     LlmConfig,
     OpeningStats,
+    Record,
     Result,
     TimeClass,
 )
@@ -91,13 +97,14 @@ _ANALYZE_TOOL_DESCRIPTION = (
     "best reply."
 )
 
-# The chat toolkit's other three tools (docs/06-coach.md, "Chat" --
+# The chat toolkit's other tools (docs/06-coach.md, "Chat" --
 # "Tools"): read-only lookups over the thread's player, pre-scoped by the
 # API layer's ChatToolkit implementation -- the model passes filters,
 # never a username.
 _FIND_GAMES_TOOL_NAME = "find_games"
 _GET_GAME_TOOL_NAME = "get_game"
 _GET_OPENING_STATS_TOOL_NAME = "get_opening_stats"
+_COMPARE_TOOL_NAME = "compare_groups"
 
 _FIND_GAMES_TOOL_DESCRIPTION = (
     "Search the student's own stored games by opponent, opening, result, "
@@ -117,6 +124,26 @@ _GET_OPENING_STATS_TOOL_DESCRIPTION = (
     "whether the name is the opponent's choice, the record, and the "
     "average loss in pawns per move for the opening phase and for the "
     "whole game."
+)
+
+_COMPARE_TOOL_DESCRIPTION = (
+    "Compare one group of the student's games against the rest, and get "
+    "back a verdict on whether the difference is real. This is the ONLY "
+    "way to establish that a difference is a tendency -- a percentage "
+    "you work out yourself from find_games or get_opening_stats has not "
+    "been checked and must not be reported as one.\n"
+    "Name the group by properties fixed before the game was played: "
+    "color, opening, time class, date range. There is deliberately no "
+    "result filter -- selecting games by how they ended and then "
+    "measuring how they ended proves nothing.\n"
+    "The other side is computed for you by subtracting the group from "
+    "`within` (default: every game in scope), so you cannot accidentally "
+    "compare a group against a set that contains it. Use `within` to "
+    "pick the baseline that makes the comparison mean something -- an "
+    "opening the student plays as Black belongs against their other "
+    "Black games, not against every game they have played.\n"
+    "Each call joins a family judged together, so asking more questions "
+    "makes every answer harder to earn."
 )
 
 _RESULT_VALUES = frozenset({"win", "loss", "draw"})
@@ -174,9 +201,55 @@ _GET_OPENING_STATS_TOOL_SCHEMA: dict[str, Any] = {
     "required": [],
 }
 
+_COMPARISON_GROUP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "color": {
+            "type": "string",
+            "enum": ["white", "black"],
+            "description": "Only games the student had this color in.",
+        },
+        "opening": {
+            "type": "string",
+            "description": "Opening name substring, e.g. 'Pirc'.",
+        },
+        "time_class": {
+            "type": "string",
+            "enum": ["bullet", "blitz", "rapid", "daily"],
+            "description": "Only games at this time control.",
+        },
+        "since": {
+            "type": "integer",
+            "description": "Only games ending at or after this epoch second.",
+        },
+        "until": {
+            "type": "integer",
+            "description": "Only games ending before this epoch second.",
+        },
+    },
+    "required": [],
+}
+_COMPARE_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "group": {
+            **_COMPARISON_GROUP_SCHEMA,
+            "description": "The group of games to test.",
+        },
+        "within": {
+            **_COMPARISON_GROUP_SCHEMA,
+            "description": (
+                "The baseline to read it against; the group is subtracted "
+                "from it. Omit for every game in scope."
+            ),
+        },
+    },
+    "required": ["group"],
+}
+
 # What a chat tool call returns once _CHAT_MAX_TURNS's grace round (and
 # every runaway call after it) is spent, in place of doing the real work --
-# mirrors _ENGINE_BUDGET_EXHAUSTED below but phrased for any of chat's four
+# mirrors _ENGINE_BUDGET_EXHAUSTED below but phrased for any of chat's
 # tools, not just the engine.
 _CHAT_BUDGET_EXHAUSTED = (
     "Tool-call budget for this message is exhausted — finish your answer "
@@ -223,6 +296,20 @@ class ChatToolkit(Protocol):
     async def get_game(self, game_id: str) -> GameDetail | None: ...
     async def opening_stats(self) -> list[OpeningStats]: ...
 
+    # The comparison guard's data half (docs/06-coach.md, "Reading a
+    # comparison"). Returns the group's record and the rest of `within`,
+    # computed by subtraction -- the caller never supplies the other
+    # side, so a run cannot compare a group against a set containing it.
+    # Records and not scores: the coach needs W/D/L to get both the mean
+    # and its variance.
+    prior_comparisons: list[Comparison]
+
+    async def compare_games(
+        self,
+        group: ComparisonGroup,
+        within: ComparisonGroup | None = None,
+    ) -> tuple[Record, Record]: ...
+
 
 class CoachProviderError(Exception):
     """The provider could not produce advice."""
@@ -230,7 +317,11 @@ class CoachProviderError(Exception):
 
 class CoachProvider(Protocol):
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str: ...
     def explain(
         self, prompt: str, analyst: PositionAnalystFn
@@ -259,9 +350,32 @@ class ClaudeAgentSdkProvider:
         self._system_prompt = system_prompt
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
-        if analyst is None:
+        if toolkit is not None:
+            # The agentic profile run (docs/06-coach.md, "Narrative"):
+            # the same in-process MCP mechanics chat uses, with the full
+            # read-only toolkit, so the narrative can read the
+            # repertoire and pull games rather than paraphrasing the
+            # aggregates it was handed. `toolkit` subsumes `analyst` --
+            # it carries one of its own.
+            options = ClaudeAgentOptions(
+                model=self._model,
+                system_prompt=self._system_prompt,
+                max_turns=_REPORT_MAX_TURNS,
+                mcp_servers={
+                    _MCP_SERVER_NAME: create_sdk_mcp_server(
+                        name=_MCP_SERVER_NAME, tools=_build_chat_tools(toolkit)
+                    )
+                },
+                tools=[],  # no built-in Claude Code tools
+                allowed_tools=_chat_allowed_tools(toolkit),
+            )
+        elif analyst is None:
             # Same built-in-tool lockdown as every other provider path:
             # a coaching completion must never reach Claude Code's file
             # or shell tools, and with max_turns=1 a stray tool call
@@ -296,6 +410,14 @@ class ClaudeAgentSdkProvider:
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             chunks.append(block.text)
+                        elif isinstance(block, ToolUseBlock):
+                            # Text written before a tool call is the model
+                            # narrating its plan ("I'll verify the turning
+                            # points first"), not the finished piece
+                            # (docs/06-coach.md, "Providers"). Keeping it
+                            # concatenated a preamble onto the front of
+                            # every agentic brief.
+                            chunks.clear()
                 elif isinstance(message, ResultMessage):
                     fallback = message.result
                     if message.is_error:
@@ -442,6 +564,13 @@ class ClaudeAgentSdkProvider:
                                     yield ChatEvent(type="text", text=block.text)
                             elif isinstance(block, ToolUseBlock):
                                 produced_any = True
+                                # As in complete(): narration before a tool
+                                # call is not the reply. It has already been
+                                # streamed as its own text event, so the
+                                # student still watches the coach work --
+                                # only the `done` text the API persists and
+                                # replays drops it.
+                                chunks.clear()
                                 yield ChatEvent(
                                     type="tool", text=_chat_tool_summary(block)
                                 )
@@ -540,7 +669,7 @@ class _ToolCallBudget:
     ClaudeAgentSdkProvider's `max_turns`), so CopilotSdkProvider counts
     calls itself and enforces the identical shape everywhere it needs a
     budget: complete()'s and explain()'s single engine tool, and chat()'s
-    four tools sharing one budget. Every call within `max_calls` is "ok";
+    tools sharing one budget. Every call within `max_calls` is "ok";
     the call at `max_calls + 1` is "grace" (one nudge to wrap up); every
     call after that is "cutoff" (the run must end).
     """
@@ -586,7 +715,11 @@ class CopilotSdkProvider:
         self._system_prompt = system_prompt
 
     async def complete(
-        self, prompt: str, analyst: PositionAnalystFn | None = None
+        self,
+        prompt: str,
+        analyst: PositionAnalystFn | None = None,
+        *,
+        toolkit: ChatToolkit | None = None,
     ) -> str:
         chunks: list[str] = []
         error: CoachProviderError | None = None
@@ -614,7 +747,29 @@ class CopilotSdkProvider:
         # does, under the report turn budget.
         tools: list[Tool] | None = None
         available_tools = ToolSet()
-        if analyst is not None:
+        drainer: asyncio.Task[None] | None = None
+        if toolkit is not None:
+            # The agentic profile run, with chat's full read-only
+            # toolkit (docs/06-coach.md, "Narrative"). Chat's tools
+            # report progress onto a queue a streaming consumer drains;
+            # complete() has no stream, so the queue is drained here and
+            # its one meaningful item -- the cutoff sentinel -- is
+            # translated into the idle event this method already waits
+            # on, which is how its own runaway path ends the run.
+            queue: asyncio.Queue[ChatEvent | Exception | None] = asyncio.Queue()
+            tools, available_tools = _build_copilot_chat_tools(
+                toolkit, queue, _ToolCallBudget(_REPORT_MAX_TURNS), chunks.clear
+            )
+
+            async def drain() -> None:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        idle.set()
+                        return
+
+            drainer = asyncio.create_task(drain())
+        elif analyst is not None:
             engine_analyst = analyst  # narrowed: not None from here on
             budget = _ToolCallBudget(_REPORT_MAX_TURNS)
 
@@ -622,6 +777,13 @@ class CopilotSdkProvider:
                 args = cast("dict[str, Any]", invocation.arguments or {})
                 fen = str(args.get("fen", ""))
                 status = budget.record_call()
+                if status != "cutoff":
+                    # Narration before a tool call is not the brief, exactly
+                    # as in ClaudeAgentSdkProvider.complete(). Cutoff is
+                    # excluded because it tears the run down: no further
+                    # text is coming, so clearing there could only destroy
+                    # the last thing left to return.
+                    chunks.clear()
                 if status == "grace":
                     # One grace round: nudge the model to wrap up instead of
                     # cutting it off the instant it goes over budget.
@@ -690,6 +852,17 @@ class CopilotSdkProvider:
                 "runtime installed and logged in? (python -m copilot "
                 "download-runtime, then copilot login via the CLI)"
             ) from exc
+        finally:
+            # `finally`, not the success path: every `except` above
+            # re-raises, so cancelling after them left a task suspended
+            # on `queue.get()` forever on each failed agentic run
+            # (GUIDELINES.md, "no fire-and-forget tasks"). Awaiting the
+            # cancellation is what makes it tracked rather than merely
+            # signalled.
+            if drainer is not None:
+                drainer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await drainer
 
         if error is not None:
             raise error
@@ -851,7 +1024,9 @@ class CopilotSdkProvider:
                 case _:  # every other session-event type is irrelevant here
                     pass
 
-        tools, available_tools = _build_copilot_chat_tools(toolkit, queue, budget)
+        tools, available_tools = _build_copilot_chat_tools(
+            toolkit, queue, budget, chunks.clear
+        )
         session_id: str | None = None
 
         try:
@@ -1107,10 +1282,29 @@ def _render_move_sheet(detail: GameDetail) -> str:
     )
 
 
+# Printed above every repertoire dump. The rows are (colour, ECO, name)
+# groups and the moves beside them are the group's *commonest* line, not
+# a filter -- docs/06-coach.md says so under "Repertoire", and saying it
+# only there was not enough: a live narrative read
+# "[1.e4 d6 2.d4 ...], 32g, 33%" as "32 games where White played 2.d4",
+# and reported a prep hole at 33% where the real 2.d4 split is 46% over
+# 153 games. A move sequence printed beside a count reads as a filter
+# unless something says otherwise, so this says otherwise.
+_OPENING_STATS_PREAMBLE = (
+    "One row per (colour, ECO, name) group. The moves in brackets are "
+    "that group's MOST COMMON line, not a filter: transpositions reach "
+    "the same name by other move orders, so a row's games are not only "
+    "the games with those moves, and its score says nothing about that "
+    "move order specifically. To compare move orders, read games with "
+    "find_games; to test whether a difference is real, use "
+    f"{_COMPARE_TOOL_NAME}."
+)
+
+
 def _render_opening_stats(rows: list[OpeningStats]) -> str:
     if not rows:
         return "No repertoire data available."
-    lines: list[str] = []
+    lines: list[str] = [_OPENING_STATS_PREAMBLE, ""]
     for r in rows:
         role = "faced" if r.faced else "chosen"
         score = (r.wins + r.draws / 2) / r.games * 100 if r.games else 0.0
@@ -1127,7 +1321,12 @@ def _chat_tool_names(toolkit: ChatToolkit) -> list[str]:
     names: list[str] = []
     if toolkit.analyst is not None:
         names.append(_ANALYZE_TOOL_NAME)
-    names += [_FIND_GAMES_TOOL_NAME, _GET_GAME_TOOL_NAME, _GET_OPENING_STATS_TOOL_NAME]
+    names += [
+        _FIND_GAMES_TOOL_NAME,
+        _GET_GAME_TOOL_NAME,
+        _GET_OPENING_STATS_TOOL_NAME,
+        _COMPARE_TOOL_NAME,
+    ]
     return names
 
 
@@ -1144,6 +1343,8 @@ def _chat_tool_summary(block: ToolUseBlock) -> str:
     if name == _GET_GAME_TOOL_NAME:
         game_id = block.input.get("game_id")
         return f"looking up game {game_id}" if game_id else "looking up a game"
+    if name == _COMPARE_TOOL_NAME:
+        return "checking whether a difference is real"
     if name == _GET_OPENING_STATS_TOOL_NAME:
         return "looking up the repertoire"
     return f"calling {name}"
@@ -1180,6 +1381,115 @@ def _build_opening_stats_tool(toolkit: ChatToolkit) -> SdkMcpTool[Any]:
     return get_opening_stats
 
 
+class _ComparisonLedger:
+    """The BH family for one run (docs/06-coach.md, "Reading a
+    comparison").
+
+    Seeded with whatever the profile already judged, then grown by each
+    `compare_groups` call. Every call re-judges the whole family, so a
+    run that fishes raises its own bar -- and a verdict may change
+    between calls, which is not a bug: Benjamini-Hochberg is a property
+    of the family, so the fourteenth question genuinely does change what
+    the first one supports.
+
+    One ledger per run, held by the tool closure, so two concurrent runs
+    never share a family.
+    """
+
+    def __init__(self, prior: list[Comparison]) -> None:
+        self._prior = list(prior)
+        self._asked: list[ComparisonInput] = []
+
+    def add(self, pair: ComparisonInput) -> tuple[Comparison, int]:
+        """Judge `pair` against the whole family; return it and the
+        family size."""
+        self._asked.append(pair)
+        family = [
+            ComparisonInput(
+                label=c.label,
+                left_label=c.left_label,
+                left=c.left,
+                right_label=c.right_label,
+                right=c.right,
+            )
+            for c in self._prior
+        ] + self._asked
+        judged = build_comparisons(family)
+        return judged[-1], len(family)
+
+
+def _render_comparison(row: Comparison, family: int) -> str:
+    """The tool result: the two records, the verdict, and the family
+    size -- never a sigma or a p-value, which are not this audience's
+    vocabulary and invite the false confidence the guard removes."""
+    if not row.measurable:
+        return (
+            f"{row.left.games} game(s) {row.left_label} against "
+            f"{row.right.games} {row.right_label} -- too few to compare. "
+            "This is not a tendency and must not be reported as one."
+        )
+    left = _score_pct(row.left)
+    right = _score_pct(row.right)
+    verdict = (
+        "a real difference, larger than chance accounts for"
+        if row.significant
+        else (
+            "WITHIN NOISE -- a difference this many games cannot tell apart "
+            "from chance. Not a tendency; do not report it as one, and do "
+            'not soften it into "worth watching"'
+        )
+    )
+    return (
+        f"{left} over {row.left.games} games {row.left_label}, against "
+        f"{right} over {row.right.games} games {row.right_label}. "
+        f"Verdict: {verdict}. "
+        f"(Judged together with {family - 1} other comparison(s) in this "
+        "profile; asking more makes each one harder to earn.)"
+    )
+
+
+def _score_pct(record: Record) -> str:
+    if not record.games:
+        return "n/a"
+    return f"{(record.wins + record.draws / 2) / record.games * 100:.0f}%"
+
+
+def _comparison_group(args: dict[str, Any]) -> ComparisonGroup:
+    """A tool argument object as a group, ignoring anything the schema
+    does not name -- notably `result`, which a model may try anyway and
+    which must never reach a comparison (docs/06-coach.md)."""
+    return ComparisonGroup.model_validate(
+        {
+            key: args[key]
+            for key in ("color", "opening", "time_class", "since", "until")
+            if args.get(key) is not None
+        }
+    )
+
+
+async def _run_comparison(
+    toolkit: ChatToolkit, ledger: _ComparisonLedger, args: dict[str, Any]
+) -> str:
+    group_args = cast("dict[str, Any]", args.get("group") or {})
+    within_args = cast("dict[str, Any]", args.get("within") or {})
+    group = _comparison_group(group_args)
+    within = _comparison_group(within_args) if within_args else None
+    left, right = await toolkit.compare_games(group, within)
+    baseline = within.label() if within is not None else "in every game"
+    row, family = ledger.add(
+        ComparisonInput(
+            label=group.label(),
+            left_label=group.label(),
+            left=left,
+            right_label=f"in their other games {baseline}".replace(
+                "in their other games in every game", "in their other games"
+            ),
+            right=right,
+        )
+    )
+    return _render_comparison(row, family)
+
+
 def _build_chat_tools(toolkit: ChatToolkit) -> list[SdkMcpTool[Any]]:
     tools: list[SdkMcpTool[Any]] = []
     if toolkit.analyst is not None:
@@ -1187,7 +1497,22 @@ def _build_chat_tools(toolkit: ChatToolkit) -> list[SdkMcpTool[Any]]:
     tools.append(_build_find_games_tool(toolkit))
     tools.append(_build_get_game_tool(toolkit))
     tools.append(_build_opening_stats_tool(toolkit))
+    # One ledger per build, so the BH family belongs to this run alone.
+    tools.append(
+        _build_compare_tool(toolkit, _ComparisonLedger(toolkit.prior_comparisons))
+    )
     return tools
+
+
+def _build_compare_tool(
+    toolkit: ChatToolkit, ledger: _ComparisonLedger
+) -> SdkMcpTool[Any]:
+    @tool(_COMPARE_TOOL_NAME, _COMPARE_TOOL_DESCRIPTION, _COMPARE_TOOL_SCHEMA)
+    async def compare_groups(args: dict[str, Any]) -> dict[str, Any]:
+        text = await _run_comparison(toolkit, ledger, args)
+        return {"content": [{"type": "text", "text": text}]}
+
+    return compare_groups
 
 
 async def _guarded_chat_tool_call(
@@ -1195,14 +1520,26 @@ async def _guarded_chat_tool_call(
     budget: _ToolCallBudget,
     progress_text: str,
     call: Callable[[], Awaitable[str]],
+    on_call: Callable[[], None],
 ) -> ToolResult:
-    """Shared per-call plumbing for CopilotSdkProvider.chat's four tools:
+    """Shared per-call plumbing for CopilotSdkProvider.chat's tools:
     budget check, then either the wrap-up steer or a progress event
     followed by the real call. Generalizes explain()'s single-tool budget
-    handling (_ToolCallBudget) across chat's four tools sharing one
-    budget.
+    handling (_ToolCallBudget) across chat's tools sharing one budget.
+
+    `on_call` drops the text narrated before this call, the same rule the
+    other three providers' paths apply inline (docs/06-coach.md,
+    "Providers"). It runs here rather than where the caller drains the
+    queue because `chunks` is appended at *enqueue* time: by the time a
+    consumer dequeued this tool event, text belonging after it could
+    already have arrived.
     """
     status = budget.record_call()
+    if status != "cutoff":
+        # Cutoff excluded for the same reason as complete()'s: it tears
+        # the run down, so no further text is coming and clearing could
+        # only destroy the last thing left to return.
+        on_call()
     if status == "grace":
         return ToolResult(
             text_result_for_llm=_CHAT_BUDGET_EXHAUSTED, result_type="success"
@@ -1221,6 +1558,7 @@ def _build_copilot_chat_tools(
     toolkit: ChatToolkit,
     queue: asyncio.Queue[ChatEvent | Exception | None],
     budget: _ToolCallBudget,
+    on_tool_call: Callable[[], None],
 ) -> tuple[list[Tool], ToolSet]:
     tools: list[Tool] = []
     names: list[str] = []
@@ -1237,7 +1575,7 @@ def _build_copilot_chat_tools(
                 return _render_lines(lines)
 
             return await _guarded_chat_tool_call(
-                queue, budget, _analyze_summary(fen), do_call
+                queue, budget, _analyze_summary(fen), do_call, on_tool_call
             )
 
         tools.append(
@@ -1254,7 +1592,11 @@ def _build_copilot_chat_tools(
     async def handle_find_games(invocation: ToolInvocation) -> ToolResult:
         args = cast("dict[str, Any]", invocation.arguments or {})
         return await _guarded_chat_tool_call(
-            queue, budget, "looking up games", lambda: _call_find_games(toolkit, args)
+            queue,
+            budget,
+            "looking up games",
+            lambda: _call_find_games(toolkit, args),
+            on_tool_call,
         )
 
     tools.append(
@@ -1276,6 +1618,7 @@ def _build_copilot_chat_tools(
             budget,
             f"looking up game {game_id}" if game_id else "looking up a game",
             lambda: _call_get_game(toolkit, args),
+            on_tool_call,
         )
 
     tools.append(
@@ -1289,12 +1632,36 @@ def _build_copilot_chat_tools(
     )
     names.append(_GET_GAME_TOOL_NAME)
 
+    ledger = _ComparisonLedger(toolkit.prior_comparisons)
+
+    async def handle_compare(invocation: ToolInvocation) -> ToolResult:
+        args = cast("dict[str, Any]", invocation.arguments or {})
+        return await _guarded_chat_tool_call(
+            queue,
+            budget,
+            "checking whether a difference is real",
+            lambda: _run_comparison(toolkit, ledger, args),
+            on_tool_call,
+        )
+
+    tools.append(
+        Tool(
+            name=_COMPARE_TOOL_NAME,
+            description=_COMPARE_TOOL_DESCRIPTION,
+            parameters=_COMPARE_TOOL_SCHEMA,
+            handler=handle_compare,
+            skip_permission=True,
+        )
+    )
+    names.append(_COMPARE_TOOL_NAME)
+
     async def handle_opening_stats(invocation: ToolInvocation) -> ToolResult:
         return await _guarded_chat_tool_call(
             queue,
             budget,
             "looking up the repertoire",
             lambda: _call_opening_stats(toolkit),
+            on_tool_call,
         )
 
     tools.append(

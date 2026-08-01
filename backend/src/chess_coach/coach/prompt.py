@@ -24,6 +24,7 @@ from chess_coach.domain import (
     MATE_SCORE,
     ChatMessage,
     Color,
+    Comparison,
     CriticalPosition,
     ErrorPattern,
     EvalLine,
@@ -78,7 +79,7 @@ PROMPT_VERSION = "2026-07-one-register-one-unit"
 # embed also block-quotes the narrative, so the second is belt and
 # braces. The templates stopped saying "ACPL" at the same time (see
 # docs/06-coach.md, "Units"), so nothing here models the habit either.
-PROFILE_PROMPT_VERSION = "profile-v4"
+PROFILE_PROMPT_VERSION = "profile-v10"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.
@@ -891,8 +892,21 @@ def _profile_coverage(profile: PlayerProfile) -> str:
     """
     if profile.games_in_scope <= profile.games_covered:
         return f"all {_plural(profile.games_covered, 'game')} analyzed"
+    # The analyzed subset's own *span*, not just its size. Stating a
+    # bare count let the first live narrative call a seven-month quality
+    # figure the student's "whole span", because nothing said the
+    # analyzed games were all recent (docs/06-coach.md, "Coverage").
+    span = ""
+    if (
+        profile.analyzed_window_start is not None
+        and profile.analyzed_window_end is not None
+    ):
+        span = (
+            f", all from {_format_date(profile.analyzed_window_start)} to "
+            f"{_format_date(profile.analyzed_window_end)}"
+        )
     return (
-        f"{profile.games_covered} of {profile.games_in_scope} analyzed -- "
+        f"{profile.games_covered} of {profile.games_in_scope} analyzed{span} -- "
         "ratings, records and repertoire counts cover every game; "
         "average loss, blunder rates and error patterns cover the "
         "analyzed ones"
@@ -906,14 +920,25 @@ def _profile_intro(profile: PlayerProfile) -> str:
             f", {_format_date(profile.window_start)} to "
             f"{_format_date(profile.window_end)}"
         )
+    # The window holds the student's level roughly constant, so every
+    # figure below describes one player. When it could not -- too thin a
+    # sample at this level -- that is said outright rather than left for
+    # a reader to infer from dates (docs/06-coach.md, "Window").
+    caveat = (
+        "\n*(This span covers a change in the student's level: there "
+        "were too few games at their current one to describe it alone, "
+        "so the rates below average across more than one player.)*"
+        if profile.window_spans_level_change
+        else ""
+    )
     return (
         f"# Player profile -- {profile.username}\n"
         "*(Losses are in pawns per move -- 0.35 means the average move "
         "gave up about a third of a pawn; lower is better. Every figure "
         "below is move-weighted over the games covered.)*\n"
-        f"Covering {_profile_scope(profile)}: "
+        f"Covering {_profile_scope(profile)} at their current level: "
         f"{_plural(profile.games_in_scope, 'game')}{window} "
-        f"({_profile_coverage(profile)})."
+        f"({_profile_coverage(profile)}).{caveat}"
     )
 
 
@@ -960,6 +985,9 @@ def _profile_ratings_section(profile: PlayerProfile) -> str:
     """
     if not profile.time_classes:
         return ""
+    # The gap is only a milestone for a student who is not improving,
+    # and the trajectory section is the only thing that knows which.
+    show_gap = profile.trajectory is None or not profile.trajectory.improving
     lines = [
         "## Ratings",
         "| Time class | Score | Rating | Peak |",
@@ -970,21 +998,27 @@ def _profile_ratings_section(profile: PlayerProfile) -> str:
             f"| {tc.time_class.capitalize()} | {_score_line(tc.record)} "
             f"| {tc.rating_start} → {tc.rating_end} "
             f"(range {tc.rating_min}-{tc.rating_max}) "
-            f"| {_peak_cell(tc)} |"
+            f"| {_peak_cell(tc, show_gap=show_gap)} |"
         )
     return "\n".join(lines)
 
 
-def _peak_cell(tc: TimeClassStats) -> str:
+def _peak_cell(tc: TimeClassStats, *, show_gap: bool = True) -> str:
     """ "1496 on 2026-06-10, -42 since" -- the date is what makes a peak
     a milestone, and the gap is what makes it actionable. Renders
     without the date on a profile snapshot stored before the field
     existed (`rating_max_at` is None only there).
+
+    `show_gap=False` drops the trailing gap for a student the trajectory
+    says is improving (docs/06-coach.md, "Trajectory"). Without it this
+    cell contradicts the trajectory section three lines above it: one
+    saying "up 443 points over the year", the other "-95 since", about
+    the same student in the same document.
     """
     peak = str(tc.rating_max)
     if tc.rating_max_at is not None:
         peak += f" on {_format_date(tc.rating_max_at)}"
-    if tc.rating_end < tc.rating_max:
+    if show_gap and tc.rating_end < tc.rating_max:
         peak += f", {tc.rating_end - tc.rating_max} since"
     return peak
 
@@ -1017,10 +1051,14 @@ def _best_win_line(profile: PlayerProfile) -> str | None:
     if win is None:
         return None
     gap = win.opponent_rating - win.player_rating
+    # Gap first, because the gap is the achievement. "Beat a 1559" only
+    # says the student was once rated about 1559 themselves -- chess.com
+    # pairs by rating, so the highest-rated opponent beaten is
+    # structurally their own peak (docs/06-coach.md, "Trajectory").
     return (
-        f"- Best win: beat a {win.opponent_rating} on "
-        f"{_format_date(win.end_time)}, rated {win.player_rating} at the "
-        f"time ({gap:+d})"
+        f"- Biggest upset: beat someone {gap} points higher, a "
+        f"{win.opponent_rating} on {_format_date(win.end_time)} while "
+        f"rated {win.player_rating}"
     )
 
 
@@ -1053,15 +1091,18 @@ def _profile_milestones_section(profile: PlayerProfile) -> str:
     the section states that once, so the model does not read these
     against the analyzed count in the header.
     """
+    # The after-a-loss and color-split lines are deliberately absent
+    # here, though the report brief still renders them: this document
+    # has a "Splits" section that states the same two comparisons *with
+    # a verdict*. Rendering both would put the raw gap above the
+    # judgement of it, and a model handed "48% after a loss against 52%
+    # overall" as a milestone will narrate it whatever the section below
+    # says (docs/06-coach.md, "Reading a comparison").
     lines = [
         line
         for line in (
             _best_win_line(profile),
             _streak_line(profile),
-            # Subject-free in both prompts, so shared with the report
-            # brief rather than restated here.
-            _after_loss_line(profile.streaks, profile.record),
-            _color_split_line(profile.color_records),
             _opposition_line(profile),
         )
         if line
@@ -1118,31 +1159,158 @@ def _profile_quality_section(profile: PlayerProfile) -> str:
     return "\n".join(lines)
 
 
+def _profile_trajectory_section(profile: PlayerProfile) -> str:
+    """Where the student is heading, over the **full** archive
+    (docs/06-coach.md, "Trajectory") -- stated as covering more than the
+    window above it, since every other figure in this document is
+    level-scoped and a reader has no other way to tell.
+    """
+    t = profile.trajectory
+    if t is None:
+        return ""
+    lines = [
+        "## Trajectory",
+        "*(The whole archive in this time control, not the window above "
+        "-- direction is the one thing a level-scoped window cannot "
+        "show.)*",
+        f"- Now {t.rating_now} over {_plural(t.games, 'game')}",
+    ]
+    if t.deltas:
+        moves = "; ".join(
+            f"{d.delta:+d} over {d.days} days ({_plural(d.games, 'game')})"
+            for d in t.deltas
+        )
+        lines.append(f"- Change: {moves}")
+    # The peak gap is a headline only for a student who is not
+    # improving: "95 below peak" on someone up 443 on the year is a
+    # misread, and it is the one the first live narrative made.
+    peak = f"- Peak {t.rating_max} on {_format_date(t.rating_max_at)}"
+    if not t.improving and t.rating_now < t.rating_max:
+        peak += f", {t.rating_now - t.rating_max} since"
+    lines.append(peak)
+    lines.append(f"- Low {t.rating_min} on {_format_date(t.rating_min_at)}")
+
+    d = t.drawdown
+    if d is not None:
+        recovery = (
+            f"recovered since ({_score_line(d.since_record)})"
+            if d.recovered
+            else f"since then {_score_line(d.since_record)}"
+        )
+        lines.append(
+            f"- Largest setback: {d.depth} points, {d.peak} on "
+            f"{_format_date(d.peak_at)} to {d.trough} on "
+            f"{_format_date(d.trough_at)} -- {_score_line(d.record)} "
+            f"through the fall; {recovery}"
+        )
+    return "\n".join(lines)
+
+
+def _comparison_line(c: Comparison) -> str:
+    """One matched comparison with its verdict (docs/06-coach.md,
+    "Reading a comparison").
+
+    The verdict is stated; the arithmetic behind it is not. Sigmas and
+    p-values are not this audience's vocabulary, and a number the reader
+    cannot calibrate invites exactly the false confidence the guard
+    exists to remove.
+    """
+    body = (
+        f"- {c.label}: {_score_line(c.left)} {c.left_label}, against "
+        f"{_score_line(c.right)} {c.right_label}"
+    )
+    # A comparison with a baseline is not tested against zero, and a
+    # reader who assumes it is will misread both verdicts: "within
+    # noise" would look like "no difference" where it means "no more
+    # than everyone has", and "a real difference" like any gap at all.
+    if c.baseline:
+        body += (
+            f" (a {c.baseline:.0f}-point edge is normal for everyone and "
+            "is already allowed for)"
+        )
+    if c.significant:
+        return f"{body} -- a real difference"
+    return f"{body} -- within noise, not a tendency"
+
+
+def _profile_comparisons_section(profile: PlayerProfile) -> str:
+    """Only the splits that could actually be measured.
+
+    An unmeasurable one has nothing to say in either direction, and
+    rendering it as "n/a ... too few games to compare" spends lines on
+    the absence of a finding -- in a document whose whole problem was
+    that the repertoire kept losing the budget to milestones.
+    """
+    rows = [c for c in profile.comparisons if c.measurable]
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "## Splits",
+            "*(Each compares two groups of the student's own games. A "
+            'split marked "within noise" is a difference this many '
+            "games cannot distinguish from chance -- it is not a "
+            "tendency and must not be reported as one.)*",
+            *(_comparison_line(c) for c in rows),
+        ]
+    )
+
+
 def _profile_opening_entry(o: ProfileOpening) -> str:
-    return f"{o.name} ({o.moves}) -- {o.games}g, {o.score * 100:.0f}%"
+    """Games, score, and -- when the engine has reached the family --
+    what the opening itself costs.
+
+    The loss column is what makes a repertoire row coaching signal
+    rather than a scoreboard: a system the student scores 48% in while
+    leaking 0.32 pawns a move out of the book is a different problem
+    from one they score 48% in at 0.21, and score alone cannot tell
+    them apart.
+    """
+    entry = f"{o.name} ({o.moves}) -- {o.games}g, {o.score * 100:.0f}%"
+    if o.opening_acpl is not None:
+        entry += f", {_pawns_or_na(o.opening_acpl)} pawns/move out of the opening"
+    return entry
 
 
 def _profile_repertoire_section(profile: PlayerProfile) -> str:
     if not profile.openings:
         return ""
     parts = ["## Repertoire"]
-    for color, label in (("white", "White"), ("black", "Black")):
+    colors: tuple[tuple[Color, str], ...] = (("white", "White"), ("black", "Black"))
+    for color, label in colors:
         rows = [o for o in profile.openings if o.color == color]
         if not rows:
             continue
-        parts.append(_profile_repertoire_color_section(label, rows))
+        total = profile.color_records.get(color)
+        parts.append(
+            _profile_repertoire_color_section(
+                label, rows, total.games if total is not None else None
+            )
+        )
     return "\n\n".join(parts)
 
 
-def _profile_repertoire_color_section(label: str, rows: list[ProfileOpening]) -> str:
+def _profile_repertoire_color_section(
+    label: str, rows: list[ProfileOpening], color_games: int | None
+) -> str:
     """Third person throughout, like every other line of this prompt --
     the narrative it produces is stored and pasted into other prompts,
     where "you" addresses the coach reading it, not the student
     (docs/06-coach.md, "Narrative").
+
+    The heading states how many games these rows actually cover. Without
+    it a reader sees three families totalling 640 games and cannot tell
+    whether that is the whole of a 640-game repertoire or two thirds of
+    a 968-game one -- so "they open 1.d4 in essentially every game", the
+    single most useful sentence about this student, is unsayable.
     """
+    covered = sum(o.games for o in rows)
+    header = f"### As {label}"
+    if color_games:
+        header += f" ({covered} of {_plural(color_games, 'game')} in these lines)"
     chosen = [o for o in rows if not o.faced]
     faced = [o for o in rows if o.faced]
-    lines = [f"### As {label}"]
+    lines = [header]
     if chosen:
         lines.append("Systems the student chose:")
         lines.extend(f"- {_profile_opening_entry(o)}" for o in chosen)
@@ -1169,90 +1337,107 @@ def _profile_error_patterns_section(profile: PlayerProfile) -> str:
     return "\n".join(lines)
 
 
+# The whole instruction block (docs/06-coach.md, "The instructions say
+# what the text is for"). It ran to twelve bullets of shape and never
+# once said what the narrative was *for*, so the model optimized the
+# only thing it had been given and the repertoire -- which no bullet
+# named -- lost the sentence budget in every run. Twelve rules could not
+# make it mention the openings; one sentence of purpose does, because a
+# text written to be useful in another session has to say what the
+# student plays.
+#
+# What survives is only what nothing else can supply. Everything cut was
+# either a shape constraint the purpose statement implies, or an
+# instruction to say something the facts already say -- recency being
+# the clearest case, since it is now the window rather than a bullet.
 _PROFILE_INSTRUCTIONS = (
     "## Instructions\n"
-    "Write the player's narrative now, following these rules:\n"
-    "- **Length and shape.** Three to five sentences describing this "
-    "student's tendencies, then a short list of weaknesses -- a handful "
-    "of bullets, not an essay.\n"
-    "- **Audience.** You are briefing a chess coach about a student "
-    "they are about to work with -- you are not talking to the student. "
-    "Write about them in the third person, by name or as "
-    '"this student"; never address the reader as "you". This text is '
-    "stored and pasted into other prompts, where the reader is another "
-    'coach: a narrative that opens "You are a rapid player" tells that '
-    "coach they are the rapid player.\n"
-    "- **Scope.** The facts above cover one time control, named in the "
-    "header. Say which one when you characterize the student, and never "
-    "generalize the figures to their whole game -- a rapid profile is "
-    "not a description of their bullet play.\n"
-    "- **Two denominators.** Ratings, records and repertoire counts "
-    "cover every game in scope; average loss, blunder rates and error "
-    "patterns "
-    "cover only the analyzed subset, whose size the header states. "
-    "Never present the analyzed sample as the student's whole history, "
-    "and if coverage is thin, say the quality read is provisional.\n"
-    "- **Recent form first.** Where the recent-form windows disagree "
-    "with the all-time figures, lead with the most recent window that "
-    "has a real sample and say which way it is moving -- how the "
-    "student plays now matters more than their average over years. "
-    "Ignore a window whose analyzed count is too small to carry a "
-    "conclusion.\n"
-    "- **Milestones are evidence, not decoration.** The rating peak "
-    "with its date, the best win, the streaks, the after-a-loss score, "
-    "the color split and how games end are all facts about every game "
-    "in scope. Use the ones that say something -- sitting well below a "
-    "peak reached long ago, a worse score in the game right after a "
-    "loss, a lopsided White/Black split, or a large share of losses on "
-    "the clock are each a coaching problem with a name. Ignore the "
-    "ones that do not, and never read a split whose sample is a "
-    "handful of games as a tendency.\n"
-    "- **Register.** Write for a club player's coach, not a fellow "
-    "engine: pawns, never centipawns, and the idea before the number. "
-    'Spell the unit out where the number is -- "1.30 pawns a move", '
-    'never "1.30 ACPL" or any other acronym. Nothing here defines one, '
-    "and what you write is stored and pasted into prompts that define "
-    "nothing either, where a reader has no way to tell the figure is "
-    "not centipawns.\n"
-    "- **Plain prose only.** Sentences and the bullet list, and no "
-    "markdown headings (`#`, `##`) anywhere -- this text is pasted "
-    "*inside* another prompt's sections, and a heading of your own "
-    "would read there as starting a new one.\n"
-    "- **Evidence.** Every claim must tie to a figure stated above -- a "
-    "rating, an average loss, a blunder rate, a repertoire score, an "
-    "error-pattern count. Never assert a tendency the facts do not "
-    "support.\n"
-    "- **No invented lines.** Do not assert a concrete variation, "
-    "opening trap, or line of play beyond what the facts state -- these "
-    "are aggregates, not annotated games, and there is no engine here "
-    "to verify a claimed line.\n"
-    "- **No game citations.** Never reference a specific game, date, or "
-    "opponent, and never write a link or handle of any kind -- this "
-    "text is stored and reused inside other prompts, where a game "
-    "reference could not be resolved into a link or checked.\n"
-    "- **Honesty.** If a section's sample is too thin to support a "
-    "claim, say so or omit it rather than filling space."
+    "Write a short profile of this student for the coach who works with "
+    "them next. It gets pasted into other sessions as context when that "
+    "coach explains a move or answers a question, so write what would "
+    "actually change the advice.\n\n"
+    "**Dense, not polished. Around 200 words.** This is context another "
+    "prompt pastes in, not an essay -- it is read for what it says, "
+    "never for how it reads. Every sentence must carry a fact or a "
+    "consequence the coach would act on. Cut transitions, cut any "
+    "sentence whose only job is to introduce the next one, and never "
+    "explain the significance of a figure you have just given: the "
+    "reader is a coach and can see it. If a sentence could be deleted "
+    "without losing information, delete it.\n\n"
+    "{facts_clause}\n\n"
+    "Seven rules, all because this text is stored and reused elsewhere:\n"
+    "- Third person, about the student, to a coach. Never address the "
+    'reader as "you" -- they are the coach, not the player.\n'
+    "- No game citations, dates, opponents, links or handles. They "
+    "resolve to nothing where this lands.\n"
+    "- No markdown headings (`#`, `##`). This text is pasted *inside* "
+    "another prompt's sections, where a heading of your own reads as "
+    "starting a new one.\n"
+    "- A claim about the position itself -- a structure, a plan, why a "
+    "line is awkward -- is either verified or not made. The facts are "
+    "aggregates; the move sequences printed beside them are the only "
+    "concrete lines you have, and they are frequently the "
+    "counterexample to a guess.\n"
+    "- Every figure covers the same games as the facts above, including "
+    "anything a tool returns. State a count only when you have it from "
+    "the facts or a tool -- never rolled up in your head from rows.\n"
+    "- An observation from reading individual games is an example, "
+    "never a tendency. Say how many games you looked at, and do not "
+    "turn it into a trait -- collapsing in three sampled endings is "
+    "three endings, not a temperament.\n"
+    '- Spell every unit out -- "1.30 pawns a move", never "1.30 ACPL" '
+    "or any other acronym. Nothing here defines one, and neither do the "
+    "prompts this lands in.\n\n"
+    'A comparison marked "within noise" is not a tendency. Do not name '
+    'it as a weakness, do not call it "worth watching", and do not '
+    "soften it into a passing mention -- the honest statement is that "
+    "the data cannot tell, and the sentence is better spent on "
+    "something it can."
+)
+
+# The one clause that depends on how the run is actually executed. A
+# prompt that says "use the tools" to a run with no tools is worse than
+# one that never mentions them: the model either invents the lookups it
+# was told to do, or spends its turn saying it cannot. Same conditional
+# shape as `_explain_instructions`, and for the same reason.
+_PROFILE_FACTS_ONLY = (
+    "The facts above are everything you have -- there are no tools on "
+    "this run, so write only what they support and say so where they "
+    "run out."
+)
+_PROFILE_FACTS_WITH_TOOLS = (
+    "The facts above are computed and correct -- your starting point, "
+    "not your limit. Use the tools to check anything the summary rests "
+    "on, and to find what the aggregates cannot show."
 )
 
 
-def render_profile_prompt(profile: PlayerProfile) -> str:
+def render_profile_prompt(profile: PlayerProfile, *, has_tools: bool = False) -> str:
     """The narrative-generation prompt (docs/06-coach.md, "Player
     profile"): the facts -- fuller than `render_profile_context`, e.g. a
     full months table rather than one compact trend line -- followed by
-    instructions asking for 3-5 sentences of tendencies plus a short
-    weakness list, every claim tied to a figure stated in the facts.
+    instructions stating what the text is *for* and the four rules
+    nothing else can supply.
+
+    `has_tools` says whether this run can actually look anything up. It
+    changes exactly one clause: telling a tool-less run to "use the
+    tools" makes the model either invent the lookups it was told to do
+    or spend its turn explaining that it cannot.
     """
+    facts_clause = _PROFILE_FACTS_WITH_TOOLS if has_tools else _PROFILE_FACTS_ONLY
     sections = [
         _profile_intro(profile),
+        _profile_trajectory_section(profile),
         _profile_ratings_section(profile),
         _periods_section(profile.periods),
         _profile_quality_section(profile),
         _trend_section(profile.months),
         _profile_milestones_section(profile),
+        _profile_comparisons_section(profile),
         _terminations_section(profile.terminations),
         _profile_repertoire_section(profile),
         _profile_error_patterns_section(profile),
-        _PROFILE_INSTRUCTIONS,
+        _PROFILE_INSTRUCTIONS.format(facts_clause=facts_clause),
     ]
     return "\n\n".join(section for section in sections if section)
 
@@ -1291,6 +1476,30 @@ def _profile_quality_line(profile: PlayerProfile) -> str:
         f"- Quality: {_pawns_or_na(profile.overall_acpl)} pawns lost per move, "
         f"{overall_blunder} blunders overall ({', '.join(phase_bits)})"
     )
+
+
+def _profile_trajectory_line(profile: PlayerProfile) -> str | None:
+    """Direction, in one line, for the embedded block (docs/06-coach.md,
+    "Trajectory").
+
+    The longest measured span rather than all four: what a host prompt
+    needs settled is "is this student climbing, stuck, or falling", and
+    one number answers it. A live drawdown is appended when it has not
+    been recovered, because a student still below a recent peak is a
+    different person to explain a move to.
+    """
+    t = profile.trajectory
+    if t is None or not t.deltas:
+        return None
+    longest = t.deltas[-1]
+    line = (
+        f"- Trajectory: {t.rating_now} now, {longest.delta:+d} over the "
+        f"last {longest.days} days"
+    )
+    d = t.drawdown
+    if d is not None and not d.recovered and d.depth <= -100:
+        line += f"; still below a {d.peak} peak ({d.depth} at the worst)"
+    return line
 
 
 def _profile_trend_line(profile: PlayerProfile) -> str | None:
@@ -1443,6 +1652,7 @@ def render_profile_context(profile: PlayerProfile) -> str:
     for line in (
         _profile_coverage_line(profile),
         _profile_ratings_line(profile),
+        _profile_trajectory_line(profile),
         _profile_quality_line(profile),
         _profile_recent_line(profile),
         _profile_trend_line(profile),

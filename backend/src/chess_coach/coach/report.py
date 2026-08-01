@@ -13,6 +13,7 @@ import contextlib
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from statistics import median
 
 import chess
 
@@ -217,6 +218,14 @@ def build_report(
         # subset's -- with `all_games` omitted the two are identical.
         window_start=min((g.end_time for g in volume), default=None),
         window_end=max((g.end_time for g in volume), default=None),
+        # ...and the analyzed subset's own span beside it. On a
+        # partly-analyzed archive the two differ by more than a count:
+        # the reference archive's volume runs 22 months while the engine
+        # has reached only the last seven, which made "average loss
+        # across the whole span" a claim about this year wearing two
+        # years' clothes (docs/06-coach.md, "Coverage is stated").
+        analyzed_window_start=min((g.end_time for g in games), default=None),
+        analyzed_window_end=max((g.end_time for g in games), default=None),
         time_class=time_class,
         requested_since=requested_since,
         requested_until=requested_until,
@@ -421,6 +430,12 @@ def _month_stats(
                 month=month,
                 games=len(month_games),
                 rating_end=latest.player_rating,
+                # The median, not the closing rating, is what the
+                # profile window's drift rule reads (docs/06-coach.md,
+                # "Window"): a month's last game is one outcome and
+                # swings with it, and a window boundary decided by a
+                # single game is not a boundary.
+                rating_median=round(median(g.player_rating for g in month_games)),
                 acpl=round(loss / moves, 1) if moves else None,
                 blunder_rate=round(blunders / moves, 4) if moves else None,
             )
@@ -548,16 +563,36 @@ def _color_records(games: list[_VolumeGame]) -> dict[Color, Record]:
 
 
 def _best_win(games: list[_VolumeGame]) -> BestWin | None:
-    """The win against the highest-rated opponent, most recent on a tie.
+    """The biggest **upset** -- the win over the opponent furthest above
+    the student at the time (docs/06-coach.md, "Trajectory"). Ties break
+    toward the recent game, because of two comparable wins the newer is
+    the one the student remembers.
 
-    Ties broken toward the recent game because the milestone is meant
-    to be recognizable: of two wins over 1900s, the one from last month
-    is the one the student remembers.
+    Not the highest-rated opponent beaten, which is what this was and
+    which measures nothing: chess.com pairs by rating, so that figure is
+    structurally the student's own peak (1559 against a 1574 peak in
+    rapid, 1172 against 1162 in blitz) and merely restates the ratings
+    table two rows above -- while on a tightly-paired archive naming an
+    opponent *weaker* than the student, rendered as a milestone.
+
+    None when no win in scope beat a higher-rated opponent. That is the
+    honest answer for a rating-matched archive, and it is common: over
+    1,925 reference rapid games the student faced someone 50+ points
+    stronger nine times and never beat one.
     """
-    wins = [g for g in games if g.result == "win"]
+    # More than the opposition band above, not merely one point: inside
+    # +/-50 the two players are the same strength by this report's own
+    # definition, so "beat someone 7 points higher" is a milestone about
+    # nothing. On the reference rapid archive the largest upset is
+    # exactly that +7, and None is the right answer there.
+    wins = [
+        g
+        for g in games
+        if g.result == "win" and g.opponent_rating - g.player_rating > _OPPONENT_BAND
+    ]
     if not wins:
         return None
-    best = max(wins, key=lambda g: (g.opponent_rating, g.end_time))
+    best = max(wins, key=lambda g: (g.opponent_rating - g.player_rating, g.end_time))
     return BestWin(
         game_id=best.id,
         end_time=best.end_time,

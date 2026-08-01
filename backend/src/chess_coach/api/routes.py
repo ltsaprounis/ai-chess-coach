@@ -38,9 +38,12 @@ from chess_coach.coach import (
     build_move_context,
     build_profile,
     build_report,
+    build_trajectory,
+    profile_window,
     render_explain_prompt,
     render_profile_prompt,
     render_prompt,
+    window_spans_level_change,
 )
 from chess_coach.config import AppConfig
 from chess_coach.domain import (
@@ -657,6 +660,16 @@ async def explain_move(
                 async for event in events:
                     if event.type == "text":
                         chunks.append(event.text)
+                    elif event.type == "tool":
+                        # Text written before an engine call is the model
+                        # narrating its plan, not the explanation
+                        # (docs/06-coach.md, "Providers"). It still streams
+                        # to the panel below, so the student watches the
+                        # work; only what gets cached drops it. Safe to do
+                        # on dequeue here, unlike the Copilot chat path:
+                        # this loop is the sole consumer of a sequential
+                        # generator, so no later text can have arrived yet.
+                        chunks.clear()
                     yield {"event": event.type, "data": event.model_dump_json()}
         except CoachProviderError as exc:
             # Too late for an HTTPException: events are already on the
@@ -935,6 +948,14 @@ class ProfileResponse(BaseModel):
     # stale, since a 30-day facts count can never match a full-history
     # narrative's. None when no narrative is stored.
     narrative_games_now: int | None = None
+    # The prompt version the backend would generate under *now*, against
+    # `narrative.prompt_version` for what the stored text was written
+    # under. Without it a bump flags nothing, which is precisely what
+    # docs/06-coach.md promises it does -- and a narrative written under
+    # an older template can contradict the facts rendered beside it
+    # ("drift downward from a high" under a trajectory reading +443 over
+    # the year, which is what profile-v5 was for).
+    prompt_version: str = PROFILE_PROMPT_VERSION
 
 
 def _load_profile_facts(
@@ -957,22 +978,56 @@ def _load_profile_facts(
     stored one, if any. An unknown player has no stored games, so this is
     simply the profile of an empty report, mirroring `/report`.
     """
-    games = list_analyzed_games(
+    # Pass one: every stored game in the caller's scope. Light rows (no
+    # PGN), and they carry both things only the *unwindowed* archive can
+    # answer -- where the student's current level begins, and where they
+    # are heading (docs/06-coach.md, "Window", "Trajectory").
+    archive = list_game_summaries(
         db, username, since=since, until=until, time_class=time_class
     )
-    all_games = list_game_summaries(
-        db, username, since=since, until=until, time_class=time_class
+    # Trajectory ignores the caller's window as well as the level one:
+    # both renderers say it covers "the whole archive in this time
+    # control", and under a 90-day page filter that would have been an
+    # overstatement of 90 days of games. Its own query, because it is
+    # the one figure whose whole point is to outlive every window
+    # (docs/06-coach.md, "Trajectory"); the rows are light and carry no
+    # PGN, which is what makes a second pass affordable.
+    trajectory = build_trajectory(
+        archive
+        if since is None and until is None
+        else list_game_summaries(db, username, time_class=time_class)
+    )
+    archive_report = build_report(username, [], all_games=archive)
+    level_since = profile_window(archive_report.months)
+    spans_change = window_spans_level_change(archive_report.months, level_since)
+
+    # Pass two, narrowed to that level. The bound only ever tightens the
+    # caller's own window, never widens it: a request for last month must
+    # not come back covering six.
+    outcome_since = (
+        max(x for x in (since, level_since) if x is not None)
+        if (since is not None or level_since is not None)
+        else None
+    )
+
+    games = list_analyzed_games(
+        db, username, since=outcome_since, until=until, time_class=time_class
+    )
+    all_games = (
+        archive
+        if outcome_since is None
+        else [g for g in archive if g.end_time >= outcome_since]
     )
     report = build_report(
         username,
         games,
         all_games=all_games,
         time_class=time_class,
-        requested_since=since,
+        requested_since=outcome_since,
         requested_until=until,
         games_in_scope=len(all_games),
     )
-    return build_profile(report)
+    return build_profile(report, trajectory=trajectory, spans_level_change=spans_change)
 
 
 @router.get("/players/{username}/profile")
@@ -1014,9 +1069,19 @@ def player_profile(
             generated_at=cached.created_at,
             games_covered=cached.profile.games_covered,
         ),
-        # The narrative's scope, not the request's: no window, since that
-        # is how POST generates it.
-        narrative_games_now=count_analyzed_games(db, user, time_class=time_class),
+        # The narrative's own scope, which is the *level window* POST
+        # generates it over -- not the request's window, and no longer
+        # "no window at all". Counting unwindowed here compared a
+        # windowed `games_covered` against an archive-wide total, so on
+        # any player whose analysis reaches past the window the banner
+        # was permanently on and regenerating never cleared it. The
+        # stored facts carry the bound they were built with.
+        narrative_games_now=count_analyzed_games(
+            db,
+            user,
+            since=cached.profile.window_start,
+            time_class=time_class,
+        ),
     )
 
 
@@ -1032,21 +1097,23 @@ async def regenerate_player_profile(
     username: str,
     db: DbDep,
     cfg: CfgDep,
+    pool: PoolDep,
     providers: ProvidersDep,
     body: ProfileGenerateRequest | None = None,
 ) -> ProfileResponse:
     """Regenerate the narrative (user-triggered -- LLM calls cost money;
     GET never generates): fresh facts -> `render_profile_prompt` -> the
-    chosen agent's `complete` with no engine analyst (docs/06-coach.md,
-    "Player profile": the narrative summarizes aggregates and asserts no
-    concrete line, so there is nothing for an engine to verify) ->
-    `save_player_profile`. Responds with the same shape as `GET`. 409 when
-    there are no analyzed games to describe.
+    chosen agent's `complete` with the read-only chat toolkit
+    (docs/06-coach.md, "Narrative") -> `save_player_profile`. Responds
+    with the same shape as `GET`. 409 when there are no analyzed games
+    to describe.
 
-    Generated over the time control's **full** history, never a window:
+    Scoped to the student's current level, never to a caller window:
     the narrative is the durable artifact other prompts embed, and one
     written over "the last 30 days" would be silently wrong the moment
-    those 30 days moved. Time control is the one scope it carries.
+    those 30 days moved. The level window moves only when the student's
+    level does (docs/06-coach.md, "Window"), and time control remains
+    the one scope the stored row is keyed by.
     """
     agent_id = cfg.coach.default_agent
     if body is not None and body.agent_id is not None:
@@ -1070,14 +1137,39 @@ async def regenerate_player_profile(
             else "no analyzed games yet -- sync and analyze first"
         )
         raise HTTPException(status_code=409, detail=detail)
-    prompt = render_profile_prompt(facts)
+    # Agentic (docs/06-coach.md, "Narrative"): the toolkit is pre-scoped
+    # to this student and this control, so the run can read the
+    # repertoire and pull games rather than paraphrasing the aggregates
+    # it was handed. It is the same read-only toolkit chat uses -- the
+    # engine analyst rides along on it when the pool is up, and the
+    # narrative simply does not ask for positions when it is not.
+    # Scoped to the same window as the facts (docs/06-coach.md, "Reading
+    # a comparison"). This was unwindowed at first on the reasoning that
+    # the narrative covers the control's whole history -- which confused
+    # the storage *key* (time control alone) with the content's scope.
+    # The narrative describes the windowed facts, so an unwindowed tool
+    # answers a different question from the one the document is about:
+    # get_opening_stats returned a 484-game London over 1,925 games into
+    # a narrative whose every other figure covered 1,158, and
+    # compare_groups returned a 968-game White split beside a facts block
+    # stating 576. One document, one denominator.
+    toolkit: ChatToolkit = ApiChatToolkit(
+        db,
+        user,
+        since=facts.window_start,
+        until=None,
+        time_class=time_class,
+        analyst=_build_analyst(pool, cfg) if pool is not None else None,
+        # Seeds the compare tool's BH family with the splits the facts
+        # already judged, so a question the run asks is weighed
+        # alongside them rather than in a family of its own
+        # (docs/06-coach.md, "Reading a comparison").
+        prior_comparisons=facts.comparisons,
+    )
+    prompt = render_profile_prompt(facts, has_tools=True)
 
     try:
-        # Single turn by contract (docs/06-coach.md, "Player profile"): the
-        # narrative summarizes aggregates and asserts no concrete
-        # variation, so there is nothing for the engine tool to verify --
-        # never pass the analyst here, unlike /coach and /explain.
-        advice = await provider.complete(prompt, analyst=None)
+        advice = await provider.complete(prompt, toolkit=toolkit)
     except CoachProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

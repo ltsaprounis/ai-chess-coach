@@ -270,6 +270,7 @@ export default function Coach() {
             profile={profile.data.profile}
             narrative={profile.data.narrative ?? null}
             narrativeGamesNow={profile.data.narrative_games_now ?? null}
+            currentPromptVersion={profile.data.prompt_version ?? null}
             agentLabel={agentLabel}
             generating={generateProfile.isPending}
             generateError={
