@@ -364,7 +364,13 @@ player has only ever faced.
 - They describe that representative line, not an invariant of the
   group: transpositions inside one (color, eco, name) can reach the
   same name by a different move order, so a row's `system` is the
-  commonest way the player got there, not the only one.
+  commonest way the player got there, not the only one. **The
+  `get_opening_stats` tool result says this at the top of every dump**,
+  because stating it only here was not enough: a live narrative read
+  `[1.e4 d6 2.d4 Nf6 3.Nc3 g6], 32g, 33%` as "32 games where White
+  played 2.d4" and reported a prep hole at 33%, where the real 2.d4
+  split is 46% over 153 games. A move sequence printed beside a count
+  reads as a filter unless something says otherwise.
 - `opening_moves` and `player_moves` carry the denominators behind the
   two ACPL columns, so a consumer rolling rows up can stay
   move-weighted (see below).

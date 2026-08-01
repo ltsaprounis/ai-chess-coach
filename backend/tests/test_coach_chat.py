@@ -937,6 +937,42 @@ async def _run_compare_tool(toolkit: _StubChatToolkit, args: dict[str, object]) 
     return await _compare_tool(toolkit)(args)
 
 
+async def test_opening_stats_says_its_moves_are_not_a_filter() -> None:
+    """docs/06-coach.md, "Repertoire": a row's moves are the group's
+    commonest line, not an invariant -- transpositions reach the same
+    name by other move orders.
+
+    Stating that only in the doc was not enough. A live narrative read
+    "[1.e4 d6 2.d4 Nf6 3.Nc3 g6], 32g, 33%" as "32 games where White
+    played 2.d4" and reported a prep hole at 33%, where the real 2.d4
+    split is 46% over 153 games. A move sequence printed beside a count
+    reads as a filter unless something says otherwise.
+    """
+    toolkit = _StubChatToolkit(
+        openings=[
+            OpeningStats(
+                eco="B07", name="Pirc Defense", color="black",
+                system="1...d6 2...Nf6 3...g6",
+                first_moves="1.e4 d6 2.d4 Nf6 3.Nc3 g6",
+                faced=False, games=32, wins=9, losses=20, draws=3,
+                analyzed_games=32, opening_moves=320, player_moves=1200,
+                opening_acpl=27.0, avg_cp_loss=170.0,
+            )
+        ]
+    )  # fmt: skip
+
+    # Same convention as test_coach.py's threshold imports: the private
+    # renderer is what the model actually reads.
+    text = await providers_module._call_opening_stats(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit)
+    )
+
+    assert "MOST COMMON line, not a filter" in text
+    assert "not only the games with those moves" in text
+    # The row itself is unchanged -- the figures were never wrong.
+    assert "32g, 33%" in text
+
+
 async def test_compare_tool_never_lets_the_caller_pick_the_other_side() -> None:
     """docs/06-coach.md, "Reading a comparison": the model names one
     group and the tool subtracts, so a run cannot compare a group

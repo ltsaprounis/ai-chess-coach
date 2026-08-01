@@ -79,7 +79,7 @@ PROMPT_VERSION = "2026-07-one-register-one-unit"
 # embed also block-quotes the narrative, so the second is belt and
 # braces. The templates stopped saying "ACPL" at the same time (see
 # docs/06-coach.md, "Units"), so nothing here models the habit either.
-PROFILE_PROMPT_VERSION = "profile-v9"
+PROFILE_PROMPT_VERSION = "profile-v10"
 
 # Given to the LLM as its system prompt -- it replaces the Claude Code
 # coding persona when running through the Agent SDK provider.

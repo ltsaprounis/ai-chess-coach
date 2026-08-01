@@ -1275,10 +1275,29 @@ def _render_move_sheet(detail: GameDetail) -> str:
     )
 
 
+# Printed above every repertoire dump. The rows are (colour, ECO, name)
+# groups and the moves beside them are the group's *commonest* line, not
+# a filter -- docs/06-coach.md says so under "Repertoire", and saying it
+# only there was not enough: a live narrative read
+# "[1.e4 d6 2.d4 ...], 32g, 33%" as "32 games where White played 2.d4",
+# and reported a prep hole at 33% where the real 2.d4 split is 46% over
+# 153 games. A move sequence printed beside a count reads as a filter
+# unless something says otherwise, so this says otherwise.
+_OPENING_STATS_PREAMBLE = (
+    "One row per (colour, ECO, name) group. The moves in brackets are "
+    "that group's MOST COMMON line, not a filter: transpositions reach "
+    "the same name by other move orders, so a row's games are not only "
+    "the games with those moves, and its score says nothing about that "
+    "move order specifically. To compare move orders, read games with "
+    "find_games; to test whether a difference is real, use "
+    f"{_COMPARE_TOOL_NAME}."
+)
+
+
 def _render_opening_stats(rows: list[OpeningStats]) -> str:
     if not rows:
         return "No repertoire data available."
-    lines: list[str] = []
+    lines: list[str] = [_OPENING_STATS_PREAMBLE, ""]
     for r in rows:
         role = "faced" if r.faced else "chosen"
         score = (r.wins + r.draws / 2) / r.games * 100 if r.games else 0.0
