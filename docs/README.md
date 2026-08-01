@@ -189,11 +189,14 @@ class PlayerReport(BaseModel):
     terminations: list[TerminationStats] # how games actually ended
     opponents: OpponentStats | None      # score vs stronger/weaker
     color_records: dict[Color, Record]   # score as White / as Black
-    best_win: BestWin | None             # strongest opponent beaten
+    best_win: BestWin | None             # the biggest upset, not the
+                                         # highest-rated opponent beaten
     streaks: StreakStats | None          # runs + the after-a-loss score
     openings: list[OpeningStats]
     error_patterns: list[ErrorPattern]   # tagged deterministically
     critical_positions: list[CriticalPosition]  # turning points
+    analyzed_window_start: int | None    # the analyzed subset's own
+    analyzed_window_end: int | None      # span, not the scope's
 ```
 
 Composites elided above for brevity (`CriticalPosition`,
@@ -201,7 +204,9 @@ Composites elided above for brevity (`CriticalPosition`,
 `TerminationStats`, `BestWin`, `StreakStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
 `RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`,
-`PlayerProfile`, `ProfileOpening`) also
+`PlayerProfile`, `ProfileOpening`, `RatingDelta`, `Drawdown`,
+`RatingTrajectory`, `ComparisonGroup`, `ComparisonInput`,
+`Comparison`) also
 live in `domain.py` — the component docs state their shapes where
 they are used. `PlayerProfile` is the coach's two-layer distillation
 of the report (docs/06-coach.md, "Player profile"), scoped to one

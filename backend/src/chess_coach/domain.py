@@ -640,7 +640,8 @@ class Comparison(BaseModel):
 
     `significant` is decided over the profile's whole comparison family
     by Benjamini-Hochberg, never per row, which is the entire point: a
-    profile makes up to fourteen of these, and judging each on its own
+    profile makes up to eight of these before a narrative run asks
+    anything, and judging each on its own
     manufactures roughly one spurious tendency every other student.
     """
 

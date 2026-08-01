@@ -2985,9 +2985,15 @@ def test_rating_peak_is_dated_at_the_first_game_that_reached_it() -> None:
     assert report.time_classes[0].rating_max_at == first
 
 
-def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
+def test_best_win_is_the_biggest_upset_not_the_highest_rated_opponent() -> None:
     """Losses to stronger players are not milestones, and the winner is
-    picked on the opponent's rating, not the player's own."""
+    picked on the rating *gap*, not the opponent's rating
+    (docs/06-coach.md, "Trajectory").
+
+    Here the two disagree: the 1750 is 250 above the student, the 1900
+    only 150, so picking on the opponent's rating alone -- what this
+    did before -- would name the wrong game.
+    """
     day = 1_780_000_000
     report = _volume_report(
         [
@@ -3013,11 +3019,21 @@ def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
                 opponent="weaker",
                 opponent_rating=1400,
             ),
+            # A higher-rated opponent beaten, but from a higher rating
+            # too -- a smaller upset than g-best.
+            _volume(
+                "g-higher-rated",
+                result="win",
+                end_time=day + 3 * _DAY,
+                opponent="highest",
+                opponent_rating=1900,
+                player_rating=1750,
+            ),
         ]
     )
 
     assert report.best_win is not None
-    assert report.best_win.game_id == "g-best"
+    assert report.best_win.game_id == "g-best"  # +250, not the 1900 at +150
     assert report.best_win.opponent == "strongest"
     assert report.best_win.opponent_rating == 1750
     assert report.best_win.player_rating == 1500
@@ -3026,6 +3042,30 @@ def test_best_win_is_the_strongest_opponent_actually_beaten() -> None:
 def test_best_win_is_none_without_a_win() -> None:
     report = _volume_report([_volume("g-1", result="loss", end_time=1_780_000_000)])
 
+    assert report.best_win is None
+
+
+def test_best_win_is_none_on_a_rating_matched_archive() -> None:
+    """Common and correct (docs/06-coach.md, "Trajectory"): chess.com
+    pairs by rating, so on the reference rapid archive the largest upset
+    over 1,925 games is +7 -- inside the band where the two players are
+    the same strength by this report's own definition, and a milestone
+    about nothing."""
+    day = 1_780_000_000
+    report = _volume_report(
+        [
+            _volume(
+                f"g-{i}",
+                result="win",
+                end_time=day + i * _DAY,
+                opponent_rating=1507,
+                player_rating=1500,
+            )
+            for i in range(5)
+        ]
+    )
+
+    assert report.record.wins == 5
     assert report.best_win is None
 
 

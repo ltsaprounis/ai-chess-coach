@@ -29,7 +29,8 @@ from chess_coach.domain import (
 )
 
 # Trend rows kept in the profile -- enough to show direction without
-# blowing render_profile_context's ~250-token budget (docs/06-coach.md).
+# blowing render_profile_context's budget, ~420 tokens of facts as
+# measured in docs/06-coach.md.
 _MONTHS_CAP = 6
 
 # Repertoire rows kept per color: chosen capped by games (what the player

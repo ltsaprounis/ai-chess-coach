@@ -8,12 +8,12 @@ measured on: 1,925 rapid games running 185 to 1479 over two years.
 from datetime import UTC, datetime
 
 from chess_coach.coach import (
+    WHITE_ADVANTAGE_POINTS,
     build_comparisons,
     build_trajectory,
     profile_window,
     window_spans_level_change,
 )
-from chess_coach.coach.comparisons import WHITE_ADVANTAGE_POINTS
 from chess_coach.domain import ComparisonInput, GameSummary, MonthStats, Record
 from tests.factories import make_game, summarize
 

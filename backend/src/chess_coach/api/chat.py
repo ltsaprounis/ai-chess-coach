@@ -159,18 +159,31 @@ class ApiChatToolkit:
         inner = await run_in_threadpool(
             game_record, self._db, self._username, self._filters(within, group)
         )
+        # Clamped: `group` is a subset of `within` whenever the model
+        # nests them as intended, but nothing forces it to -- asking for
+        # White within Black subtracts two disjoint sets and would hand
+        # back a Record with negative games, which no consumer of
+        # `Record` is prepared for. `coach/profile.py:_without` clamps
+        # for the same reason.
         rest = Record(
-            games=baseline.games - inner.games,
-            wins=baseline.wins - inner.wins,
-            losses=baseline.losses - inner.losses,
-            draws=baseline.draws - inner.draws,
+            games=max(0, baseline.games - inner.games),
+            wins=max(0, baseline.wins - inner.wins),
+            losses=max(0, baseline.losses - inner.losses),
+            draws=max(0, baseline.draws - inner.draws),
         )
         return inner, rest
 
     def _filters(self, *groups: ComparisonGroup | None) -> GameFilters:
-        """The thread's scope, narrowed by each group in turn. A later
-        group's value wins, which is what makes `within` then `group`
-        read as an intersection."""
+        """The toolkit's own scope, narrowed by each group in turn.
+
+        Narrowed, never widened. The window bounds **intersect** rather
+        than overwrite: `since`/`until` are model-supplied through the
+        tool schema, so an overwrite would let a run pass `since: 0` and
+        get an archive-wide comparison beside a windowed facts block --
+        exactly the one-document-two-denominators defect the toolkit was
+        scoped to close. The other fields are single-valued, so a later
+        group's value simply wins there.
+        """
         filters = GameFilters(
             time_class=self._time_class,
             since=self._since,
@@ -180,19 +193,23 @@ class ApiChatToolkit:
         for group in groups:
             if group is None:
                 continue
-            filters = filters.model_copy(
-                update={
-                    key: value
-                    for key, value in (
-                        ("color", group.color),
-                        ("opening_name_like", group.opening),
-                        ("time_class", group.time_class),
-                        ("since", group.since),
-                        ("until", group.until),
-                    )
-                    if value is not None
-                }
-            )
+            update: dict[str, object] = {
+                key: value
+                for key, value in (
+                    ("color", group.color),
+                    ("opening_name_like", group.opening),
+                    ("time_class", group.time_class),
+                )
+                if value is not None
+            }
+            if group.since is not None:
+                update["since"] = max(filters.since or 0, group.since)
+            if group.until is not None:
+                update["until"] = min(
+                    filters.until if filters.until is not None else group.until,
+                    group.until,
+                )
+            filters = filters.model_copy(update=update)
         return filters
 
     async def find_games(

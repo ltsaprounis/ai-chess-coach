@@ -4,7 +4,8 @@
 Several profile figures are differences between two disjoint buckets of
 the same games -- after a loss against not, White against Black, one
 opening family against the rest. They are noisy, a profile makes up to
-fourteen of them, and a prompt that hands a model a difference and
+eight of them before a narrative run asks anything, and a prompt
+that hands a model a difference and
 calls it a coaching problem gets a coin flip narrated as a tendency.
 
 This module is the guard. Records in, gaps and verdicts out; the
@@ -21,7 +22,7 @@ from chess_coach.domain import Comparison, ComparisonInput
 # accept being spurious. FDR rather than family-wise error because the
 # costs here are lopsided but not catastrophic -- a missed tendency
 # costs one bullet, a fabricated one is pasted into every later prompt.
-# Bonferroni over fourteen comparisons would demand a roughly 9-point
+# Bonferroni over a family this size would demand a roughly 9-point
 # colour split before saying anything, which reads as a profile that
 # has nothing to say rather than one being careful.
 COMPARISON_FDR = 0.05

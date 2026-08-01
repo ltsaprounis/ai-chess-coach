@@ -5,6 +5,7 @@ Mirrors test_coach.py's provider-stubbing patterns (the SDKs are stubbed;
 no real LLM ever runs).
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1092,6 +1093,63 @@ async def test_compare_tool_says_when_a_group_is_too_thin_to_compare() -> None:
 
     assert "too few to compare" in text
     assert "not a tendency" in text.lower()
+
+
+async def test_copilot_provider_complete_with_a_toolkit_offers_every_chat_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Copilot half of the agentic narrative run. Chat's tools report
+    progress onto a queue a streaming consumer drains and complete() has
+    no stream, so it runs its own drain task -- exercised here, along
+    with the roster, since the Claude path had three tests and this one
+    none.
+    """
+    captured: dict[str, object] = {}
+    script: list[_ScriptStep] = [("text", "This student plays the Pirc."), ("idle",)]
+    monkeypatch.setattr(
+        providers_module, "CopilotClient", _fake_chat_client(script, captured)
+    )
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    toolkit = _StubChatToolkit(analyst=stub_analyst, games=[_sample_game_summary()])
+
+    narrative = await provider.complete("write the profile", toolkit=toolkit)
+
+    assert narrative == "This student plays the Pirc."
+    available = cast("ToolSet", captured["create_available_tools"])
+    assert "custom:compare_groups" in available.to_list()
+    assert "custom:get_opening_stats" in available.to_list()
+    assert "custom:analyze_position" in available.to_list()
+
+
+async def test_copilot_provider_complete_leaves_no_task_behind_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUIDELINES.md: no fire-and-forget tasks. The drain task was
+    cancelled only on the success path, so every failed agentic run left
+    one suspended on `queue.get()` forever -- and a failed run is the
+    common case when the runtime is missing or not logged in.
+    """
+    before = len(asyncio.all_tasks())
+
+    class _Boom:
+        async def __aenter__(self) -> "_Boom":
+            raise RuntimeError("runtime missing")
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr(providers_module, "CopilotClient", _Boom)
+
+    provider = create_provider(LlmConfig(provider="github-copilot"))
+    toolkit = _StubChatToolkit(analyst=stub_analyst)
+
+    with pytest.raises(CoachProviderError):
+        await provider.complete("write the profile", toolkit=toolkit)
+
+    # Let anything still scheduled run, then check nothing lingers.
+    await asyncio.sleep(0)
+    assert len(asyncio.all_tasks()) <= before
 
 
 async def test_copilot_provider_chat_streams_text_tool_then_done(

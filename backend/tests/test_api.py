@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 import chess_coach.api.app as app_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
-from chess_coach.api.chat import ApiChatToolkit
 from chess_coach.api.runs import AnalysisRun
 from chess_coach.coach import (
     PROFILE_PROMPT_VERSION,
@@ -40,6 +39,7 @@ from chess_coach.domain import (
     ChatMessage,
     CoachAgent,
     Color,
+    ComparisonGroup,
     EvalLine,
     Game,
     GameAnalysis,
@@ -1842,10 +1842,8 @@ def test_profile_post_runs_agentically_with_the_full_toolkit(
     rather than paraphrasing the aggregates it was handed -- and the
     prompt says so, which is the whole point of the conditional clause.
 
-    The toolkit is unwindowed: the narrative is generated over the time
-    control's whole history and stored under that scope alone, so a tool
-    that could only see the profile's level window would contradict the
-    text it is helping write.
+    Its scope is pinned by the test below, which is the opposite of what
+    this docstring claimed before d9580d7 reversed the decision.
     """
     seed(db_path, [make_game(id="g-1")], analyzed={"g-1"})
     provider = stub_provider(stub_registry, "claude")
@@ -1878,9 +1876,13 @@ def test_profile_post_scopes_the_toolkit_to_the_facts_window(
     post(client, "/api/players/testuser/profile", json={})
 
     toolkit = provider.complete_toolkits[-1]
-    assert isinstance(toolkit, ApiChatToolkit)
+    assert toolkit is not None
     facts = get(client, "/api/players/testuser/profile", params={}).json()["profile"]
-    assert toolkit._since == facts["window_start"]  # pyright: ignore[reportPrivateUsage]
+    # Through the seam, not the attribute: whatever the window turned
+    # out to be, a comparison the model asks for must count the same
+    # games the facts block states.
+    left, right = asyncio.run(toolkit.compare_games(ComparisonGroup()))
+    assert left.games + right.games == facts["games_in_scope"]
 
 
 def test_profile_post_persists_and_a_subsequent_get_sees_it(

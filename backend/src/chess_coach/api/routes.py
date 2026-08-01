@@ -985,7 +985,18 @@ def _load_profile_facts(
     archive = list_game_summaries(
         db, username, since=since, until=until, time_class=time_class
     )
-    trajectory = build_trajectory(archive)
+    # Trajectory ignores the caller's window as well as the level one:
+    # both renderers say it covers "the whole archive in this time
+    # control", and under a 90-day page filter that would have been an
+    # overstatement of 90 days of games. Its own query, because it is
+    # the one figure whose whole point is to outlive every window
+    # (docs/06-coach.md, "Trajectory"); the rows are light and carry no
+    # PGN, which is what makes a second pass affordable.
+    trajectory = build_trajectory(
+        archive
+        if since is None and until is None
+        else list_game_summaries(db, username, time_class=time_class)
+    )
     archive_report = build_report(username, [], all_games=archive)
     level_since = profile_window(archive_report.months)
     spans_change = window_spans_level_change(archive_report.months, level_since)
@@ -1058,9 +1069,19 @@ def player_profile(
             generated_at=cached.created_at,
             games_covered=cached.profile.games_covered,
         ),
-        # The narrative's scope, not the request's: no window, since that
-        # is how POST generates it.
-        narrative_games_now=count_analyzed_games(db, user, time_class=time_class),
+        # The narrative's own scope, which is the *level window* POST
+        # generates it over -- not the request's window, and no longer
+        # "no window at all". Counting unwindowed here compared a
+        # windowed `games_covered` against an archive-wide total, so on
+        # any player whose analysis reaches past the window the banner
+        # was permanently on and regenerating never cleared it. The
+        # stored facts carry the bound they were built with.
+        narrative_games_now=count_analyzed_games(
+            db,
+            user,
+            since=cached.profile.window_start,
+            time_class=time_class,
+        ),
     )
 
 
@@ -1087,10 +1108,12 @@ async def regenerate_player_profile(
     with the same shape as `GET`. 409 when there are no analyzed games
     to describe.
 
-    Generated over the time control's **full** history, never a window:
+    Scoped to the student's current level, never to a caller window:
     the narrative is the durable artifact other prompts embed, and one
     written over "the last 30 days" would be silently wrong the moment
-    those 30 days moved. Time control is the one scope it carries.
+    those 30 days moved. The level window moves only when the student's
+    level does (docs/06-coach.md, "Window"), and time control remains
+    the one scope the stored row is keyed by.
     """
     agent_id = cfg.coach.default_agent
     if body is not None and body.agent_id is not None:

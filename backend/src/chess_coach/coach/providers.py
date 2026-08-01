@@ -1,6 +1,7 @@
 """LLM providers behind the CoachProvider seam (docs/06-coach.md)."""
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
@@ -96,7 +97,7 @@ _ANALYZE_TOOL_DESCRIPTION = (
     "best reply."
 )
 
-# The chat toolkit's other three tools (docs/06-coach.md, "Chat" --
+# The chat toolkit's other tools (docs/06-coach.md, "Chat" --
 # "Tools"): read-only lookups over the thread's player, pre-scoped by the
 # API layer's ChatToolkit implementation -- the model passes filters,
 # never a username.
@@ -248,7 +249,7 @@ _COMPARE_TOOL_SCHEMA: dict[str, Any] = {
 
 # What a chat tool call returns once _CHAT_MAX_TURNS's grace round (and
 # every runaway call after it) is spent, in place of doing the real work --
-# mirrors _ENGINE_BUDGET_EXHAUSTED below but phrased for any of chat's four
+# mirrors _ENGINE_BUDGET_EXHAUSTED below but phrased for any of chat's
 # tools, not just the engine.
 _CHAT_BUDGET_EXHAUSTED = (
     "Tool-call budget for this message is exhausted — finish your answer "
@@ -668,7 +669,7 @@ class _ToolCallBudget:
     ClaudeAgentSdkProvider's `max_turns`), so CopilotSdkProvider counts
     calls itself and enforces the identical shape everywhere it needs a
     budget: complete()'s and explain()'s single engine tool, and chat()'s
-    four tools sharing one budget. Every call within `max_calls` is "ok";
+    tools sharing one budget. Every call within `max_calls` is "ok";
     the call at `max_calls + 1` is "grace" (one nudge to wrap up); every
     call after that is "cutoff" (the run must end).
     """
@@ -851,11 +852,17 @@ class CopilotSdkProvider:
                 "runtime installed and logged in? (python -m copilot "
                 "download-runtime, then copilot login via the CLI)"
             ) from exc
-
-        if drainer is not None:
-            # The run is over either way; the drainer only exists to
-            # translate a cutoff into `idle`, so it has no work left.
-            drainer.cancel()
+        finally:
+            # `finally`, not the success path: every `except` above
+            # re-raises, so cancelling after them left a task suspended
+            # on `queue.get()` forever on each failed agentic run
+            # (GUIDELINES.md, "no fire-and-forget tasks"). Awaiting the
+            # cancellation is what makes it tracked rather than merely
+            # signalled.
+            if drainer is not None:
+                drainer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await drainer
 
         if error is not None:
             raise error
@@ -1515,11 +1522,10 @@ async def _guarded_chat_tool_call(
     call: Callable[[], Awaitable[str]],
     on_call: Callable[[], None],
 ) -> ToolResult:
-    """Shared per-call plumbing for CopilotSdkProvider.chat's four tools:
+    """Shared per-call plumbing for CopilotSdkProvider.chat's tools:
     budget check, then either the wrap-up steer or a progress event
     followed by the real call. Generalizes explain()'s single-tool budget
-    handling (_ToolCallBudget) across chat's four tools sharing one
-    budget.
+    handling (_ToolCallBudget) across chat's tools sharing one budget.
 
     `on_call` drops the text narrated before this call, the same rule the
     other three providers' paths apply inline (docs/06-coach.md,

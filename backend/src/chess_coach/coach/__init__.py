@@ -1,6 +1,10 @@
 """Coach component — see docs/06-coach.md."""
 
-from chess_coach.coach.comparisons import COMPARISON_FDR, build_comparisons
+from chess_coach.coach.comparisons import (
+    COMPARISON_FDR,
+    WHITE_ADVANTAGE_POINTS,
+    build_comparisons,
+)
 from chess_coach.coach.context import MoveContext, build_move_context
 from chess_coach.coach.highlights import (
     HighlightMove,
@@ -45,6 +49,7 @@ __all__ = [
     "COMPARISON_FDR",
     "PROFILE_PROMPT_VERSION",
     "PROMPT_VERSION",
+    "WHITE_ADVANTAGE_POINTS",
     "WINDOW_DRIFT_POINTS",
     "WINDOW_MAX_MONTHS",
     "WINDOW_MIN_GAMES",

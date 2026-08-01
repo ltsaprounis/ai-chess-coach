@@ -449,6 +449,13 @@ the remaining games — which is what lets the instruction block's
 honesty rule actually bite. With no scope information (`None`
 throughout) the section renders as it always did.
 
+A count alone was not enough. `PlayerReport.analyzed_window_start`/
+`_end` carry the analyzed subset's own **span** beside the scope's,
+because on the reference archive the volume layer ran 22 months while
+the engine had reached only the last seven — which let a narrative
+call a seven-month quality figure the student's "whole span". Both
+profile renderers state it.
+
 The caveat **names which figures the shortfall touches**, rather than
 saying every figure below describes the analyzed span. That shorter
 wording was true when it was written and the next section made it
@@ -962,11 +969,13 @@ resolution, and a verdict. The rules:
   allowed for, since "within noise" against a baseline means "no more
   than everyone has", not "no difference".
 - **Benjamini–Hochberg across the profile's whole family.** A profile
-  makes up to fourteen of these comparisons; at an unadjusted 2σ that
-  is 0.6 expected false positives per profile, so the guard would
-  manufacture roughly one spurious tendency every other student. BH
-  controls the false-discovery rate, which is the right error to
-  control here — a missed tendency costs a bullet, a fabricated one is
+  makes up to eight of these comparisons — tilt, colour, and up to
+  three chosen opening families per colour — plus one for every
+  `compare_groups` call a narrative run makes, which is why the tool
+  reports the family size back. At an unadjusted 2σ that is roughly
+  one spurious tendency every two or three students before the run
+  asks anything at all. BH controls the false-discovery rate, which is
+  the right error to control here — a missed tendency costs a bullet, a fabricated one is
   pasted into every later prompt.
 - **The verdict is rendered, the arithmetic is not.** Both renderers
   state "within noise" or the plain difference; neither prints sigmas
@@ -1000,10 +1009,10 @@ Three properties make it a guard rather than a convenience:
   comparison the profile already made *plus* every one this run has
   requested, so a run that fishes raises its own bar. The result states
   the family size, and it is the honest answer to "can I just ask
-  fourteen more ways": yes, and each answer gets harder to earn.
+  more ways": yes, and each answer gets harder to earn.
 
 A verdict can therefore change between calls, and that is correct: BH
-is a property of the family, so the fourteenth question genuinely does
+is a property of the family, so a later question genuinely does
 change what the first one supports.
 
 Tilt stays precomputed. It conditions on the *previous* game's result,
@@ -1032,6 +1041,11 @@ with it: `games_covered` is the analyzed sample behind the quality
 figures, `games_in_scope` every stored game behind the volume ones.
 Distillation rules:
 
+- Repertoire rows carry `opening_acpl` and `avg_cp_loss` as well as
+  games and score. Score alone cannot tell a system won from even
+  positions from one survived out of the book — 48% at 0.32 pawns a
+  move is a different problem from 48% at 0.21 — and that contrast is
+  the sharpest repertoire signal the data holds.
 - Repertoire rows reuse the family rollup defined under "Repertoire"
   above — partition by `faced`, chosen rolled up by (color, system),
   faced by (color, name root), move-weighted throughout, the 5+ game
