@@ -1,6 +1,7 @@
 """API-layer integration tests (docs/07-api.md) — stubbed ingestion."""
 
 import asyncio
+import logging
 import threading
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator
@@ -13,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import chess_coach.api.app as app_module
+import chess_coach.api.chat as chat_module
 import chess_coach.api.routes as routes
 from chess_coach.api import create_app
 from chess_coach.api.runs import AnalysisRun
@@ -44,11 +46,15 @@ from chess_coach.domain import (
     Game,
     GameAnalysis,
     GameDetail,
+    GameSearchPage,
     GameSummary,
     Opening,
     OpeningStats,
     PlayerProfile,
     RepertoireGame,
+    ScanEventSpec,
+    ScanOutcome,
+    ScanSpec,
     TimeClass,
 )
 from chess_coach.engine import (
@@ -2836,7 +2842,7 @@ def test_chat_toolkit_find_games_scoped_to_thread_username(
     found: list[GameSummary] = []
 
     async def probe(toolkit: ChatToolkit) -> None:
-        found.extend(await toolkit.find_games(opponent="rival"))
+        found.extend((await toolkit.find_games(opponent="rival")).games)
 
     provider.chat_toolkit_probe = probe
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
@@ -2856,12 +2862,42 @@ def test_chat_toolkit_find_games_limit_is_capped(
     found: list[GameSummary] = []
 
     async def probe(toolkit: ChatToolkit) -> None:
-        found.extend(await toolkit.find_games(limit=9999))
+        found.extend((await toolkit.find_games(limit=9999)).games)
 
     provider.chat_toolkit_probe = probe
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     assert 0 < len(found) < 30  # capped well below the model's own ask
+
+
+def test_chat_toolkit_find_games_total_and_offset_paging(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """`total` counts beyond the page (docs/06-coach.md, "Chat"), and
+    `offset` walks it: two pages of the same filters, newest first,
+    together cover the whole match with no overlap."""
+    seed(
+        db_path,
+        [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(7)],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    pages: list[GameSearchPage] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        pages.append(await toolkit.find_games(limit=3, offset=0))
+        pages.append(await toolkit.find_games(limit=3, offset=3))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    first, second = pages
+    assert first.total == 7
+    assert second.total == 7
+    assert first.offset == 0
+    assert second.offset == 3
+    assert [g.id for g in first.games] == ["g-6", "g-5", "g-4"]
+    assert [g.id for g in second.games] == ["g-3", "g-2", "g-1"]
 
 
 def test_chat_toolkit_opening_stats_uses_the_thread_window(
@@ -2895,6 +2931,214 @@ def test_chat_toolkit_opening_stats_uses_the_thread_window(
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     assert [o.eco for o in found] == ["D00"]
+
+
+# --- toolkit: scan_games denominators, caps, cross-player guard ----------
+
+# A short real game ending in White's kingside castle -- `castled` is a
+# moves-only event (docs/06-coach.md, "Chat"), so it needs no stored evals
+# and matches deterministically regardless of whether a game is analyzed.
+_CASTLE_MOVES = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "O-O"]
+
+
+def test_chat_toolkit_scan_games_moves_only_denominators(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """A moves-only spec scans analyzed and unanalyzed games alike: the
+    unanalyzed ones count toward `unverified_scanned`, never
+    `skipped_unanalyzed` (docs/06-coach.md, "Chat")."""
+    games = [
+        make_game(id=f"g-{i}", username="testuser", san_moves=_CASTLE_MOVES, end_time=i)
+        for i in range(5)
+    ]
+    seed(db_path, games, analyzed={"g-0", "g-1", "g-2"})
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 5
+    assert outcome.scanned == 5
+    assert outcome.skipped_unanalyzed == 0
+    assert outcome.unverified_scanned == 2  # g-3, g-4: not in `analyzed`
+    assert outcome.truncated is False
+    assert len(outcome.matches) == 5  # every game castles at ply 7
+
+
+def test_chat_toolkit_scan_games_eval_reading_denominators(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """An eval-reading spec (`comeback`) restricts the candidate fetch to
+    analyzed games: the unanalyzed ones are excluded from `scanned` and
+    counted as `skipped_unanalyzed` instead, and `unverified_scanned` is
+    always 0 there since nothing unverified was fetched at all."""
+    games = [
+        make_game(id=f"g-{i}", username="testuser", san_moves=_CASTLE_MOVES, end_time=i)
+        for i in range(5)
+    ]
+    seed(db_path, games, analyzed={"g-0", "g-1", "g-2"})
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="comeback")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 5
+    assert outcome.scanned == 3  # only the analyzed candidates were fetched
+    assert outcome.skipped_unanalyzed == 2
+    assert outcome.unverified_scanned == 0
+
+
+def test_chat_toolkit_scan_games_truncated_flips_past_the_candidate_cap(
+    client: TestClient,
+    db_path: Path,
+    stub_registry: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`truncated` tells the model the candidate cap actually cut the
+    fetch short of `eligible` -- shrink the cap so a small fixture set
+    can exercise it without seeding hundreds of games."""
+    monkeypatch.setattr(chat_module, "_SCAN_CANDIDATE_CAP", 2)
+    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(5)]
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 5
+    assert outcome.scanned == 2  # the shrunk cap, not the true eligible count
+    assert outcome.truncated is True
+
+
+def test_chat_toolkit_scan_games_not_truncated_under_the_cap(
+    client: TestClient,
+    db_path: Path,
+    stub_registry: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_module, "_SCAN_CANDIDATE_CAP", 5)
+    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(5)]
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 5
+    assert outcome.scanned == 5
+    assert outcome.truncated is False
+
+
+def test_chat_toolkit_scan_games_match_limit_clamps_to_server_cap(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """The model's own `limit` is capped server-side the same way
+    `find_games`' is, independent of how many games actually match."""
+    games = [
+        make_game(id=f"g-{i}", username="testuser", san_moves=_CASTLE_MOVES, end_time=i)
+        for i in range(30)
+    ]
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec, limit=9999))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.scanned == 30
+    assert len(outcome.matches) == 25  # _SCAN_MATCH_CAP, not the model's ask
+
+
+def test_chat_toolkit_scan_games_cross_player_guard(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """A thread scoped to one player never scans another's games -- held
+    by construction (`scan_candidates`/`game_record` take the toolkit's
+    own username), unlike `get_game`'s explicit id check."""
+    seed(
+        db_path,
+        [
+            make_game(id="mine", username="testuser", san_moves=_CASTLE_MOVES),
+            make_game(
+                id="theirs",
+                username="rival",
+                opponent="testuser",
+                san_moves=_CASTLE_MOVES,
+            ),
+        ],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 1
+    assert [m.game.id for m in outcome.matches] == ["mine"]
+
+
+def test_chat_toolkit_scan_games_logs_wall_time(
+    client: TestClient,
+    db_path: Path,
+    stub_registry: dict[str, object],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The design doc gates a future cache decision on this number
+    (docs/future-improvements/coach-game-search.md), so it must actually
+    be emitted."""
+    seed(db_path, [make_game(id="g-1", username="testuser", san_moves=_CASTLE_MOVES)])
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        await toolkit.scan_games(spec)
+
+    provider.chat_toolkit_probe = probe
+    with caplog.at_level(logging.INFO, logger="chess_coach.api.chat"):
+        post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    assert any("scan_games" in record.message for record in caplog.records)
 
 
 # --- profile scoping (docs/07-api.md, "Player profile") ------------------

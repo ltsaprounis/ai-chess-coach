@@ -152,29 +152,39 @@ def _is_brilliant(
     if move_eval.cp_loss > thresholds.best_tolerance_cp:
         return False
 
-    before_cp, before_mate = _eval_before(evals, idx)
-    before_pov = _pov_cp(before_cp, before_mate, player_is_white)
+    before_cp, before_mate = eval_before(evals, idx)
+    before_pov = pov_cp(before_cp, before_mate, player_is_white)
     if before_pov > thresholds.winning_cap_cp:
         return False
 
-    after_pov = _pov_cp(move_eval.eval_cp, move_eval.eval_mate, player_is_white)
+    after_pov = pov_cp(move_eval.eval_cp, move_eval.eval_mate, player_is_white)
     if after_pov < thresholds.sound_floor_cp:
         return False
 
     return _is_real_sacrifice(board_before, move, thresholds)
 
 
-def _eval_before(evals: list[MoveEval], idx: int) -> tuple[int | None, int | None]:
+def eval_before(evals: list[MoveEval], idx: int) -> tuple[int | None, int | None]:
     """The previous ply's stored eval; the game's first move counts as
-    equal (docs/06-coach.md)."""
+    equal (docs/06-coach.md).
+
+    Promoted out of underscore-privacy so the sacrifice scan event
+    (coach/scan.py, same component) can compute `balanced_before` with
+    the identical rule rather than a second implementation.
+    """
     if idx == 0:
         return None, None
     prev = evals[idx - 1]
     return prev.eval_cp, prev.eval_mate
 
 
-def _pov_cp(cp: int | None, mate: int | None, player_is_white: bool) -> int:
-    """Fold a white-POV eval to the player's own POV, mate at +/-MATE_SCORE."""
+def pov_cp(cp: int | None, mate: int | None, player_is_white: bool) -> int:
+    """Fold a white-POV eval to the player's own POV, mate at +/-MATE_SCORE.
+
+    Promoted out of underscore-privacy for the same reason as
+    `eval_before` -- the sacrifice scan event's `sound`/`balanced_before`
+    annotations are this exact fold.
+    """
     if mate is not None:
         folded = MATE_SCORE if mate > 0 else -MATE_SCORE
     elif cp is not None:
@@ -195,36 +205,51 @@ def _is_real_sacrifice(
     handled for free) rather than a hand-rolled attacker count.
     """
     captured_by_move = (
-        _captured_value(board_before, move) if board_before.is_capture(move) else 0
+        captured_value(board_before, move) if board_before.is_capture(move) else 0
     )
     board_before.push(move)
     try:
-        opponent_gain = _best_exchange_gain(board_before)
+        opponent_gain = best_exchange_gain(board_before)
     finally:
         board_before.pop()
     return opponent_gain - captured_by_move >= thresholds.sac_points
 
 
-def _best_exchange_gain(board: chess.Board) -> int:
+def best_exchange_gain(board: chess.Board) -> int:
     """`board.turn`'s best net gain from any capture target on the board,
-    each exchange played out by `_see_gain`. Zero with no legal capture --
-    declining every exchange is itself always an option."""
+    each exchange played out by `see_gain`. Zero with no legal capture --
+    declining every exchange is itself always an option.
+
+    Thin wrapper over `best_exchange_gain_target` for callers that only
+    need the number, not which square it came from.
+    """
+    return best_exchange_gain_target(board)[0]
+
+
+def best_exchange_gain_target(board: chess.Board) -> tuple[int, chess.Square | None]:
+    """As `best_exchange_gain`, plus which target square produced the best
+    gain -- the sacrifice scan event reads the piece standing there to
+    resolve the offered piece's tier (docs/06-coach.md, "Chat"). `None`
+    with no legal capture, matching the zero gain in that case.
+    """
     targets = {m.to_square for m in board.legal_moves if board.is_capture(m)}
     if not targets:
-        return 0
-    return max(_see_gain(board, square) for square in targets)
+        return 0, None
+    gains = {square: see_gain(board, square) for square in targets}
+    best_square = max(gains, key=lambda square: gains[square])
+    return gains[best_square], best_square
 
 
-def _see_gain(board: chess.Board, square: chess.Square) -> int:
+def see_gain(board: chess.Board, square: chess.Square) -> int:
     """Net material `board.turn` gains from an optimal capture sequence on
     `square`: always the least valuable attacker first, and either side
     may decline to continue when that nets more (docs/06-coach.md)."""
     move = _least_valuable_capture(board, square)
     if move is None:
         return 0
-    gained = _captured_value(board, move)
+    gained = captured_value(board, move)
     board.push(move)
-    net = gained - _see_gain(board, square)
+    net = gained - see_gain(board, square)
     board.pop()
     return max(0, net)
 
@@ -249,15 +274,27 @@ def _attacker_value(board: chess.Board, move: chess.Move) -> int:
     return PIECE_POINTS.get(piece.symbol().lower(), 0) if piece else 0
 
 
-def _captured_value(board: chess.Board, move: chess.Move) -> int:
-    """The value of the piece `move` captures. En passant displaces the
-    captured pawn off `to_square`; a promotion capture simply counts the
-    captured piece's own value, not the promoted piece's."""
+def captured_piece(board: chess.Board, move: chess.Move) -> chess.Piece | None:
+    """The piece `move` captures, or None if it captures nothing. En
+    passant displaces the captured pawn off `to_square`; a promotion
+    capture simply names the captured piece, not the promoted one.
+
+    Split out from `captured_value` so the sacrifice scan event (same
+    component, coach/scan.py) can name the captured piece in a match's
+    detail line ("gave the queen for a bishop") without re-deriving the
+    square logic.
+    """
     if board.is_en_passant(move):
         captured_square = chess.square(
             chess.square_file(move.to_square), chess.square_rank(move.from_square)
         )
     else:
         captured_square = move.to_square
-    captured = board.piece_at(captured_square)
+    return board.piece_at(captured_square)
+
+
+def captured_value(board: chess.Board, move: chess.Move) -> int:
+    """The value of the piece `move` captures, zero if it captures
+    nothing recognized."""
+    captured = captured_piece(board, move)
     return PIECE_POINTS.get(captured.symbol().lower(), 0) if captured else 0

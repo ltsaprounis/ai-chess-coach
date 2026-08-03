@@ -1839,7 +1839,23 @@ _CHAT_INSTRUCTIONS = (
     "link it with an app-relative markdown reference in the form "
     "`[text](/games/{id}?ply={n})`, using only a game id a tool result "
     "returned in this conversation -- never an id you have not seen from "
-    "a tool result, and never a raw URL."
+    "a tool result, and never a raw URL.\n"
+    "- **Coverage honesty.** When you answer from a find_games or "
+    "scan_games result, state its own totals and denominators -- how "
+    "many matched, how many were scanned, how many had no analysis -- "
+    "and offer to widen the search rather than presenting a partial "
+    "look as the whole picture. Matches are EXAMPLES to read, never a "
+    "tendency: only compare_groups establishes one.\n"
+    "- **Dates.** Game times are stored as UTC epoch seconds. When the "
+    'student names a calendar day ("the game on March 7th"), widen the '
+    "search by a day on each side before concluding nothing matches -- "
+    "a late-evening game in their own timezone can land on the next UTC "
+    'day, and "no such game" for one they vividly remember is the worst '
+    "answer available.\n"
+    "- **Event fit.** When no scan_games event or chain matches what "
+    'the student is asking ("games where I slowly strangled a knight"), '
+    "say so plainly and fall back to metadata search plus reading "
+    "rather than stretching the nearest event to cover it."
 )
 
 

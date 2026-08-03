@@ -235,6 +235,17 @@ class ChatToolkit(Protocol):
                          since: int | None = None,
                          until: int | None = None,
                          limit: int = 10) -> ScanOutcome
+
+# The scan event library behind `scan_games` (see "Chat" > "Tools"):
+# pure functions over ScanCandidate, no I/O, no engine. The API layer
+# fetches candidates (storage's scan_candidates) and calls run_scan;
+# spec_needs_evals says whether the sequence reads stored evals
+# (comeback, eval_swing), which is what restricts that fetch -- and
+# its denominators -- to analyzed games. Event semantics live here,
+# with one owner.
+def run_scan(candidates: list[ScanCandidate],
+             spec: ScanSpec) -> list[ScanMatch]
+def spec_needs_evals(spec: ScanSpec) -> bool
     # The comparison guard, exposed so a run cannot obtain an unjudged
     # percentage (see "Reading a comparison"). Returns the group's
     # record and the rest of `within`, computed by subtraction -- the

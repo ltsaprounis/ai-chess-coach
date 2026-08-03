@@ -31,9 +31,11 @@ from copilot.tools import Tool, ToolInvocation, ToolResult
 from pydantic import BaseModel
 
 from chess_coach.coach.comparisons import build_comparisons
+from chess_coach.coach.context import build_move_context
 from chess_coach.coach.prompt import (
     CHAT_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
+    format_cp_loss,
     format_eval,
     render_chat_prompt,
 )
@@ -44,11 +46,16 @@ from chess_coach.domain import (
     ComparisonInput,
     EvalLine,
     GameDetail,
-    GameSummary,
+    GameSearchPage,
     LlmConfig,
+    MoveEval,
     OpeningStats,
     Record,
     Result,
+    ScanEventSpec,
+    ScanMatch,
+    ScanOutcome,
+    ScanSpec,
     TimeClass,
 )
 
@@ -104,19 +111,28 @@ _ANALYZE_TOOL_DESCRIPTION = (
 _FIND_GAMES_TOOL_NAME = "find_games"
 _GET_GAME_TOOL_NAME = "get_game"
 _GET_OPENING_STATS_TOOL_NAME = "get_opening_stats"
+_SCAN_GAMES_TOOL_NAME = "scan_games"
 _COMPARE_TOOL_NAME = "compare_groups"
 
 _FIND_GAMES_TOOL_DESCRIPTION = (
     "Search the student's own stored games by opponent, opening, result, "
-    "time class, or date range (unix epoch seconds). Returns compact rows "
-    "-- date, color, opponent with ratings, result, time class, opening, "
-    "and the game id -- for at most `limit` games (default 10, most "
-    "recent first). Call get_game with a returned id for full detail."
+    "time class, or date range (unix epoch seconds) -- this filters game "
+    "METADATA, the row a game is stored under; it never looks at what "
+    "happened on the board (use scan_games for that). Returns the total "
+    "match count, then compact rows -- date, color, opponent with "
+    "ratings, result, time class, opening, an unanalyzed marker, and the "
+    "game id -- for `limit` games (default 10) starting at `offset`, "
+    "most recent first; page past the total with `offset`. Call get_game "
+    "with a returned id for full detail."
 )
 _GET_GAME_TOOL_DESCRIPTION = (
-    "Look up one of the student's games by id (as returned by find_games) "
-    "and return its identity plus a compact move sheet: every move in "
-    "SAN, with judgment and eval in pawns shown at the moves that matter."
+    "Look up one of the student's games by id (as returned by find_games "
+    "or scan_games) and return its identity plus a compact move sheet: "
+    "every move in SAN, with judgment and eval in pawns shown at the "
+    "moves that matter. Pass `ply` to also get a position block for that "
+    "one move -- FEN before and after, the played move, judgment, loss, "
+    "the engine's best move, and the eval either side -- which is what "
+    "hands analyze_position a position to check."
 )
 _GET_OPENING_STATS_TOOL_DESCRIPTION = (
     "Return the student's repertoire: one row per opening per color, "
@@ -124,6 +140,31 @@ _GET_OPENING_STATS_TOOL_DESCRIPTION = (
     "whether the name is the opponent's choice, the record, and the "
     "average loss in pawns per move for the opening phase and for the "
     "whole game."
+)
+_SCAN_GAMES_TOOL_DESCRIPTION = (
+    "Search the student's games by what happened on the board, not by "
+    "row metadata: find_games filters metadata (opponent, result, date); "
+    "scan_games replays every matching game's moves and looks for one to "
+    "three named events, in order, within the same game -- a single "
+    'event is the common case, more express a chain like "castled, '
+    'then sacrificed" (optionally within a ply window of the previous '
+    'step\'s match). Events: "sacrifice" (a real, SEE-gated piece '
+    'offer -- see `piece`/`sound_only`), "eval_swing" (a big '
+    "player-POV eval change across one ply -- see "
+    '`min_swing_pawns`/`direction`), "comeback" (won after standing '
+    '3+ pawns worse at some point), "delivered_mate" (won by '
+    'checkmate), "castled" (see `side`). Use it for questions no '
+    'metadata filter can answer, e.g. "games where I sacrificed my '
+    'queen" or "games I came back from losing badly."\n'
+    "Every result opens with its own denominators: how many games were "
+    "scanned out of how many eligible, how many of those had no stored "
+    "analysis (soundness on those is simply unverified, never assumed "
+    "either way), and whether the scan was truncated. Report those "
+    "numbers as given -- never estimate coverage yourself.\n"
+    'Matches are EXAMPLES to read, never a tendency: "2 of your last 10 '
+    'games show a sound sacrifice" says nothing about how often that '
+    "happens across the archive. compare_groups is the only tool that "
+    "establishes a tendency; scan dimensions must never be treated as one."
 )
 
 _COMPARE_TOOL_DESCRIPTION = (
@@ -148,39 +189,65 @@ _COMPARE_TOOL_DESCRIPTION = (
 
 _RESULT_VALUES = frozenset({"win", "loss", "draw"})
 _TIME_CLASS_VALUES = frozenset({"bullet", "blitz", "rapid", "daily"})
+_SCAN_PIECE_VALUES = ("queen", "rook", "minor")
+_SCAN_SIDE_VALUES = ("short", "long", "any")
+_SCAN_DIRECTION_VALUES = ("gained", "lost")
+# Every `ScanEventName` value now has a detector (coach/scan.py's
+# `_EVENT_DETECTORS`), so the schema exposes the domain's full set.
+_SCAN_EVENT_VALUES = (
+    "sacrifice",
+    "eval_swing",
+    "comeback",
+    "delivered_mate",
+    "castled",
+)
+
+# The metadata filters find_games and scan_games share verbatim
+# (docs/06-coach.md, "Chat": "Metadata filters mean exactly what
+# find_games' do"), so the two schemas cannot drift apart.
+_GAME_FILTER_PROPERTIES: dict[str, Any] = {
+    "opponent": {
+        "type": "string",
+        "description": "Filter by opponent username (substring match).",
+    },
+    "opening": {
+        "type": "string",
+        "description": "Filter by opening name (substring match).",
+    },
+    "result": {
+        "type": "string",
+        "enum": sorted(_RESULT_VALUES),
+        "description": "Filter by the student's result.",
+    },
+    "time_class": {
+        "type": "string",
+        "enum": sorted(_TIME_CLASS_VALUES),
+        "description": "Filter by time control class.",
+    },
+    "since": {
+        "type": "integer",
+        "description": "Only games ending at or after this unix epoch second.",
+    },
+    "until": {
+        "type": "integer",
+        "description": "Only games ending before this epoch second (exclusive).",
+    },
+}
 
 _FIND_GAMES_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "opponent": {
-            "type": "string",
-            "description": "Filter by opponent username (exact match).",
-        },
-        "opening": {
-            "type": "string",
-            "description": "Filter by opening name (substring match).",
-        },
-        "result": {
-            "type": "string",
-            "enum": sorted(_RESULT_VALUES),
-            "description": "Filter by the student's result.",
-        },
-        "time_class": {
-            "type": "string",
-            "enum": sorted(_TIME_CLASS_VALUES),
-            "description": "Filter by time control class.",
-        },
-        "since": {
-            "type": "integer",
-            "description": "Only games ending at or after this unix epoch second.",
-        },
-        "until": {
-            "type": "integer",
-            "description": "Only games ending before this epoch second (exclusive).",
-        },
+        **_GAME_FILTER_PROPERTIES,
         "limit": {
             "type": "integer",
             "description": "Maximum rows to return (default 10).",
+        },
+        "offset": {
+            "type": "integer",
+            "description": (
+                "Skip this many matches, newest first (default 0) -- page "
+                "further under the result's own total."
+            ),
         },
     },
     "required": [],
@@ -191,7 +258,16 @@ _GET_GAME_TOOL_SCHEMA: dict[str, Any] = {
         "game_id": {
             "type": "string",
             "description": "The game id, as returned by find_games.",
-        }
+        },
+        "ply": {
+            "type": "integer",
+            "description": (
+                "Optional 1-based ply (as in find_games/scan_games results) "
+                "to inspect: appends the position before and after that "
+                "move -- FEN, the played move, judgment, loss, the engine's "
+                "best move, and the eval either side."
+            ),
+        },
     },
     "required": ["game_id"],
 }
@@ -199,6 +275,93 @@ _GET_OPENING_STATS_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {},
     "required": [],
+}
+
+_SCAN_EVENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "event": {
+            "type": "string",
+            "enum": list(_SCAN_EVENT_VALUES),
+            "description": "The move-content event to match.",
+        },
+        "piece": {
+            "type": "string",
+            "enum": list(_SCAN_PIECE_VALUES),
+            "description": (
+                "sacrifice: the tier of piece given up, resolved from what "
+                'actually stood en prise. "rook" matches rook or queen; '
+                '"minor" matches minor or better -- a pure pawn offer '
+                'never matches any tier. Default "minor".'
+            ),
+        },
+        "sound_only": {
+            "type": "boolean",
+            "description": (
+                "sacrifice: drop matches where the player's eval after the "
+                "move is negative, on games that have analysis. On "
+                "unanalyzed games soundness is unknown, so the match is "
+                "kept either way. Default false."
+            ),
+        },
+        "min_swing_pawns": {
+            "type": "number",
+            "minimum": 1.0,
+            "description": (
+                "eval_swing: the minimum player-POV stored-eval change, in "
+                "pawns, across one ply (mate folds to a large score). "
+                "Requires analysis -- unanalyzed games never match this "
+                "event. Default 3.0."
+            ),
+        },
+        "direction": {
+            "type": "string",
+            "enum": list(_SCAN_DIRECTION_VALUES),
+            "description": (
+                'eval_swing: "gained" for a swing toward the player, "lost" '
+                'for one against them. Default "gained".'
+            ),
+        },
+        "side": {
+            "type": "string",
+            "enum": list(_SCAN_SIDE_VALUES),
+            "description": (
+                'castled: which side to match -- "short" (kingside), '
+                '"long" (queenside), or "any". Default "any".'
+            ),
+        },
+        "within_plies": {
+            "type": "integer",
+            "minimum": 1,
+            "description": (
+                "Steps after the first only: the maximum ply gap allowed "
+                "to the previous step's match. Omit for no limit."
+            ),
+        },
+    },
+    "required": ["event"],
+}
+_SCAN_GAMES_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "match": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": _SCAN_EVENT_SCHEMA,
+            "description": (
+                "An ordered sequence of one to three event conditions "
+                'within the same game -- a single event (e.g. [{"event": '
+                '"sacrifice", "piece": "queen"}]) is the common case.'
+            ),
+        },
+        **_GAME_FILTER_PROPERTIES,
+        "limit": {
+            "type": "integer",
+            "description": "Maximum matches to return (default 10).",
+        },
+    },
+    "required": ["match"],
 }
 
 _COMPARISON_GROUP_SCHEMA: dict[str, Any] = {
@@ -292,9 +455,27 @@ class ChatToolkit(Protocol):
         since: int | None = None,
         until: int | None = None,
         limit: int = 10,
-    ) -> list[GameSummary]: ...
+        offset: int = 0,
+    ) -> GameSearchPage: ...
     async def get_game(self, game_id: str) -> GameDetail | None: ...
     async def opening_stats(self) -> list[OpeningStats]: ...
+
+    # The event scan (docs/06-coach.md, "Chat" -- "Tools"): coach owns the
+    # event detectors and rendering; the API implementation owns the
+    # candidate fetch, the denominators, and the caps. Metadata filters
+    # mean exactly what find_games' do.
+    async def scan_games(
+        self,
+        spec: ScanSpec,
+        *,
+        opponent: str | None = None,
+        opening: str | None = None,
+        result: Result | None = None,
+        time_class: TimeClass | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 10,
+    ) -> ScanOutcome: ...
 
     # The comparison guard's data half (docs/06-coach.md, "Reading a
     # comparison"). Returns the group's record and the rest of `within`,
@@ -1201,7 +1382,8 @@ def _opt_time_class(value: Any) -> TimeClass | None:
 
 async def _call_find_games(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
     limit = args.get("limit")
-    games = await toolkit.find_games(
+    offset = args.get("offset")
+    page = await toolkit.find_games(
         opponent=_opt_str(args.get("opponent")),
         opening=_opt_str(args.get("opening")),
         result=_opt_result(args.get("result")),
@@ -1209,14 +1391,15 @@ async def _call_find_games(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
         since=_opt_int(args.get("since")),
         until=_opt_int(args.get("until")),
         limit=int(limit) if isinstance(limit, (int, float)) else 10,
+        offset=int(offset) if isinstance(offset, (int, float)) else 0,
     )
-    return _render_game_summaries(games)
+    return _render_game_summaries(page)
 
 
 async def _call_get_game(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
     game_id = str(args.get("game_id", ""))
     detail = await toolkit.get_game(game_id)
-    return _render_game_detail(detail, game_id)
+    return _render_game_detail(detail, game_id, _opt_int(args.get("ply")))
 
 
 async def _call_opening_stats(toolkit: ChatToolkit) -> str:
@@ -1224,22 +1407,38 @@ async def _call_opening_stats(toolkit: ChatToolkit) -> str:
     return _render_opening_stats(rows)
 
 
-def _render_game_summaries(games: list[GameSummary]) -> str:
-    if not games:
+def _move_prefix(ply: int) -> str:
+    move_number = (ply + 1) // 2
+    return f"{move_number}." if ply % 2 == 1 else f"{move_number}..."
+
+
+def _render_game_summaries(page: GameSearchPage) -> str:
+    if not page.games:
+        if page.total > 0:
+            # An offset past the end must not read as "no games": the
+            # model was just told the total, and losing it here is the
+            # dishonesty the header exists to prevent.
+            return f"Matched {page.total} games; nothing at offset {page.offset}."
         return "No games matched."
+    first = page.offset + 1
+    last = page.offset + len(page.games)
+    header = f"Matched {page.total} games; showing {first}-{last}, newest first."
     rows: list[str] = []
-    for g in games:
+    for g in page.games:
         date = _format_date(g.end_time)
         opening = f", {g.opening.name}" if g.opening else ""
+        unanalyzed = "" if g.analyzed else ", unanalyzed"
         rows.append(
             f"- {date}, {g.color} vs {g.opponent} "
             f"({g.player_rating} vs {g.opponent_rating}), {g.result}, "
-            f"{g.time_class}{opening} -- id `{g.id}`"
+            f"{g.time_class}{opening}{unanalyzed} -- id `{g.id}`"
         )
-    return "\n".join(rows)
+    return "\n".join([header, *rows])
 
 
-def _render_game_detail(detail: GameDetail | None, game_id: str) -> str:
+def _render_game_detail(
+    detail: GameDetail | None, game_id: str, ply: int | None = None
+) -> str:
     if detail is None:
         return f"No game found for id `{game_id}`."
     date = _format_date(detail.end_time)
@@ -1249,16 +1448,25 @@ def _render_game_detail(detail: GameDetail | None, game_id: str) -> str:
         f"{date} ({detail.time_class}), result: {detail.result}{opening}. "
         f"id `{detail.id}`."
     )
-    return f"{header}\n{_render_move_sheet(detail)}"
+    sections = [header, _render_move_sheet(detail)]
+    if ply is not None:
+        sections.append(_render_position_block(detail, ply))
+    return "\n".join(sections)
 
 
 def _numbered_san(san_moves: list[str]) -> list[str]:
-    tokens: list[str] = []
-    for ply, san in enumerate(san_moves, start=1):
-        move_number = (ply + 1) // 2
-        prefix = f"{move_number}." if ply % 2 == 1 else f"{move_number}..."
-        tokens.append(f"{prefix}{san}")
-    return tokens
+    return [f"{_move_prefix(ply)}{san}" for ply, san in enumerate(san_moves, start=1)]
+
+
+def _worth_annotating(move_eval: MoveEval, san: str) -> bool:
+    """The move-sheet annotation rule (docs/06-coach.md, "Chat"): widened
+    from "not the engine's best" alone, since a sound sacrifice is by
+    definition engine-best and would otherwise render as bare SAN --
+    invisible to a student asking about it. Captures are detected from
+    the SAN token itself (no board replay needed here); mate scores are
+    always worth showing regardless of judgment.
+    """
+    return move_eval.judgment != "best" or "x" in san or move_eval.eval_mate is not None
 
 
 def _render_move_sheet(detail: GameDetail) -> str:
@@ -1267,18 +1475,55 @@ def _render_move_sheet(detail: GameDetail) -> str:
     evals_by_ply = {e.ply: e for e in detail.analysis.evals}
     tokens: list[str] = []
     for ply, san in enumerate(detail.san_moves, start=1):
-        move_number = (ply + 1) // 2
-        prefix = f"{move_number}." if ply % 2 == 1 else f"{move_number}..."
-        token = f"{prefix}{san}"
+        token = f"{_move_prefix(ply)}{san}"
         move_eval = evals_by_ply.get(ply)
-        if move_eval is not None and move_eval.judgment != "best":
-            token += (
-                f" ({move_eval.judgment}, "
-                f"{format_eval(move_eval.eval_cp, move_eval.eval_mate)})"
-            )
+        if move_eval is not None and _worth_annotating(move_eval, san):
+            eval_str = format_eval(move_eval.eval_cp, move_eval.eval_mate)
+            if move_eval.judgment == "best":
+                # A best-move annotation (a capture or a mate score) is
+                # the eval alone -- there is no judgment word for "best"
+                # to pair with it.
+                token += f" ({eval_str})"
+            else:
+                token += f" ({move_eval.judgment}, {eval_str})"
         tokens.append(token)
-    return "Moves (evals in pawns; only inaccuracies and worse annotated): " + " ".join(
-        tokens
+    return (
+        "Moves (evals in pawns; annotated on inaccuracies and worse, "
+        "captures, and mate scores): "
+    ) + " ".join(tokens)
+
+
+def _render_position_block(detail: GameDetail, ply: int) -> str:
+    """`get_game`'s optional `ply` addition (docs/06-coach.md, "Chat"):
+    the position before and after one move, which is what hands
+    `analyze_position` a position for any moment of any stored game.
+    Degrades to a one-line note on an unanalyzed game or an out-of-range
+    ply -- the rest of the move sheet still rendered above it.
+    """
+    analysis = detail.analysis
+    if analysis is None:
+        return f"Position at ply {ply}: not available -- this game is unanalyzed."
+    try:
+        ctx = build_move_context(detail, analysis, detail.opening, ply)
+    except ValueError as exc:
+        # build_move_context raises for an out-of-range ply AND for an
+        # in-range ply with no recorded eval; its own message names
+        # which, so don't overwrite it with a guess.
+        return f"Position at ply {ply}: not available -- {exc}."
+    evals_by_ply = {e.ply: e for e in analysis.evals}
+    move_eval = evals_by_ply[ply]
+    before = evals_by_ply.get(ply - 1)
+    before_str = format_eval(
+        before.eval_cp if before else None, before.eval_mate if before else None
+    )
+    after_str = format_eval(move_eval.eval_cp, move_eval.eval_mate)
+    return (
+        f"Position at ply {ply} ({ctx.san}):\n"
+        f"FEN before: `{ctx.fen_before}`\n"
+        f"FEN after: `{ctx.fen_after}`\n"
+        f"Judgment: {ctx.judgment}, loss {format_cp_loss(ctx.cp_loss)}\n"
+        f"Engine best move: {ctx.best_move}\n"
+        f"Eval before: {before_str}, eval after: {after_str}"
     )
 
 
@@ -1317,6 +1562,108 @@ def _render_opening_stats(rows: list[OpeningStats]) -> str:
     return "\n".join(lines)
 
 
+# --- scan_games (docs/06-coach.md, "Chat") ---------------------------------
+
+
+def _scan_event_spec(args: dict[str, Any]) -> ScanEventSpec:
+    """One `match` array entry as a `ScanEventSpec`, ignoring any field
+    the schema does not name for that call -- mirrors
+    `_comparison_group`'s stance on stray model-supplied fields.
+    """
+    fields: dict[str, Any] = {"event": args.get("event")}
+    for key in ("piece", "sound_only", "direction", "side"):
+        if args.get(key) is not None:
+            fields[key] = args[key]
+    min_swing = args.get("min_swing_pawns")
+    if isinstance(min_swing, (int, float)):
+        # Clamped alongside the schema minimums: not every provider
+        # enforces JSON-schema bounds, and a sub-pawn threshold (or a
+        # negative gap) degrades to spam rather than erroring.
+        fields["min_swing_pawns"] = max(1.0, float(min_swing))
+    within_plies = _opt_int(args.get("within_plies"))
+    if within_plies is not None:
+        fields["within_plies"] = max(1, within_plies)
+    return ScanEventSpec.model_validate(fields)
+
+
+async def _call_scan_games(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
+    match_args = args.get("match")
+    match_list = cast("list[Any]", match_args) if isinstance(match_args, list) else []
+    steps = [_scan_event_spec(cast("dict[str, Any]", step)) for step in match_list]
+    if not steps:
+        # An empty `match` would scan nothing and render as "no games
+        # matched" -- a wrong answer the model cannot distinguish from a
+        # real miss. Say what actually happened so it can correct.
+        return "scan_games needs at least one event in `match`; nothing was scanned."
+    limit = args.get("limit")
+    outcome = await toolkit.scan_games(
+        ScanSpec(match=steps),
+        opponent=_opt_str(args.get("opponent")),
+        opening=_opt_str(args.get("opening")),
+        result=_opt_result(args.get("result")),
+        time_class=_opt_time_class(args.get("time_class")),
+        since=_opt_int(args.get("since")),
+        until=_opt_int(args.get("until")),
+        limit=int(limit) if isinstance(limit, (int, float)) else 10,
+    )
+    return _render_scan_outcome(outcome)
+
+
+def _scan_preamble(outcome: ScanOutcome) -> str:
+    """The coverage-honesty statement every scan result opens with
+    (docs/06-coach.md, "Chat"): scanned vs eligible, how many of those
+    were unanalyzed (soundness on them is unverified, not assumed),
+    whether the candidate cap truncated the sweep, and -- only when it
+    happened at all -- how many more an eval-reading event had to skip
+    outright.
+    """
+    truncated = "yes" if outcome.truncated else "no"
+    # "all" belongs only to the untruncated case; a truncated sweep
+    # covered the newest slice, and saying "all" there would be the
+    # coverage lie this preamble exists to prevent.
+    scope = (
+        f"all {outcome.scanned}"
+        if not outcome.truncated
+        else (f"the newest {outcome.scanned}")
+    )
+    preamble = (
+        f"Scanned {scope} of {outcome.eligible} games "
+        f"matching the filters ({outcome.unverified_scanned} without "
+        f"analysis: soundness unverified; truncated: {truncated})."
+    )
+    if outcome.skipped_unanalyzed:
+        preamble += (
+            f" {outcome.skipped_unanalyzed} more without analysis could "
+            "not be scanned for this event at all."
+        )
+    return preamble
+
+
+def _render_scan_match(match: ScanMatch) -> str:
+    g = match.game
+    date = _format_date(g.end_time)
+    opening = f", {g.opening.name}" if g.opening else ""
+    unanalyzed = "" if g.analyzed else ", unanalyzed"
+    header = (
+        f"- {date}, {g.color} vs {g.opponent}, {g.result}, "
+        f"{g.time_class}{opening}{unanalyzed} -- id `{g.id}`"
+    )
+    hit_lines = [
+        f"  {_move_prefix(hit.ply)}{hit.san}: {hit.detail} (`{hit.fen_before}`)"
+        for hit in match.hits
+    ]
+    return "\n".join([header, *hit_lines])
+
+
+def _render_scan_outcome(outcome: ScanOutcome) -> str:
+    lines = [_scan_preamble(outcome)]
+    if not outcome.matches:
+        lines.append("No games matched.")
+        return "\n".join(lines)
+    lines += [_render_scan_match(match) for match in outcome.matches]
+    return "\n".join(lines)
+
+
 def _chat_tool_names(toolkit: ChatToolkit) -> list[str]:
     names: list[str] = []
     if toolkit.analyst is not None:
@@ -1326,6 +1673,7 @@ def _chat_tool_names(toolkit: ChatToolkit) -> list[str]:
         _GET_GAME_TOOL_NAME,
         _GET_OPENING_STATS_TOOL_NAME,
         _COMPARE_TOOL_NAME,
+        _SCAN_GAMES_TOOL_NAME,
     ]
     return names
 
@@ -1347,6 +1695,8 @@ def _chat_tool_summary(block: ToolUseBlock) -> str:
         return "checking whether a difference is real"
     if name == _GET_OPENING_STATS_TOOL_NAME:
         return "looking up the repertoire"
+    if name == _SCAN_GAMES_TOOL_NAME:
+        return "scanning games for events"
     return f"calling {name}"
 
 
@@ -1379,6 +1729,15 @@ def _build_opening_stats_tool(toolkit: ChatToolkit) -> SdkMcpTool[Any]:
         return {"content": [{"type": "text", "text": text}]}
 
     return get_opening_stats
+
+
+def _build_scan_games_tool(toolkit: ChatToolkit) -> SdkMcpTool[Any]:
+    @tool(_SCAN_GAMES_TOOL_NAME, _SCAN_GAMES_TOOL_DESCRIPTION, _SCAN_GAMES_TOOL_SCHEMA)
+    async def scan_games(args: dict[str, Any]) -> dict[str, Any]:
+        text = await _call_scan_games(toolkit, args)
+        return {"content": [{"type": "text", "text": text}]}
+
+    return scan_games
 
 
 class _ComparisonLedger:
@@ -1501,6 +1860,7 @@ def _build_chat_tools(toolkit: ChatToolkit) -> list[SdkMcpTool[Any]]:
     tools.append(
         _build_compare_tool(toolkit, _ComparisonLedger(toolkit.prior_comparisons))
     )
+    tools.append(_build_scan_games_tool(toolkit))
     return tools
 
 
@@ -1674,6 +2034,27 @@ def _build_copilot_chat_tools(
         )
     )
     names.append(_GET_OPENING_STATS_TOOL_NAME)
+
+    async def handle_scan_games(invocation: ToolInvocation) -> ToolResult:
+        args = cast("dict[str, Any]", invocation.arguments or {})
+        return await _guarded_chat_tool_call(
+            queue,
+            budget,
+            "scanning games for events",
+            lambda: _call_scan_games(toolkit, args),
+            on_tool_call,
+        )
+
+    tools.append(
+        Tool(
+            name=_SCAN_GAMES_TOOL_NAME,
+            description=_SCAN_GAMES_TOOL_DESCRIPTION,
+            parameters=_SCAN_GAMES_TOOL_SCHEMA,
+            handler=handle_scan_games,
+            skip_permission=True,
+        )
+    )
+    names.append(_SCAN_GAMES_TOOL_NAME)
 
     available_tools = ToolSet()
     for name in names:

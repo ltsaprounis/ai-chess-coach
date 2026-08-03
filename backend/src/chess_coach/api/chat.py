@@ -6,6 +6,8 @@ wiring are sizeable on their own -- mirrors `runs.py`'s separation of
 state/logic from the HTTP surface.
 """
 
+import logging
+import time
 from typing import cast
 
 from fastapi import HTTPException
@@ -18,6 +20,8 @@ from chess_coach.coach import (
     build_report,
     render_game_chat_context,
     render_report_chat_context,
+    run_scan,
+    spec_needs_evals,
 )
 from chess_coach.domain import (
     ChatMessage,
@@ -25,12 +29,14 @@ from chess_coach.domain import (
     ComparisonGroup,
     EvalLine,
     GameDetail,
-    GameSummary,
+    GameSearchPage,
     OpeningStats,
     PlayerProfile,
     PlayerReport,
     Record,
     Result,
+    ScanOutcome,
+    ScanSpec,
     TimeClass,
 )
 from chess_coach.engine import EngineError
@@ -48,7 +54,10 @@ from chess_coach.storage import (
     list_game_summaries,
     list_games,
     opening_stats,
+    scan_candidates,
 )
+
+logger = logging.getLogger(__name__)
 
 # Threads cap here; the send-message route 409s and directs the student to
 # start a new thread (docs/archive/coach-chat.md, "Persistence and cost").
@@ -59,6 +68,17 @@ CHAT_MESSAGE_CAP = 40
 # model chooses its own window per call -- capped so an ambitious limit
 # can't render the whole archive into one tool result.
 _FIND_GAMES_LIMIT_CAP = 25
+
+# scan_games' candidate fetch cap: bounds the worst-case replay (plus SEE
+# for sacrifice steps) cost per call, however wide the model's own filters
+# are -- an unfiltered archive (thousands of games) never costs more than
+# this many replays. The outcome's `truncated` flag tells the model to
+# narrow the window instead of trusting a scan that stopped partway.
+_SCAN_CANDIDATE_CAP = 800
+
+# scan_games' match cap, independent of the candidate cap above: bounds the
+# tool-result size the same way _FIND_GAMES_LIMIT_CAP bounds find_games'.
+_SCAN_MATCH_CAP = 25
 
 
 def profile_for_game(
@@ -221,7 +241,14 @@ class ApiChatToolkit:
         since: int | None = None,
         until: int | None = None,
         limit: int = 10,
-    ) -> list[GameSummary]:
+        offset: int = 0,
+    ) -> GameSearchPage:
+        """The page plus its total (docs/06-coach.md, "Chat"): `list_games`
+        and `game_record` run over the identical `GameFilters`, so the
+        total can never drift from what the page actually shows -- both
+        share `_game_filter_clauses` in storage. Rendering is coach's job;
+        this returns the model.
+        """
         filters = GameFilters(
             opponent=opponent,
             opening_name_like=opening,
@@ -230,8 +257,111 @@ class ApiChatToolkit:
             since=since,
             until=until,
             limit=min(max(limit, 0), _FIND_GAMES_LIMIT_CAP),
+            offset=max(offset, 0),
         )
-        return await run_in_threadpool(list_games, self._db, self._username, filters)
+        games = await run_in_threadpool(list_games, self._db, self._username, filters)
+        record = await run_in_threadpool(game_record, self._db, self._username, filters)
+        return GameSearchPage(games=games, total=record.games, offset=filters.offset)
+
+    async def scan_games(
+        self,
+        spec: ScanSpec,
+        *,
+        opponent: str | None = None,
+        opening: str | None = None,
+        result: Result | None = None,
+        time_class: TimeClass | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 10,
+    ) -> ScanOutcome:
+        """The event scan (docs/06-coach.md, "Chat"): candidate fetch,
+        the outcome's denominators, and `run_scan` itself all run inside
+        one `run_in_threadpool` call, unlike every other tool on this
+        toolkit -- the replay-plus-SEE work is CPU-bound, so batching it
+        keeps the event loop free for SSE instead of bouncing back to it
+        between steps that don't need it.
+
+        Like `find_games`, the metadata filters are the model's own as
+        given, with no intersection against the toolkit's own
+        since/until/time_class -- unlike `_filters`, which narrows
+        `compare_games`' groups against the thread's scope. Cross-player
+        safety holds by construction here, not by an explicit check:
+        `scan_candidates` and `game_record` are both scoped by
+        `self._username`, so there is no id path across players the way
+        `get_game` has to guard against directly.
+
+        Denominators (docs/06-coach.md, "Chat"): `eligible` is every
+        stored game the metadata filters match, analyzed or not.
+        Sequences that read stored evals (`spec_needs_evals`) restrict
+        the candidate fetch to analyzed games and report the rest as
+        `skipped_unanalyzed`; moves-only sequences fetch everything up
+        to `_SCAN_CANDIDATE_CAP` and instead report `unverified_scanned`
+        -- the fetched candidates with no stored analysis, whose
+        eval-backed annotations render as unverified. `truncated` flags
+        when the candidate cap actually cut the fetch short of
+        `eligible`.
+        """
+        needs_evals = spec_needs_evals(spec)
+        match_cap = min(max(limit, 0), _SCAN_MATCH_CAP)
+
+        def make_filters(*, analyzed: bool | None, limit: int) -> GameFilters:
+            return GameFilters(
+                opponent=opponent,
+                opening_name_like=opening,
+                result=result,
+                time_class=time_class,
+                since=since,
+                until=until,
+                analyzed=analyzed,
+                limit=limit,
+            )
+
+        def scan() -> ScanOutcome:
+            start = time.monotonic()
+            candidates = scan_candidates(
+                self._db,
+                self._username,
+                make_filters(
+                    analyzed=True if needs_evals else None,
+                    limit=_SCAN_CANDIDATE_CAP,
+                ),
+            )
+            eligible = game_record(
+                self._db, self._username, make_filters(analyzed=None, limit=0)
+            ).games
+            skipped_unanalyzed = (
+                game_record(
+                    self._db, self._username, make_filters(analyzed=False, limit=0)
+                ).games
+                if needs_evals
+                else 0
+            )
+            scanned = len(candidates)
+            unverified_scanned = (
+                0
+                if needs_evals
+                else sum(1 for candidate in candidates if candidate.evals is None)
+            )
+            truncated = (eligible - skipped_unanalyzed) > scanned
+            matches = run_scan(candidates, spec)[:match_cap]
+            elapsed = time.monotonic() - start
+            logger.info(
+                "scan_games: %d candidates in %.2fs, %d matches",
+                scanned,
+                elapsed,
+                len(matches),
+            )
+            return ScanOutcome(
+                eligible=eligible,
+                scanned=scanned,
+                unverified_scanned=unverified_scanned,
+                skipped_unanalyzed=skipped_unanalyzed,
+                truncated=truncated,
+                matches=matches,
+            )
+
+        return await run_in_threadpool(scan)
 
     async def get_game(self, game_id: str) -> GameDetail | None:
         game = await run_in_threadpool(get_game, self._db, game_id)
