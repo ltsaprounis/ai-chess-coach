@@ -30,6 +30,7 @@ from chess_coach.storage.games import (
     list_games,
     list_players,
     opening_stats,
+    scan_candidates,
     set_opening,
     upsert_games,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "save_explanation",
     "save_player_profile",
     "save_report",
+    "scan_candidates",
     "set_opening",
     "upsert_games",
 ]

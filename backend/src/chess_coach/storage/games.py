@@ -19,6 +19,7 @@ from chess_coach.domain import (
     PlayerSummary,
     Record,
     Result,
+    ScanCandidate,
     TimeClass,
 )
 from chess_coach.storage.analyses import analysis_from_json, is_player_ply
@@ -33,9 +34,11 @@ class GameFilters(BaseModel):
     `AnalyzeRequest.limit` documents.
 
     `opening_name_like`, `opponent`, and `since`/`until` exist for the
-    coach chat toolkit's `find_games` tool (docs/archive/coach-chat.md),
-    which queries by what a student says — an
-    opponent's name, an opening's name — rather than by ECO code.
+    coach chat toolkit's `find_games` and `scan_games` tools
+    (docs/archive/coach-chat.md,
+    docs/archive/coach-game-search.md), which query by what
+    a student says — an opponent's name, an opening's name — rather
+    than by ECO code.
     `since`/`until` are an epoch-second window (`since` inclusive,
     `until` exclusive), the same semantics every other windowed query
     here uses.
@@ -43,7 +46,10 @@ class GameFilters(BaseModel):
 
     opening_eco: str | None = None
     opening_name_like: str | None = None  # case-insensitive substring
-    opponent: str | None = None  # case-insensitive exact match
+    # Case-insensitive substring, loosened from exact match in 2026-08:
+    # the filter's one consumer is a student half-remembering a
+    # username, and "ousaama" should find "ousaama78".
+    opponent: str | None = None
     color: Color | None = None
     result: Result | None = None
     time_class: TimeClass | None = None
@@ -140,8 +146,8 @@ def _game_filter_clauses(
         clauses.append("LOWER(g.opening_name) LIKE ? ESCAPE '\\'")
         params.append(f"%{_escape_like(filters.opening_name_like.lower())}%")
     if filters.opponent is not None:
-        clauses.append("LOWER(g.opponent) = LOWER(?)")
-        params.append(filters.opponent)
+        clauses.append("LOWER(g.opponent) LIKE ? ESCAPE '\\'")
+        params.append(f"%{_escape_like(filters.opponent.lower())}%")
     if filters.result is not None:
         clauses.append("g.result = ?")
         params.append(filters.result)
@@ -216,6 +222,48 @@ def game_record(db: Db, username: str, filters: GameFilters) -> Record:
         losses=counts.get("loss", 0),
         draws=counts.get("draw", 0),
     )
+
+
+def scan_candidates(db: Db, username: str, filters: GameFilters) -> list[ScanCandidate]:
+    """The chat scan tool's fetch (docs/06-coach.md, "Chat"): summary
+    columns plus full `san_moves` and, via LEFT JOIN, `evals` -- None on
+    unanalyzed rows, exactly `RepertoireGame`'s convention. `pgn` is
+    never selected.
+
+    Honors every `GameFilters` field, including `analyzed` (None = all
+    games, analyzed or not) and `limit` as the candidate cap (`offset`
+    honored the same way `list_games` honors it), newest first. Builds
+    its WHERE through `_game_filter_clauses`, the same shared builder
+    `list_games`/`game_record` use, so a filter cannot come to mean two
+    things depending on which function reads it.
+    """
+    clauses, params = _game_filter_clauses(username, filters)
+
+    rows = db.execute(
+        f"""
+        SELECT {_SUMMARY_COLUMNS}, a.game_id IS NOT NULL AS analyzed,
+               a.evals AS a_evals
+        FROM games AS g LEFT JOIN analyses AS a ON a.game_id = g.id
+        WHERE {" AND ".join(clauses)}
+        ORDER BY g.end_time DESC
+        LIMIT ? OFFSET ?
+        """,
+        [*params, filters.limit, filters.offset],
+    ).fetchall()
+    return [
+        ScanCandidate.model_validate(
+            {
+                "summary": {
+                    **_summary_fields(row),
+                    "opening": _opening_from_row(row),
+                    "analyzed": bool(row["analyzed"]),
+                },
+                "san_moves": json.loads(row["san_moves"]),
+                "evals": _evals_from_row(row),
+            }
+        )
+        for row in rows
+    ]
 
 
 def get_game(db: Db, game_id: str) -> GameDetail | None:
@@ -820,6 +868,14 @@ def _opening_from_row(row: sqlite3.Row) -> Opening | None:
     return Opening(
         eco=row["opening_eco"], name=row["opening_name"], ply=row["opening_ply"]
     )
+
+
+def _evals_from_row(row: sqlite3.Row) -> list[dict[str, object]] | None:
+    """Raw evals for pydantic to validate into `list[MoveEval]` -- None
+    on an unanalyzed (LEFT JOIN miss) row, `RepertoireGame`'s
+    convention (`storage/repertoire.py`)."""
+    evals_json: str | None = row["a_evals"]
+    return None if evals_json is None else json.loads(evals_json)
 
 
 def _analysis_from_row(row: sqlite3.Row) -> GameAnalysis | None:

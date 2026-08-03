@@ -33,6 +33,7 @@ first contact.
 
 | Design | Shipped | Contracts now live in |
 |--------|---------|-----------------------|
+| [coach-game-search.md](coach-game-search.md) | 2026-08-03, designed and built the same day | 03, 06, 07 + `domain` |
 | [player-profile.md](player-profile.md) | 2026-07-30, reworked the same day | 03, 06, 07, 08 + `domain` |
 | [coach-chat.md](coach-chat.md) | 2026-07-30 | 03, 06, 07, 08 + `domain` |
 | [openings-explorer.md](openings-explorer.md) | 2026-07-29 | 03, 05, 07, 08 + `domain` |
@@ -72,6 +73,15 @@ first contact.
   parked behind the GPL distribution question that `pyproject.toml`
   already notes. Finding 1's rejected alternative is recorded in
   [normalized-game-model.md](../future-improvements/normalized-game-model.md).
+- **Coach game search**: three follow-ups, all carried as one
+  backlog entry under "Housekeeping worth scheduling" in
+  [NEW-FEATURE-PROPOSAL.md](../NEW-FEATURE-PROPOSAL.md): the
+  bounded "analyze this one game from chat" affordance for verifying
+  finds in unanalyzed games, the scan-result cache whose go/no-go is
+  fed by the wall-time log the API layer emits per scan, and a watch
+  on `_CHAT_MAX_TURNS` (8) now that a search turn spends 3-4 calls.
+  Its [spike report](../spike-reports/coach-game-search-events.md)
+  stays in spike-reports as live evidence for the cache decision.
 - **Player profile**: nothing. Every surface it specified is built
   and re-stated in 03/06/07/08, including the same-day rework that
   re-keyed the profile per time control and split volume from

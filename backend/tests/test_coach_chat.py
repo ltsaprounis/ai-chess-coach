@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal, cast
 from uuid import uuid4
 
+import chess
 import pytest
 from claude_agent_sdk import (
     AssistantMessage,
@@ -50,13 +51,22 @@ from chess_coach.domain import (
     Comparison,
     ComparisonGroup,
     EvalLine,
+    GameAnalysis,
     GameDetail,
+    GameSearchPage,
     GameSummary,
+    Judgment,
     LlmConfig,
+    MoveEval,
     Opening,
     OpeningStats,
     Record,
     Result,
+    ScanEventSpec,
+    ScanHit,
+    ScanMatch,
+    ScanOutcome,
+    ScanSpec,
     TimeClass,
 )
 from tests.coach_scenario import scenario_games
@@ -247,24 +257,29 @@ class _StubChatToolkit:
         *,
         analyst: PositionAnalystFn | None = None,
         games: list[GameSummary] | None = None,
+        games_total: int | None = None,
         game_detail: GameDetail | None = None,
         openings: list[OpeningStats] | None = None,
         prior_comparisons: list[Comparison] | None = None,
         # (group record, the rest) the compare tool should receive.
         compare_result: tuple[Record, Record] | None = None,
+        scan_outcome: ScanOutcome | None = None,
     ) -> None:
         self.analyst = analyst
         self._games = games if games is not None else []
+        self._games_total = games_total if games_total is not None else len(self._games)
         self._game_detail = game_detail
         self._openings = openings if openings is not None else []
         self.prior_comparisons = list(prior_comparisons or [])
         self._compare_result = compare_result
+        self._scan_outcome = scan_outcome
         # One entry per compare_games call, so a test can assert what the
         # model actually asked for.
         self.compare_calls: list[tuple[ComparisonGroup, ComparisonGroup | None]] = []
         self.find_games_calls: list[dict[str, object]] = []
         self.get_game_calls: list[str] = []
         self.opening_stats_calls = 0
+        self.scan_games_calls: list[dict[str, object]] = []
 
     async def compare_games(
         self,
@@ -287,7 +302,8 @@ class _StubChatToolkit:
         since: int | None = None,
         until: int | None = None,
         limit: int = 10,
-    ) -> list[GameSummary]:
+        offset: int = 0,
+    ) -> GameSearchPage:
         self.find_games_calls.append(
             {
                 "opponent": opponent,
@@ -297,9 +313,10 @@ class _StubChatToolkit:
                 "since": since,
                 "until": until,
                 "limit": limit,
+                "offset": offset,
             }
         )
-        return self._games
+        return GameSearchPage(games=self._games, total=self._games_total, offset=offset)
 
     async def get_game(self, game_id: str) -> GameDetail | None:
         self.get_game_calls.append(game_id)
@@ -308,6 +325,41 @@ class _StubChatToolkit:
     async def opening_stats(self) -> list[OpeningStats]:
         self.opening_stats_calls += 1
         return self._openings
+
+    async def scan_games(
+        self,
+        spec: ScanSpec,
+        *,
+        opponent: str | None = None,
+        opening: str | None = None,
+        result: Result | None = None,
+        time_class: TimeClass | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 10,
+    ) -> ScanOutcome:
+        self.scan_games_calls.append(
+            {
+                "spec": spec,
+                "opponent": opponent,
+                "opening": opening,
+                "result": result,
+                "time_class": time_class,
+                "since": since,
+                "until": until,
+                "limit": limit,
+            }
+        )
+        if self._scan_outcome is not None:
+            return self._scan_outcome
+        return ScanOutcome(
+            eligible=0,
+            scanned=0,
+            unverified_scanned=0,
+            skipped_unanalyzed=0,
+            truncated=False,
+            matches=[],
+        )
 
 
 async def stub_analyst(fen: str) -> list[EvalLine]:
@@ -436,6 +488,7 @@ async def test_agent_sdk_provider_chat_streams_text_tool_then_done(
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
         "mcp__engine__compare_groups",
+        "mcp__engine__scan_games",
     ]
     system_prompt = options.system_prompt
     assert isinstance(system_prompt, str)
@@ -483,6 +536,7 @@ async def test_agent_sdk_provider_chat_without_analyst_omits_analyze_tool(
         "mcp__engine__get_game",
         "mcp__engine__get_opening_stats",
         "mcp__engine__compare_groups",
+        "mcp__engine__scan_games",
     ]
 
 
@@ -974,6 +1028,310 @@ async def test_opening_stats_says_its_moves_are_not_a_filter() -> None:
     assert "32g, 33%" in text
 
 
+# --- renderer goldens: find_games header, move sheet, position block,
+# --- scan_games preamble (docs/06-coach.md, "Chat") -------------------
+
+
+def test_find_games_header_states_total_and_page_and_unanalyzed_marker() -> None:
+    page = GameSearchPage(
+        games=[
+            _sample_game_summary(),
+            _sample_game_summary().model_copy(
+                update={"id": "g-2", "opponent": "magnus", "analyzed": False}
+            ),
+        ],
+        total=489,
+        offset=10,
+    )
+
+    text = providers_module._render_game_summaries(page)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Matched 489 games; showing 11-12, newest first.\n"
+        "- 2026-06-01, white vs hikaru (1500 vs 1490), win, blitz, "
+        "Ruy Lopez -- id `g-1`\n"
+        "- 2026-06-01, white vs magnus (1500 vs 1490), win, blitz, "
+        "Ruy Lopez, unanalyzed -- id `g-2`"
+    )
+
+
+def test_find_games_no_matches() -> None:
+    page = GameSearchPage(games=[], total=0, offset=0)
+
+    text = providers_module._render_game_summaries(page)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == "No games matched."
+
+
+def _widened_sheet_game() -> GameDetail:
+    """A game exercising every branch of the widened annotation rule
+    (docs/06-coach.md, "Chat"): a best move that is a plain quiet move
+    (never annotated), a non-best move (the pre-existing rule), a
+    best-move CAPTURE (annotated with the eval alone, no judgment
+    word -- the fix that makes a sound sacrifice findable at all), and a
+    best move carrying a mate score (also eval-only)."""
+    san_moves = ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Bxc6", "dxc6"]
+    overrides: dict[int, dict[str, object]] = {
+        2: {"judgment": "inaccuracy", "cp_loss": 60, "eval_cp": -40},
+        7: {"judgment": "best", "cp_loss": 0, "eval_cp": None, "eval_mate": 4},
+    }
+    board = chess.Board()
+    evals: list[MoveEval] = []
+    for idx, san in enumerate(san_moves):
+        ply = idx + 1
+        move = board.parse_san(san)
+        fields: dict[str, object] = {
+            "ply": ply,
+            "san": san,
+            "eval_cp": 20,
+            "eval_mate": None,
+            "best_move": move.uci(),
+            "cp_loss": 0,
+            "judgment": "best",
+        }
+        fields.update(overrides.get(ply, {}))
+        evals.append(MoveEval.model_validate(fields))
+        board.push(move)
+    judgments: list[Judgment] = [e.judgment for e in evals]
+    counts: dict[Judgment, int] = {
+        j: judgments.count(j)
+        for j in ("best", "good", "inaccuracy", "mistake", "blunder")
+    }
+    analysis = GameAnalysis(
+        game_id="g-sheet",
+        depth=16,
+        evals=evals,
+        overall_acpl=0.0,
+        acpl_by_phase={"opening": 0.0, "middlegame": 0.0, "endgame": 0.0},
+        judgment_counts=counts,
+    )
+    game = make_game(id="g-sheet", san_moves=san_moves, opponent="hikaru")
+    return GameDetail.model_validate(
+        {**game.model_dump(), "opening": None, "analysis": analysis}
+    )
+
+
+def test_move_sheet_widens_to_captures_and_mate_scores_eval_only() -> None:
+    detail = _widened_sheet_game()
+
+    text = providers_module._render_move_sheet(detail)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Moves (evals in pawns; annotated on inaccuracies and worse, "
+        "captures, and mate scores): "
+        "1.e4 1...e5 (inaccuracy, -0.40) 2.Nf3 2...Nc6 3.Bb5 3...a6 "
+        "4.Bxc6 (White mates in 4) 4...dxc6 (+0.20)"
+    )
+
+
+def test_move_sheet_unanalyzed_game_lists_bare_san() -> None:
+    game = make_game(id="g-bare", san_moves=["e4", "e5"])
+    detail = GameDetail.model_validate(
+        {**game.model_dump(), "opening": None, "analysis": None}
+    )
+
+    text = providers_module._render_move_sheet(detail)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == "Moves (unanalyzed): 1.e4 1...e5"
+
+
+def test_position_block_golden() -> None:
+    detail = _widened_sheet_game()
+
+    text = providers_module._render_position_block(detail, 7)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Position at ply 7 (Bxc6):\n"
+        "FEN before: `r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/"
+        "RNBQK2R w KQkq - 0 4`\n"
+        "FEN after: `r1bqkbnr/1ppp1ppp/p1B5/4p3/4P3/5N2/PPPP1PPP/"
+        "RNBQK2R b KQkq - 0 4`\n"
+        "Judgment: best, loss about 0.0 pawns\n"
+        "Engine best move: Bxc6\n"
+        "Eval before: +0.20, eval after: White mates in 4"
+    )
+
+
+def test_position_block_degrades_on_unanalyzed_game() -> None:
+    game = make_game(id="g-bare", san_moves=["e4", "e5"])
+    detail = GameDetail.model_validate(
+        {**game.model_dump(), "opening": None, "analysis": None}
+    )
+
+    text = providers_module._render_position_block(detail, 1)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == "Position at ply 1: not available -- this game is unanalyzed."
+
+
+def test_position_block_degrades_out_of_range() -> None:
+    detail = _widened_sheet_game()
+
+    text = providers_module._render_position_block(detail, 99)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Position at ply 99: not available -- ply 99 is out of range for a 8-ply game."
+    )
+
+
+def test_get_game_tool_schema_offers_optional_ply() -> None:
+    assert "ply" in providers_module._GET_GAME_TOOL_SCHEMA["properties"]  # pyright: ignore[reportPrivateUsage]
+    assert providers_module._GET_GAME_TOOL_SCHEMA["required"] == ["game_id"]  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_get_game_ply_appends_position_block_after_move_sheet() -> None:
+    detail = _widened_sheet_game()
+    toolkit = _StubChatToolkit(game_detail=detail)
+
+    text = await providers_module._call_get_game(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit), {"game_id": "g-sheet", "ply": 7}
+    )
+
+    assert "Moves (evals in pawns" in text
+    assert "Position at ply 7 (Bxc6):" in text
+
+
+def _scan_outcome() -> ScanOutcome:
+    hit = ScanHit(
+        ply=39,
+        san="Qxg7+",
+        fen_before="8/6k1/6q1/8/8/8/6K1/8 w - - 0 1",
+        detail=(
+            "queen sac, net 5 (gave the queen for a pawn); realizes in 1; "
+            "sound; already winning before; eval +9.20 -> #5"
+        ),
+    )
+    match = ScanMatch(game=_sample_game_summary(), hits=[hit])
+    return ScanOutcome(
+        eligible=489,
+        scanned=489,
+        unverified_scanned=177,
+        skipped_unanalyzed=0,
+        truncated=False,
+        matches=[match],
+    )
+
+
+def test_render_scan_outcome_preamble_and_match_golden() -> None:
+    text = providers_module._render_scan_outcome(_scan_outcome())  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Scanned all 489 of 489 games matching the filters (177 without "
+        "analysis: soundness unverified; truncated: no).\n"
+        "- 2026-06-01, white vs hikaru, win, blitz, Ruy Lopez -- id `g-1`\n"
+        "  20.Qxg7+: queen sac, net 5 (gave the queen for a pawn); "
+        "realizes in 1; sound; already winning before; eval +9.20 -> #5 "
+        "(`8/6k1/6q1/8/8/8/6K1/8 w - - 0 1`)"
+    )
+
+
+def test_render_scan_outcome_no_matches_still_states_denominators() -> None:
+    outcome = ScanOutcome(
+        eligible=12,
+        scanned=12,
+        unverified_scanned=3,
+        skipped_unanalyzed=0,
+        truncated=False,
+        matches=[],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Scanned all 12 of 12 games matching the filters (3 without "
+        "analysis: soundness unverified; truncated: no).\n"
+        "No games matched."
+    )
+
+
+def test_render_scan_outcome_states_skipped_unanalyzed_when_nonzero() -> None:
+    outcome = ScanOutcome(
+        eligible=100,
+        scanned=80,
+        unverified_scanned=0,
+        skipped_unanalyzed=20,
+        truncated=True,
+        matches=[],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert text.startswith(
+        "Scanned the newest 80 of 100 games matching the filters (0 without "
+        "analysis: soundness unverified; truncated: yes). 20 more "
+        "without analysis could not be scanned for this event at all."
+    )
+
+
+async def test_call_scan_games_parses_match_and_filters() -> None:
+    toolkit = _StubChatToolkit(scan_outcome=_scan_outcome())
+
+    text = await providers_module._call_scan_games(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit),
+        {
+            "match": [{"event": "sacrifice", "piece": "queen", "sound_only": True}],
+            "opponent": "hikaru",
+            "limit": 5,
+        },
+    )
+
+    assert "Scanned all 489 of 489 games" in text
+    [call] = toolkit.scan_games_calls
+    assert call["opponent"] == "hikaru"
+    assert call["limit"] == 5
+    spec = cast("ScanSpec", call["spec"])
+    assert spec.match == [
+        ScanEventSpec(event="sacrifice", piece="queen", sound_only=True)
+    ]
+
+
+async def test_call_scan_games_parses_a_chain_with_the_slice_2_fields() -> None:
+    """docs/06-coach.md build plan: `eval_swing`, `comeback`,
+    `delivered_mate`, `castled` and their own parameters (`direction`,
+    `min_swing_pawns`, `side`) all reach `ScanEventSpec` intact, not
+    just `sacrifice`'s."""
+    toolkit = _StubChatToolkit(scan_outcome=_scan_outcome())
+
+    await providers_module._call_scan_games(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit),
+        {
+            "match": [
+                {"event": "castled", "side": "long"},
+                {
+                    "event": "eval_swing",
+                    "direction": "lost",
+                    "min_swing_pawns": 2.5,
+                    "within_plies": 10,
+                },
+            ]
+        },
+    )
+
+    [call] = toolkit.scan_games_calls
+    spec = cast("ScanSpec", call["spec"])
+    assert spec.match == [
+        ScanEventSpec(event="castled", side="long"),
+        ScanEventSpec(
+            event="eval_swing",
+            direction="lost",
+            min_swing_pawns=2.5,
+            within_plies=10,
+        ),
+    ]
+
+
+def test_scan_games_tool_schema_event_enum_covers_every_event() -> None:
+    event_schema = providers_module._SCAN_GAMES_TOOL_SCHEMA["properties"]["match"][  # pyright: ignore[reportPrivateUsage]
+        "items"
+    ]
+    assert set(event_schema["properties"]["event"]["enum"]) == {
+        "sacrifice",
+        "eval_swing",
+        "comeback",
+        "delivered_mate",
+        "castled",
+    }
+
+
 async def test_compare_tool_never_lets_the_caller_pick_the_other_side() -> None:
     """docs/06-coach.md, "Reading a comparison": the model names one
     group and the tool subtracts, so a run cannot compare a group
@@ -1202,6 +1560,7 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
             "since": None,
             "until": None,
             "limit": 10,
+            "offset": 0,
         }
     ]
     system_message = captured["create_system_message"]
@@ -1238,6 +1597,7 @@ async def test_copilot_provider_chat_without_analyst_omits_only_the_engine(
         "custom:get_game",
         "custom:compare_groups",
         "custom:get_opening_stats",
+        "custom:scan_games",
     ]
 
 
@@ -1299,6 +1659,7 @@ async def test_copilot_provider_chat_renders_all_three_data_tools(
             "since": None,
             "until": None,
             "limit": 10,
+            "offset": 0,
         }
     ]
     assert toolkit.get_game_calls == ["g-ctx"]

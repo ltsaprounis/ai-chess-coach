@@ -44,6 +44,7 @@ from chess_coach.coach.providers import (
     create_provider,
 )
 from chess_coach.coach.report import build_report
+from chess_coach.coach.scan import run_scan, spec_needs_evals
 
 __all__ = [
     "COMPARISON_FDR",
@@ -80,5 +81,7 @@ __all__ = [
     "render_profile_prompt",
     "render_prompt",
     "render_report_chat_context",
+    "run_scan",
+    "spec_needs_evals",
     "window_spans_level_change",
 ]

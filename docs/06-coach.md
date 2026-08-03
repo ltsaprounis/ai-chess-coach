@@ -219,9 +219,33 @@ class ChatToolkit(Protocol):
                          time_class: TimeClass | None = None,
                          since: int | None = None,
                          until: int | None = None,
-                         limit: int = 10) -> list[GameSummary]
+                         limit: int = 10,
+                         offset: int = 0) -> GameSearchPage
     async def get_game(self, game_id: str) -> GameDetail | None
     async def opening_stats(self) -> list[OpeningStats]
+    # The event scan (see "Chat" > "Tools"): coach owns the event
+    # detectors and rendering; the API implementation owns the
+    # candidate fetch, the denominators, and the caps. Metadata
+    # filters mean exactly what find_games' do.
+    async def scan_games(self, spec: ScanSpec, *,
+                         opponent: str | None = None,
+                         opening: str | None = None,
+                         result: Result | None = None,
+                         time_class: TimeClass | None = None,
+                         since: int | None = None,
+                         until: int | None = None,
+                         limit: int = 10) -> ScanOutcome
+
+# The scan event library behind `scan_games` (see "Chat" > "Tools"):
+# pure functions over ScanCandidate, no I/O, no engine. The API layer
+# fetches candidates (storage's scan_candidates) and calls run_scan;
+# spec_needs_evals says whether the sequence reads stored evals
+# (comeback, eval_swing), which is what restricts that fetch -- and
+# its denominators -- to analyzed games. Event semantics live here,
+# with one owner.
+def run_scan(candidates: list[ScanCandidate],
+             spec: ScanSpec) -> list[ScanMatch]
+def spec_needs_evals(spec: ScanSpec) -> bool
     # The comparison guard, exposed so a run cannot obtain an unjudged
     # percentage (see "Reading a comparison"). Returns the group's
     # record and the rest of `within`, computed by subtraction -- the
@@ -1299,26 +1323,66 @@ what the student just read.
 
 **Tools.** Each `ChatToolkit` capability is exposed to the model as
 one tool: `analyze_position` (only when `analyst` is not None),
-`find_games`, `get_game`, `get_opening_stats`. The roster is
-deliberately small — every tool costs schema tokens on every message
-— and read-only by construction. Coach renders every result to text
-itself: `find_games` as compact rows (date, color, opponent with
-ratings, result, time class, opening, game id), `get_game` as
-identity plus a compact move sheet (SAN with judgments; evals in
-pawns at the moves that matter), `get_opening_stats` as the
-repertoire rows. The explain style contract applies to all of it:
-pawns, never centipawns.
+`find_games`, `get_game`, `get_opening_stats`, `compare_groups`
+(the comparison guard, see "Reading a comparison"), and
+`scan_games`. The roster is deliberately small — every tool costs
+schema tokens on every message — and read-only by construction.
+Coach renders every result to text itself: `find_games` as a header
+stating the total match count and page position, then compact rows
+(date, color, opponent with ratings, result, time class, opening,
+game id, an unanalyzed marker); `get_game` as identity plus a
+compact move sheet (SAN annotated on judgments worse than best, on
+captures, and on mate-scored evals — a sound sacrifice is an
+engine-best move, and without the capture rule it would render as
+bare SAN); `get_opening_stats` as the repertoire rows. The explain
+style contract applies to all of it: pawns, never centipawns.
+
+`get_game` also accepts an optional `ply`: the rendering appends a
+position block for that move — FEN before and after (replayed from
+`san_moves`), the played move, judgment, loss in pawns, engine best
+move, eval before and after — which is what hands `analyze_position`
+a position for any moment of any stored game.
+
+`scan_games` searches move content, not metadata: the model
+composes one to three named events (`sacrifice` with a piece tier,
+`eval_swing`, `comeback`, `delivered_mate`, `castled`) into an
+ordered sequence, optionally bounding each step's gap from the
+previous (`within_plies`), plus the same metadata filters
+`find_games` takes. Coach owns the event detectors as pure
+functions over `ScanCandidate` (the sacrifice event reuses the
+highlights SEE machinery: escalation gate, piece tier from the SEE
+target, promotions excluded; realization, soundness, balance and
+the eval pair are carried as annotations, never used as filters —
+the recall-first stance, `sound_only` being the one opt-in
+exception). Events computable from moves alone match unanalyzed
+games too, with eval-backed annotations rendered as unverified;
+`comeback` and `eval_swing` read stored evals and skip unanalyzed
+games. Every rendered result opens with the `ScanOutcome`
+denominators, so coverage is a fact the model reads. Matches are
+examples, never tendencies: scan dimensions are outcome-adjacent
+and must never become `ComparisonGroup` fields. The full design
+record with the archive measurements behind the gates is
+[archive/coach-game-search.md](archive/coach-game-search.md)
+and its spike report.
 
 **Instructions.** The chat system prompt carries the explain
 register rules (club player, the idea before the number, no
-redundant annotation) plus two chat-specific rules: the facts the
+redundant annotation) plus five chat-specific rules: the facts the
 seed states are established and may be used and quoted, while any
 claim past them — another game, another result, a move not shown —
 must come from a tool result in this conversation, never from
-memory; and game references are written as app-relative markdown
+memory; game references are written as app-relative markdown
 links (`/games/{id}?ply={n}`) using ids returned by tools — never an
 invented id (see "Link discipline" in the design record for why
-there is no `append_game_links` pass here).
+there is no `append_game_links` pass here); coverage honesty — when
+answering from search or scan results, state the result's own
+totals and denominators and offer to widen, and report matches as
+examples, never tendencies (tendencies go through
+`compare_groups`); dates — game times are UTC epoch seconds, so a
+calendar date the student names is widened by a day on each side;
+and event fit — when no scan event or chain matches the question,
+say so and fall back to metadata search plus reading rather than
+stretching the nearest event.
 
 The first rule is *stated versus recalled*, not context versus
 tools, and the distinction is load-bearing. Scoped to the whole

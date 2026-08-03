@@ -214,7 +214,8 @@ Composites elided above for brevity (`CriticalPosition`,
 `CoachAgent`, `ChatMessage`,
 `PlayerProfile`, `ProfileOpening`, `RatingDelta`, `Drawdown`,
 `RatingTrajectory`, `ComparisonGroup`, `ComparisonInput`,
-`Comparison`) also
+`Comparison`, `ScanEventSpec`, `ScanSpec`, `ScanHit`, `ScanMatch`,
+`ScanOutcome`, `ScanCandidate`, `GameSearchPage`) also
 live in `domain.py` — the component docs state their shapes where
 they are used. `PlayerProfile` is the coach's two-layer distillation
 of the report (docs/06-coach.md, "Player profile"), scoped to one

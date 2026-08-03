@@ -156,11 +156,20 @@ unexpected to 500.
   record). The stored transcript is the source of truth; the API
   layer never interprets `provider_state`, only persists and returns
   it. Per message: load thread + transcript, build the per-thread
-  `ChatToolkit` — `find_games`/`get_game`/`opening_stats` wrap the
-  sync storage repos in starlette's `run_in_threadpool` (the same
-  offload every sync route here rides), pre-scoped to the
-  thread's username (`get_game` returns None for another player's
-  game id — the model can never read across players);
+  `ChatToolkit` — `find_games`/`get_game`/`opening_stats`/
+  `scan_games` wrap the sync storage repos in starlette's
+  `run_in_threadpool` (the same offload every sync route here
+  rides), pre-scoped to the thread's username (`get_game` returns
+  None for another player's game id — the model can never read
+  across players); `find_games` pairs its page with a `game_record`
+  total over the same filters (shared clause builder, so the count
+  cannot drift from the rows) into a `GameSearchPage`; `scan_games`
+  fetches up to `_SCAN_CANDIDATE_CAP` (800) candidates via
+  `scan_candidates` — eval-reading events restrict to analyzed
+  games, move-only events take all — computes the `ScanOutcome`
+  denominators from `game_record`, runs coach's `run_scan` inside
+  the same threadpool call (the replay+SEE work is CPU-bound; the
+  event loop must stay free for SSE) and logs the scan wall time;
   `opening_stats` applies the thread's window; `analyst` is the same
   `pool.eval_lines` wrapper explain uses, or None when the pool is
   down — then stream `provider.chat(...)` as SSE. Seeds: game scope

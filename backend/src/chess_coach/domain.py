@@ -830,3 +830,111 @@ class GameDetail(Game):
 class AnalyzedGame(Game):
     analysis: GameAnalysis
     opening: Opening | None = None
+
+
+# --- Coach chat: the game-scan tool (docs/06-coach.md, "Chat") ---
+
+ScanEventName = Literal[
+    "sacrifice", "eval_swing", "comeback", "delivered_mate", "castled"
+]
+
+
+class ScanEventSpec(BaseModel):
+    """One step of a `scan_games` match sequence (docs/06-coach.md,
+    "Chat").
+
+    Which extra fields apply depends on `event`; the rest are
+    ignored. `within_plies` bounds the gap to the previous step's
+    match ply, so it means nothing on the first step. Caps and
+    validation live at the tool boundary (the JSON schema the model
+    sees, plus the API toolkit's clamps), not here — mirroring how
+    `GameFilters.limit` is clamped by its caller.
+    """
+
+    event: ScanEventName
+    piece: Literal["queen", "rook", "minor"] = "minor"  # sacrifice
+    sound_only: bool = False  # sacrifice
+    min_swing_pawns: float = 3.0  # eval_swing
+    direction: Literal["gained", "lost"] = "gained"  # eval_swing
+    side: Literal["short", "long", "any"] = "any"  # castled
+    within_plies: int | None = None  # steps 2+: max gap to previous
+
+
+class ScanSpec(BaseModel):
+    """An ordered event sequence to find within single games."""
+
+    match: list[ScanEventSpec]
+
+
+class ScanHit(BaseModel):
+    """One matched step: where it happened and what the annotations
+    say.
+
+    `detail` is the rendered annotation line (net points, realizes or
+    declined, soundness, balance, evals) — prose owned by coach, so
+    its wording stays beside the rest of the prompt text.
+    `fen_before` is the position before the move, ready to hand to
+    `analyze_position`.
+    """
+
+    ply: int  # 1-based, matches MoveEval.ply
+    san: str
+    fen_before: str
+    detail: str
+
+
+class ScanMatch(BaseModel):
+    """One game matching the whole sequence: one hit per step, in
+    order."""
+
+    game: GameSummary
+    hits: list[ScanHit]
+
+
+class ScanOutcome(BaseModel):
+    """A scan's matches plus the denominators that make coverage a
+    fact the model reads rather than estimates (docs/06-coach.md,
+    "Chat").
+
+    `eligible` counts every stored game matching the metadata
+    filters; `scanned` those actually inspected (the candidate cap
+    bounds it); `unverified_scanned` the scanned games with no
+    stored analysis — moves-only events still match there, with
+    eval-backed annotations rendered as unverified;
+    `skipped_unanalyzed` the games an eval-reading event could not
+    inspect at all.
+    """
+
+    eligible: int
+    scanned: int
+    unverified_scanned: int
+    skipped_unanalyzed: int
+    truncated: bool
+    matches: list[ScanMatch]
+
+
+class ScanCandidate(BaseModel):
+    """One game as the scan consumes it — summary identity, full
+    moves, and evals when analyzed.
+
+    Produced by storage (docs/03-storage.md, `scan_candidates`),
+    consumed by coach's event detectors, which is what makes it a
+    domain type. Like `RepertoireGame`, `pgn` never rides along;
+    unlike it, the moves are unsliced — events live anywhere in the
+    game.
+    """
+
+    summary: GameSummary
+    san_moves: list[str]
+    evals: list[MoveEval] | None  # None if unanalyzed
+
+
+class GameSearchPage(BaseModel):
+    """One page of `find_games` results with the totals that make
+    coverage honest (docs/06-coach.md, "Chat"): `total` counts every
+    match, the page shows `games` starting at `offset`, newest
+    first."""
+
+    games: list[GameSummary]
+    total: int
+    offset: int
