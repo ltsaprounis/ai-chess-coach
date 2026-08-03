@@ -164,7 +164,10 @@ _SCAN_GAMES_TOOL_DESCRIPTION = (
     'Matches are EXAMPLES to read, never a tendency: "2 of your last 10 '
     'games show a sound sacrifice" says nothing about how often that '
     "happens across the archive. compare_groups is the only tool that "
-    "establishes a tendency; scan dimensions must never be treated as one."
+    "establishes a tendency; scan dimensions must never be treated as one.\n"
+    "An offer made while a forced mate was already available is never a "
+    "sacrifice -- the detail states whether it forced the mate home or was "
+    "a slip the advantage absorbed."
 )
 
 _COMPARE_TOOL_DESCRIPTION = (

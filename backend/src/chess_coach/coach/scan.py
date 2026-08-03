@@ -19,6 +19,7 @@ chain-matching logic above it knows nothing about any one event.
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 import chess
 
@@ -83,6 +84,20 @@ _PIECE_TIERS: dict[str, str] = {
 # comeback's threshold (docs/06-coach.md, "Chat"): player-POV eval at
 # or below this at some ply, in a game the player went on to win.
 _COMEBACK_THRESHOLD_CP = -300
+
+
+# The sacrifice detail's soundness verdict (docs/06-coach.md, "Chat"):
+# "sound"/"unsound" is today's plain eval-sign read, unchanged whenever
+# `eval_before` is not a mate for the player. When it is, mate-score
+# folding makes that plain read blind to a piece donated inside an
+# already-winning mating net (a mate that only slows down still reads
+# "sound"), so the three mate-aware verdicts replace it: "slip" (nothing
+# captured, and the mate slowed or vanished -- never "sound"), "forced_home"
+# (something captured, and the mate held or sped up), "facts_only" (mate
+# held before but neither of the above -- the facts are stated with no
+# verdict word, conservatively counted as sound since the model reads the
+# game).
+_Verdict = Literal["sound", "unsound", "slip", "forced_home", "facts_only"]
 
 
 class UnsupportedScanEventError(ValueError):
@@ -258,9 +273,11 @@ def _check_sacrifice(
     )
 
     analyzed = evals is not None
-    sound = True
+    verdict: _Verdict = "sound"
+    counts_as_sound = True
     balanced_before = True
     before_str = after_str = ""
+    mate_note = ""
     if evals is not None and idx < len(evals):
         before_cp, before_mate = eval_before(evals, idx)
         before_pov = pov_cp(before_cp, before_mate, player_is_white)
@@ -272,10 +289,23 @@ def _check_sacrifice(
         after_str = _pov_eval_str(
             move_eval.eval_cp, move_eval.eval_mate, player_is_white
         )
+        if not sound:
+            verdict = "unsound"
+            counts_as_sound = False
+        else:
+            before_mate_n = _player_mate(before_mate, player_is_white)
+            if before_mate_n is not None and before_mate_n > 0:
+                verdict, counts_as_sound, mate_note = _mate_verdict(
+                    before_mate_n=before_mate_n,
+                    after_mate=move_eval.eval_mate,
+                    after_str=after_str,
+                    player_is_white=player_is_white,
+                    captured_by_move=captured_by_move,
+                )
     else:
         analyzed = False
 
-    if step.sound_only and analyzed and not sound:
+    if step.sound_only and analyzed and not counts_as_sound:
         return None
 
     detail = _render_sac_detail(
@@ -284,12 +314,82 @@ def _check_sacrifice(
         captured_name=captured_name,
         realizes=realizes,
         analyzed=analyzed,
-        sound=sound,
+        verdict=verdict,
         balanced_before=balanced_before,
         before_str=before_str,
         after_str=after_str,
+        mate_note=mate_note,
     )
     return ScanHit(ply=idx + 1, san=san, fen_before=fen_before, detail=detail)
+
+
+def _player_mate(mate: int | None, player_is_white: bool) -> int | None:
+    """`mate` (white POV, matching `MoveEval.eval_mate`) folded to the
+    player's own POV: positive means the player has the forced mate,
+    negative means they are being mated, `None` when the eval carries no
+    mate at all. The same fold `_pov_eval_str` applies for display,
+    exposed numerically so the mate-aware verdict can compare the
+    before/after mate distance rather than just format it.
+    """
+    if mate is None:
+        return None
+    return mate if player_is_white else -mate
+
+
+def _mate_verdict(
+    *,
+    before_mate_n: int,
+    after_mate: int | None,
+    after_str: str,
+    player_is_white: bool,
+    captured_by_move: int,
+) -> tuple[_Verdict, bool, str]:
+    """The mate-aware taxonomy (docs/06-coach.md, "Chat"), applied only
+    once the caller has confirmed `eval_before` is a forced mate for the
+    player (`before_mate_n > 0`) and the plain eval-sign read already
+    called the move "sound" -- mate folding is exactly what makes that
+    plain read blind to a queen donated inside a mating net, which is
+    the bug this taxonomy exists to close.
+
+    Checked in the order the doc states: a real sacrifice (nothing
+    captured) that slows or loses the mate is a "slip" the mating
+    position absorbed, never "sound"; a capture that keeps the mate at
+    the same speed or faster forced it home; anything else (a slip that
+    happens to speed up, or a capture that slows down) states the facts
+    with no verdict word, since the model reads the game either way.
+    Returns the verdict, whether it counts as sound for `sound_only`,
+    and the rendered clause (empty for "sound"/"unsound", which the
+    caller renders the classic way instead).
+    """
+    after_mate_n = _player_mate(after_mate, player_is_white)
+    if after_mate_n is not None and after_mate_n > 0:
+        is_mate_after = True
+        slower = after_mate_n > before_mate_n
+    else:
+        is_mate_after = False
+        slower = False
+
+    if captured_by_move == 0 and (slower or not is_mate_after):
+        tail = (
+            f"mate slowed #{before_mate_n} -> #{after_mate_n}"
+            if is_mate_after
+            else f"threw away the forced mate, #{before_mate_n} -> {after_str}"
+        )
+        # No "gave the {piece_name} for nothing" here -- the net clause
+        # ahead of this one already says it (docs/06-coach.md).
+        note = f"a slip absorbed by a mating position: {tail}"
+        return "slip", False, note
+
+    # Like the slip clause, neither branch below repeats the giveaway
+    # phrase -- the net clause ahead of this one already says what was
+    # given for what (docs/06-coach.md).
+    if captured_by_move > 0 and is_mate_after and not slower:
+        note = f"forced the mate home: #{before_mate_n} -> #{after_mate_n}"
+        return "forced_home", True, note
+
+    after_repr = f"#{after_mate_n}" if is_mate_after else after_str
+    note = f"already mating before; #{before_mate_n} -> {after_repr}"
+    return "facts_only", True, note
 
 
 def _tier_matches(offered_tier: str, requested: str) -> bool:
@@ -371,6 +471,10 @@ def _pov_eval_str(cp: int | None, mate: int | None, player_is_white: bool) -> st
     return "n/a"
 
 
+def _captured_phrase(captured_name: str | None) -> str:
+    return f"a {captured_name}" if captured_name else "nothing"
+
+
 def _render_sac_detail(
     *,
     piece_name: str,
@@ -378,23 +482,30 @@ def _render_sac_detail(
     captured_name: str | None,
     realizes: int | None,
     analyzed: bool,
-    sound: bool,
+    verdict: _Verdict,
     balanced_before: bool,
     before_str: str,
     after_str: str,
+    mate_note: str,
 ) -> str:
-    captured_phrase = f"a {captured_name}" if captured_name else "nothing"
+    captured_phrase = _captured_phrase(captured_name)
     parts = [
         f"{piece_name} sac, net {net_points} "
         f"(gave the {piece_name} for {captured_phrase})",
         f"realizes in {realizes}" if realizes is not None else "declined",
     ]
-    if analyzed:
-        parts.append("sound" if sound else "unsound")
+    if not analyzed:
+        parts.append("unverified (unanalyzed)")
+    elif verdict in ("slip", "forced_home", "facts_only"):
+        # The mate-aware taxonomy already states the eval pair and the
+        # capture in its own clause -- today's "sound"/"balanced before"/
+        # "eval X -> Y" triplet would either repeat it or (for "slip")
+        # print the word this branch exists to stop printing.
+        parts.append(mate_note)
+    else:
+        parts.append("sound" if verdict == "sound" else "unsound")
         parts.append("balanced before" if balanced_before else "already winning before")
         parts.append(f"eval {before_str} -> {after_str}")
-    else:
-        parts.append("unverified (unanalyzed)")
     return "; ".join(parts)
 
 

@@ -1357,7 +1357,12 @@ the recall-first stance, `sound_only` being the one opt-in
 exception). Events computable from moves alone match unanalyzed
 games too, with eval-backed annotations rendered as unverified;
 `comeback` and `eval_swing` read stored evals and skip unanalyzed
-games. Every rendered result opens with the `ScanOutcome`
+games. When `eval_before` is itself a mate for the player, the plain
+sound/unsound read is replaced by a mate-aware verdict: a slip when
+nothing was captured and the mate slowed or was lost, forcing the
+mate home when a real capture kept it at least as fast, and otherwise
+the facts with no verdict word, with `sound_only` excluding the slip
+class. Every rendered result opens with the `ScanOutcome`
 denominators, so coverage is a fact the model reads. Matches are
 examples, never tendencies: scan dimensions are outcome-adjacent
 and must never become `ComparisonGroup` fields. The full design

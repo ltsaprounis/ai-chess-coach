@@ -250,6 +250,19 @@ faithfulness verifier over generated text.
   anticipation); and a watch on `_CHAT_MAX_TURNS` (8), since a search
   turn spends 3-4 calls, and if real turns hit the ceiling the bump
   is one line.
+- **Mate-aware move judgment** (engine). `cp_loss` folds every mate
+  to the same score before grading, so a move that hangs the queen
+  at mate-in-3 and leaves mate-in-8 records loss 0, judgment
+  "good": seen live 2026-08-03 (57...Qg5+ vs norayr68, first
+  flagged by game search and confirmed by the player as a slip).
+  Grading mate-to-mate transitions by distance would fix the move
+  sheet, the Dashboard blunder list and explain in one place. It
+  changes docs/04's judgment semantics and needs an
+  `ANALYSIS_VERSION` bump plus a full re-analysis behind it, so it
+  is its own decision, not a rider on anything above. The chat scan
+  covers its surface meanwhile: its sacrifice detail carries a
+  mate-aware verdict, so a queen hung inside a mating net is
+  labelled a slip, never technique.
 - **Docker packaging**: the install is five prerequisites deep and
   the C++ engine build is the step most likely to fail on someone
   else's machine. One `docker compose up` fixes that, and settles how

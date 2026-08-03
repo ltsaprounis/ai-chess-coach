@@ -365,6 +365,203 @@ def test_sound_only_keeps_unanalyzed_matches_recall_first() -> None:
     assert "unverified (unanalyzed)" in matches[0].hits[0].detail
 
 
+# --- mate-aware verdict: a sacrifice offered inside a forced mate ------
+#
+# Mate-score folding makes the plain sound/unsound read (`eval_after >=
+# 0`) blind to a piece donated inside an already-winning mating net: a
+# mate that only slows down still folds positive and reads "sound" (the
+# live bug this taxonomy fixes -- docs/06-coach.md, "Chat"). It only
+# engages when `eval_before` is itself a mate for the player, so every
+# fixture below overrides both the offering move's own ply and the one
+# before it (the `eval_before` read) -- same craft-the-evals approach as
+# `test_balanced_before_and_sound_annotations_from_crafted_evals` above.
+# The position only has to produce a genuine, single sacrifice match;
+# the mate story is entirely in the crafted evals.
+
+# White's knight retreats to g1 -- undoing its own development rather
+# than capturing -- which unblocks the exact same g4-d1 diagonal
+# LEGALS_MATE_MOVES' Nxe5 does: Black's Bxd1 nets queen-for-bishop (6),
+# White recaptures Kxd1. The only difference from LEGALS_MATE_MOVES is
+# that Ng1 captures nothing, so `captured_by_move == 0` -- the "hangs
+# the queen for nothing" shape the live bug (57...Qg5+) was found in.
+# Verified: ply 9 (Ng1), queen tier, net 6, ply 9's own capture "nothing".
+QUEEN_HANG_MOVES = [
+    "e4", "e5", "Nf3", "d6", "Bc4", "Bg4", "Nc3", "g6", "Ng1",
+]  # fmt: skip
+
+# A random-but-legal walk (generated and verified with python-chess --
+# the shape only needs to be a genuine queen sacrifice that CAPTURES a
+# rook, not book theory) ending in White's Qxg6+, recapturing a rook
+# Black had lifted to g6 earlier: net 4 (opponent's best reply nets
+# queen-for-rook, minus the rook this move itself captured). It is the
+# only queen-tier occurrence in the game, so eval crafting at plies
+# 28/29 lands exactly on this move.
+QUEEN_TAKES_ROOK_MOVES = [
+    "a4", "g5", "g4", "a6", "c4", "b5", "Na3", "Nh6", "f4", "Rg8", "e4",
+    "Nc6", "Be2", "bxc4", "e5", "Nxg4", "Nf3", "Rg6", "Qc2", "Nb4", "Qb1",
+    "f6", "fxg5", "d6", "Nb5", "Ra7", "Ng1", "Nh6", "Qxg6+",
+]  # fmt: skip
+
+# Another random-but-legal walk, Black's Qxg5 capturing a bishop -- the
+# real archive "Qxg7+" brilliancy's material profile (queen for a
+# minor). Also the game's only queen-tier occurrence, so eval crafting
+# at plies 33/34 lands exactly on this move.
+QUEEN_TAKES_BISHOP_MOVES = [
+    "a3", "f6", "c4", "g5", "d4", "h6", "Nh3", "d5", "Qd2", "Qd7", "Qe3",
+    "b5", "Qc3", "Kf7", "g4", "e5", "Ng1", "a6", "Be3", "Qxg4", "Nd2",
+    "b4", "Kd1", "Kg7", "Bxg5", "Kf7", "f4", "Ne7", "Qe3", "Ng8", "Kc1",
+    "e4", "Qxe4", "Qxg5",
+]  # fmt: skip
+
+
+def test_slip_when_a_real_sacrifice_slows_a_forced_mate() -> None:
+    """The live bug, shape 1 (docs/06-coach.md): mate-in-3 before the
+    move, the queen offered for nothing, mate-in-8 after -- still
+    "sound" by the plain eval-sign read (mate folds positive either
+    way), but a queen given away for nothing inside a mating net is a
+    slip the position happened to absorb, not technique, and must never
+    print the word "sound"."""
+    candidate = _candidate(
+        "queen-hang-slows",
+        QUEEN_HANG_MOVES,
+        analyzed=True,
+        eval_overrides={
+            8: {"eval_cp": None, "eval_mate": 3},
+            9: {"eval_cp": None, "eval_mate": 8},
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    assert len(matches) == 1
+    [hit] = matches[0].hits
+    assert hit.ply == 9
+    # The giveaway ("gave the queen for nothing") already appears in the
+    # net clause ahead of this one; the slip clause itself must not
+    # repeat it.
+    assert hit.detail == (
+        "queen sac, net 6 (gave the queen for nothing); declined; "
+        "a slip absorbed by a mating position: mate slowed #3 -> #8"
+    )
+    assert "sound" not in hit.detail
+    assert run_scan([candidate], _spec(piece="queen", sound_only=True)) == []
+    assert run_scan([candidate], _spec(piece="queen", sound_only=False)) != []
+
+
+def test_slip_when_a_real_sacrifice_throws_away_the_forced_mate() -> None:
+    """The live bug, shape 2 (the abheeghosal archive shape): the same
+    "captures nothing" offer, but the mate is lost outright rather than
+    merely slowed -- still a slip, never "sound"."""
+    candidate = _candidate(
+        "queen-hang-lost",
+        QUEEN_HANG_MOVES,
+        analyzed=True,
+        eval_overrides={
+            8: {"eval_cp": None, "eval_mate": 3},
+            9: {"eval_cp": 1880, "eval_mate": None},
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    assert len(matches) == 1
+    detail = matches[0].hits[0].detail
+    assert detail == (
+        "queen sac, net 6 (gave the queen for nothing); declined; "
+        "a slip absorbed by a mating position: threw away the forced "
+        "mate, #3 -> +18.80"
+    )
+    assert "sound" not in detail
+    assert run_scan([candidate], _spec(piece="queen", sound_only=True)) == []
+
+
+def test_forced_home_when_a_capture_keeps_the_mate_at_least_as_fast() -> None:
+    """The Qxe6+ simplification shape: mate-in-8 before, a real capture
+    (a rook), mate-in-6 after -- material given up on the way to a mate
+    that arrives no slower forces the mate home, rendered positively
+    rather than with the plain "sound" wording, and still counts as
+    sound for the filter."""
+    candidate = _candidate(
+        "queen-takes-rook",
+        QUEEN_TAKES_ROOK_MOVES,
+        analyzed=True,
+        eval_overrides={
+            28: {"eval_cp": None, "eval_mate": 8},
+            29: {"eval_cp": None, "eval_mate": 6},
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    assert len(matches) == 1
+    [hit] = matches[0].hits
+    assert hit.ply == 29
+    assert "forced the mate home: #8 -> #6" in hit.detail
+    assert "gave the queen for a rook" in hit.detail
+    assert "sound" not in hit.detail
+    assert run_scan([candidate], _spec(piece="queen", sound_only=True)) != []
+
+
+def test_non_mate_before_rendering_is_unchanged() -> None:
+    """The regression baseline (the "today's gem" archive shape,
+    Qxg7+): `eval_before` is a plain cp figure, not a mate, so the
+    mate-aware taxonomy must never engage -- the detail renders exactly
+    as it did before this taxonomy existed."""
+    candidate = _candidate(
+        "queen-takes-bishop",
+        QUEEN_TAKES_BISHOP_MOVES,
+        color="black",
+        analyzed=True,
+        eval_overrides={
+            33: {"eval_cp": -920, "eval_mate": None},
+            34: {"eval_cp": None, "eval_mate": -5},
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    assert len(matches) == 1
+    [hit] = matches[0].hits
+    assert hit.ply == 34
+    assert hit.detail == (
+        "queen sac, net 5 (gave the queen for a bishop); declined; "
+        "sound; already winning before; eval +9.20 -> #5"
+    )
+    assert run_scan([candidate], _spec(piece="queen", sound_only=True)) != []
+
+
+def test_forced_home_counterfactual_never_reclassifies_as_a_slip() -> None:
+    """The regression this taxonomy exists to guard against: the SAME
+    moves as the previous test's genuine brilliancy, but crafted as if
+    a deeper future re-analysis now sees the mate before the sacrifice
+    was even played (#6, where the shallower analysis above saw only
+    +9.20 -- exactly what happens the next time ANALYSIS_VERSION bumps
+    and the archive is re-analyzed at greater depth). The move still
+    captures a bishop, so it must land on "forced the mate home", never
+    on "slip" -- a captured>0 move can never be classified as a slip
+    regardless of the mate numbers, which is what protects this
+    brilliancy from being demoted."""
+    candidate = _candidate(
+        "queen-takes-bishop-deeper",
+        QUEEN_TAKES_BISHOP_MOVES,
+        color="black",
+        analyzed=True,
+        eval_overrides={
+            33: {"eval_cp": None, "eval_mate": -6},
+            34: {"eval_cp": None, "eval_mate": -5},
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    assert len(matches) == 1
+    detail = matches[0].hits[0].detail
+    assert "forced the mate home: #6 -> #5" in detail
+    assert "gave the queen for a bishop" in detail
+    assert "slip" not in detail
+    assert run_scan([candidate], _spec(piece="queen", sound_only=True)) != []
+
+
 # --- run_scan plumbing --------------------------------------------------
 
 
