@@ -3,6 +3,11 @@
 [PROPOSAL.md](PROPOSAL.md) is the high-level pitch and
 [NEW-FEATURE-PROPOSAL.md](NEW-FEATURE-PROPOSAL.md) holds the
 prioritized candidates for what to build next.
+[codebase-assessment-2026-07-30.md](codebase-assessment-2026-07-30.md)
+is an outside review of the whole system (architecture, reliability,
+security, UI, testing) and is still open: its P0 and most of its P1
+are unaddressed, so it is a live to-do list rather than history, and
+it stays out of `archive/` until it is closed out.
 [GUIDELINES.md](GUIDELINES.md) holds the cross-cutting engineering
 rules — toolchain, boundary enforcement, style, testing, CI. Each
 component below has its own build plan. Components are decoupled: the
@@ -14,9 +19,9 @@ Four directories hold work that is not a component:
 
 - [future-improvements/](future-improvements/) — designs evaluated
   but not built, each with its reasoning: deliberately deferred, or
-  planned and not yet scheduled. A doc leaves here by being built
-  (its contracts migrate into the component docs) or by being
-  rejected outright.
+  planned and not yet scheduled. A doc leaves here by being built (its
+  contracts migrate into the component docs and the design record
+  moves to `archive/`) or by being rejected outright.
 - [spike-reports/](spike-reports/README.md) — measurements from
   time-boxed experiments, one file per spike, run when a design is
   gated on a number nobody has. The design states the question and
@@ -24,9 +29,11 @@ Four directories hold work that is not a component:
   than restated. Results that were never written down did not
   happen.
 - [archive/](archive/README.md) — reviews, scans and fix iterations
-  that are closed out, kept for their measurements and reasoning.
-  Nothing here describes current plans; anything they left open was
-  handed to `future-improvements/` or to a component doc first.
+  that are closed out, plus the design records of features that have
+  shipped, kept for their measurements and reasoning. Nothing here
+  describes current plans; anything they left open was handed to
+  `future-improvements/`, to a component doc, or to the backlog
+  first.
 - [presentations/](presentations/) — self-contained HTML decks that
   explain the project to an audience. They restate what the docs
   below already say; the docs are the source of truth, so a deck is
@@ -203,7 +210,8 @@ Composites elided above for brevity (`CriticalPosition`,
 `TimeClassStats`, `MonthStats`, `PeriodStats`, `OpponentStats`,
 `TerminationStats`, `BestWin`, `StreakStats`,
 `ErrorPattern`, `GameSummary`, `GameDetail`, `AnalyzedGame`,
-`RepertoireGame`, `LlmConfig`, `CoachAgent`, `ChatMessage`,
+`RepertoireGame`, `PlayerSummary`, `LlmConfig`, `LlmProvider`,
+`CoachAgent`, `ChatMessage`,
 `PlayerProfile`, `ProfileOpening`, `RatingDelta`, `Drawdown`,
 `RatingTrajectory`, `ComparisonGroup`, `ComparisonInput`,
 `Comparison`) also

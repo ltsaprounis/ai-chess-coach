@@ -1,5 +1,5 @@
 """Coach chat thread + message repository (docs/03-storage.md,
-docs/future-improvements/coach-chat.md).
+docs/archive/coach-chat.md).
 
 `ChatMessage` (the transcript unit) lives in `domain` because coach and
 the API layer share it too; `ChatThread`/`ChatThreadSummary` are

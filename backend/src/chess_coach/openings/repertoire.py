@@ -1,4 +1,4 @@
-"""Repertoire move tree (docs/future-improvements/openings-explorer.md,
+"""Repertoire move tree (docs/archive/openings-explorer.md,
 migrating into docs/05-openings.md alongside this code).
 
 A node is a move path from the start position: two games share a node

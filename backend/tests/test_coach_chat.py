@@ -1,4 +1,4 @@
-"""Coach chat tests (docs/06-coach.md, "Chat"; docs/future-improvements/
+"""Coach chat tests (docs/06-coach.md, "Chat"; docs/archive/
 coach-chat.md is the design record).
 
 Mirrors test_coach.py's provider-stubbing patterns (the SDKs are stubbed;
@@ -206,7 +206,7 @@ def test_chat_instructions_do_not_ban_the_seed_they_ship_with() -> None:
 
 
 def test_render_report_chat_context_turning_points_carry_no_citation_handle() -> None:
-    """docs/future-improvements/coach-chat.md, "Link discipline": chat has
+    """docs/archive/coach-chat.md, "Link discipline": chat has
     no append_game_links pass, so a [gN] handle here would never resolve --
     the seed must not offer one."""
     report = build_report("testuser", scenario_games())

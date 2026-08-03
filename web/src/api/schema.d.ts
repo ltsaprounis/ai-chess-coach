@@ -82,8 +82,8 @@ export interface paths {
         };
         /**
          * Player Openings Tree
-         * @description Per-color repertoire move tree (docs/future-improvements/
-         *     openings-explorer.md): drill from 1.e4 into any line, with games,
+         * @description Per-color repertoire move tree (docs/archive/openings-explorer.md):
+         *     drill from 1.e4 into any line, with games,
          *     score, eval, book status, and continuations at every node.
          *
          *     `since`/`until`/`time_class` scope the games exactly like
@@ -357,10 +357,12 @@ export interface paths {
          *     with the same shape as `GET`. 409 when there are no analyzed games
          *     to describe.
          *
-         *     Generated over the time control's **full** history, never a window:
+         *     Scoped to the student's current level, never to a caller window:
          *     the narrative is the durable artifact other prompts embed, and one
          *     written over "the last 30 days" would be silently wrong the moment
-         *     those 30 days moved. Time control is the one scope it carries.
+         *     those 30 days moved. The level window moves only when the student's
+         *     level does (docs/06-coach.md, "Window"), and time control remains
+         *     the one scope the stored row is keyed by.
          */
         post: operations["regenerate_player_profile_api_players__username__profile_post"];
         delete?: never;
@@ -750,7 +752,8 @@ export interface components {
          *
          *     `significant` is decided over the profile's whole comparison family
          *     by Benjamini-Hochberg, never per row, which is the entire point: a
-         *     profile makes up to fourteen of these, and judging each on its own
+         *     profile makes up to eight of these before a narrative run asks
+         *     anything, and judging each on its own
          *     manufactures roughly one spurious tendency every other student.
          */
         Comparison: {

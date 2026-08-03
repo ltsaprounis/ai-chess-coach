@@ -53,7 +53,7 @@ class BookMove(BaseModel):
 
 ## Repertoire tree
 
-Built for the [openings explorer](future-improvements/openings-explorer.md)
+Built for the [openings explorer](archive/openings-explorer.md)
 (design record there; this is the shipped contract). A per-color move
 tree over a player's games: root at ply 0, one node per SAN move.
 Nodes are move paths — two games share a node iff they played the

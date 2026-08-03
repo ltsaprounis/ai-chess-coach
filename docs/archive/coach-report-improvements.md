@@ -32,9 +32,10 @@ Findings 1-10 and 12 shipped in July 2026: the rework itself
 (`1548790`), then the follow-up iteration in
 [fixes-2026-07/](fixes-2026-07/README.md) (waves 1-3, ending
 `8c340d4`, which gave the report path the engine tool). Finding 11
-(the player profile) was never built; §11 below is still its
-analysis, but the buildable spec now lives in
-[player-profile.md](../future-improvements/player-profile.md).
+(the player profile) was unbuilt at archival; §11 below is still its
+analysis, and its buildable spec became
+[player-profile.md](player-profile.md), which shipped 2026-07-30 and
+is archived beside this doc.
 The line numbers in the table below refer to the code as it stood
 before the rework.
 
@@ -60,7 +61,7 @@ reviewable as a diff of the artifact.
 | 8 | Instructions ask for sections, not for rigor | `coach/prompt.py:32` | coach | P1 | done |
 | 9 | Report path has no engine tool, so it cannot verify a line | `coach/providers.py`, `docs/06-coach.md:54` | coach | P2 | done |
 | 10 | The report LLM call is never cached | `api/routes.py:486` | coach | P2 | done |
-| 11 | No durable player profile to feed other features | — | coach + dashboard | P3 | not built; spec moved to `future-improvements/player-profile.md` |
+| 11 | No durable player profile to feed other features | — | coach + dashboard | P3 | not built; spec moved to `archive/player-profile.md` |
 | 12 | The coach ignores the window/time-control filters the report takes | `api/routes.py:502` | coach | P1 | done |
 
 Two notes for whoever picks up 11. The turning-point entries still

@@ -1,5 +1,5 @@
 """Coach chat: per-thread toolkit + scope-seed builders (docs/07-api.md,
-"Chat"; docs/future-improvements/coach-chat.md is the design record).
+"Chat"; docs/archive/coach-chat.md is the design record).
 
 Kept out of `routes.py` because the five chat routes and their supporting
 wiring are sizeable on their own -- mirrors `runs.py`'s separation of
@@ -51,8 +51,7 @@ from chess_coach.storage import (
 )
 
 # Threads cap here; the send-message route 409s and directs the student to
-# start a new thread (docs/future-improvements/coach-chat.md, "Persistence
-# and cost").
+# start a new thread (docs/archive/coach-chat.md, "Persistence and cost").
 CHAT_MESSAGE_CAP = 40
 
 # find_games costs schema tokens like every tool, and (unlike opening_stats,

@@ -1,5 +1,5 @@
 """Repertoire tree tests (docs/05-openings.md; contract in
-docs/future-improvements/openings-explorer.md).
+docs/archive/openings-explorer.md).
 
 Uses the same tiny fixture book as test_openings.py
 (tests/testdata/minibook), extended with a few extra lines this file

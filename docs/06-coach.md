@@ -79,7 +79,7 @@ def build_highlights(games: list[AnalyzedGame], *,
 PROMPT_VERSION: str
 
 # --- Player profile (see "Player profile" below; the design record
-# --- is docs/future-improvements/player-profile.md) ---
+# --- is docs/archive/player-profile.md) ---
 
 # Pure distillation of an already-built report into the compact facts
 # layer — the aggregation runs once, in build_report; this projects
@@ -862,8 +862,8 @@ so a handle cannot be redefined from inside the advice.
 ## Player profile
 
 The durable who-is-this-student artifact
-(docs/future-improvements/player-profile.md is the design record;
-this section is the contract). Every feature that talks to the
+(docs/archive/player-profile.md is the design record; this section
+is the contract). Every feature that talks to the
 student used to re-derive who the student is from scratch; the
 profile computes it once, in two layers, and
 `render_profile_context` is the payoff — one compact block every
@@ -1280,8 +1280,8 @@ keep serving until `refresh` regenerates them.
 
 ## Chat
 
-One backbone, two scopes (docs/future-improvements/coach-chat.md is
-the design record; this section is the contract). The API layer owns
+One backbone, two scopes (docs/archive/coach-chat.md is the design
+record; this section is the contract). The API layer owns
 threads and transcripts; this component owns the seeds, the tools,
 and the provider mechanics.
 

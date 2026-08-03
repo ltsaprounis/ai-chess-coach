@@ -1,7 +1,7 @@
 # New Feature Proposal
 
 The live backlog: what to build next, first written after the MultiPV
-+ explain-move work and last refreshed 2026-07-29. Each candidate is
++ explain-move work and last refreshed 2026-08-03. Each candidate is
 grounded in code that exists today, mapped to the components it
 touches, and sorted by value against two standing constraints:
 
@@ -19,17 +19,29 @@ Sync from chess.com → SQLite; Stockfish analysis with per-move
 judgments, ACPL by phase, progress SSE; ECO opening classification;
 stats dashboard (record, ratings, activity, monthly ACPL and blunder
 rate, repertoire split chosen-vs-faced, blunder and brilliancy
-highlights that deep-link to the move); persisted window and
-time-control filters shared by Dashboard and Coach; live MultiPV
-candidate-lines panel on the game replay; on-demand, cached,
+highlights that deep-link to the move); an openings explorer that
+drills the repertoire as a per-color move tree; persisted window and
+time-control filters shared by Dashboard, Openings and Coach; live
+MultiPV candidate-lines panel on the game replay; on-demand, cached,
 regenerable coach explanations with the engine as an agentic tool;
-whole-report coaching advice that states its own analysis coverage.
-All gates green at 313 backend / 153 frontend tests.
+whole-report coaching advice that states its own analysis coverage; a
+per-time-control player profile whose context block the explain and
+game-chat prompts embed; and tool-grounded follow-up chat on both a
+game and a report. All gates green at 561 backend tests (5 of them
+opt-in against a real Stockfish) and 291 frontend.
 
-Two review cycles closed in July 2026 — the coach report rework and
-its fix iteration, and the whole-codebase scan. Both are in
-[archive/](archive/README.md); what they left unbuilt is in
-[future-improvements/](future-improvements/), not here.
+Two review cycles closed in July 2026 (the coach report rework and
+its fix iteration, and the whole-codebase scan), followed by three
+designs that shipped: the openings explorer, the player profile and
+the coach chat. All of them are in [archive/](archive/README.md);
+what they left unbuilt is in
+[future-improvements/](future-improvements/) or below, not there.
+
+One review is *not* closed: the outside
+[codebase assessment](codebase-assessment-2026-07-30.md) of
+2026-07-30. Its P0 (atomic migrations) and most of its P1 are
+untouched engineering debt rather than features, so they are not
+re-listed here; read it directly before planning a hardening pass.
 
 ## Tier 1 — quick wins, zero LLM cost
 
@@ -109,7 +121,7 @@ opening-phase ACPL mean what it says.
   cheaper than it was: `analysis_version` already exists to re-queue
   affected rows.
 - The openings explorer
-  ([openings-explorer.md](future-improvements/openings-explorer.md))
+  ([openings-explorer.md](archive/openings-explorer.md))
   wants the same book-exit ply, and is designed against it.
 
 ### 6. Lichess as a second game source
@@ -123,6 +135,28 @@ Doubles the audience for everything downstream.
   (migration for the new column), api/frontend (source picker).
 - The biggest cost is product, not code: two rating scales, two
   usernames per player.
+
+### 10. Second pass on the openings explorer
+
+The page shipped 2026-07-29 with four extensions recorded and left
+unbuilt; they came off the design record when it was archived
+([openings-explorer.md](archive/openings-explorer.md), "Deferred"),
+and the reasoning for each is still there. In rough value order:
+
+- **Punish metric**: when the *opponent* leaves book first, the eval
+  swing over the next few plies. "You get +0.8 out of book and still
+  score 40%" points at the middlegame, not at theory. Needs a defined
+  window before it can be built.
+- **Per-node drill to the Games page**: needs either a by-position
+  game filter or sample game ids on nodes; both have costs.
+- **Transposition annotation**: "also reached via …", by merging
+  node stats on EPD. Path identity stays; this only adds a label.
+- **LLM "explain this line"**: the one LLM item here, so
+  user-triggered and cached like every other, reusing the explain
+  stack.
+
+Touches openings + api + frontend, in that order; none of them is a
+domain change.
 
 ## Tier 3 — LLM features (user-triggered + cached, always)
 
@@ -145,7 +179,7 @@ stack: seeded context, engine tool, SSE streaming, cache keyed
 ### 8. Ask a follow-up question — **shipped**
 
 Built 2026-07-30 as the coach chat:
-[coach-chat.md](future-improvements/coach-chat.md) is the design
+[coach-chat.md](archive/coach-chat.md) is the design
 record, and the contracts live in the component docs. One chat
 backbone, two scopes (game-anchored on the Game page, report-scoped
 on the Coach page); `CoachProvider.chat` is stateless with an
@@ -191,6 +225,17 @@ faithfulness verifier over generated text.
 - **Reserved live-eval worker**: one long analysis run currently
   starves the live panel (workers=2). Reserve one worker for
   interactive streams, or make it a config choice.
+- **Coach chat follow-ups**: the small items its design record left
+  open ([coach-chat.md](archive/coach-chat.md), "Open questions and
+  risks"). Cheapest first: memo the report-scope seed per thread (it
+  currently rebuilds the whole `PlayerReport` on every message, which
+  is correct but real latency on a 1,200-game archive); abort the old
+  stream when the Game page's ply anchor changes mid-reply; close the
+  in-flight slot a vanished client can leak between the in-flight
+  mark and the SSE generator's first iteration. Two questions are
+  still unmeasured rather than unbuilt: how often a live provider
+  actually resumes rather than replaying, and whether the
+  ~40-message cap is anywhere near where context stops helping.
 - **Docker packaging**: the install is five prerequisites deep and
   the C++ engine build is the step most likely to fail on someone
   else's machine. One `docker compose up` fixes that, and settles how
@@ -211,22 +256,20 @@ faithfulness verifier over generated text.
    every piece of infrastructure it needs already exists.
 
 Then 4 (time management) as the next substantial analysis feature.
-5, 6, 8, 9 as demand pulls.
+5, 6, 9, 10 as demand pulls; 10 in particular is a page that already
+has users, so its items are cheap to justify one at a time.
 
-Three designs written up in
-[future-improvements/](future-improvements/) sat outside this
-ordering, waiting on a trigger rather than on priority. Two have
-since shipped: the **openings explorer** (2026-07-29) and the
-**player profile** (2026-07-30 — the context block the explain
-prompt and game-scope chat now embed). The **prompt-version
-fingerprint** still waits on its trigger: the next material change
+What remains in [future-improvements/](future-improvements/) sits
+outside this ordering, waiting on a trigger rather than on priority.
+The **prompt-version fingerprint** waits on the next material change
 to the explain prompt, so the key change and its cache invalidation
-land together.
-
-The **local LLM provider** (2026-07-31) joins them as research
+land together. The **local LLM provider** (2026-07-31) is research
 rather than a scheduled build: it is sized as the largest item in
 item 9, and its own doc lists four cheap in-repo measurements that
-should settle before anyone starts.
+should settle before anyone starts. One of them,
+[the llama-cpp-python spike](spike-reports/local-llm-provider.md),
+has since run. The **normalized game model** is there as a rejected
+alternative, kept so the rejection does not have to be re-argued.
 
 **Docker packaging** (2026-07-31) sits outside the ordering for a
 different reason: its trigger is publishing the repo, not a feature

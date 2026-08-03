@@ -6,7 +6,7 @@ import type { Components } from "react-markdown";
  * markdown whose citations are app-relative game deep links
  * (`[text][g1]` + `[g1]: /games/{id}?ply={n}`, docs/06-coach.md "Game
  * links"; chat replies mint the same links from tool results,
- * docs/future-improvements/coach-chat.md). Advice/chat state lives in
+ * docs/archive/coach-chat.md). Advice/chat state lives in
  * `useMutation`/`useReducer` state, so a same-tab navigation into a
  * game would blank the panel until the next request
  * (docs/08-frontend.md, Coach page) — open these links in a new tab

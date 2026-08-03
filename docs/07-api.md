@@ -41,7 +41,7 @@ run. Active runs are never swept.
 | GET    | `/api/players`                         | Stored players (`{username, games, last_played}`), most games first — the saved-players picker |
 | GET    | `/api/players/{u}/games`               | List games (query: opening, result, time_class, analyzed, paging). Rows are slim `GameSummary` (no pgn/full moves — see docs/03-storage.md), so the frontend can page through the whole archive |
 | GET    | `/api/players/{u}/openings`            | Per-opening record (games, W/L/D; avg cp loss once analyzed); optional `since`/`until` epoch-second window and `time_class` |
-| GET    | `/api/players/{u}/openings/tree`       | Repertoire move tree for one color (docs/future-improvements/openings-explorer.md). Query: `color` (required), `since`/`until`, `time_class` (same window semantics as `/openings`), `min_games` (default 2, clamped 1-10), `max_plies` (default 30, clamped 4-40) |
+| GET    | `/api/players/{u}/openings/tree`       | Repertoire move tree for one color (docs/archive/openings-explorer.md). Query: `color` (required), `since`/`until`, `time_class` (same window semantics as `/openings`), `min_games` (default 2, clamped 1-10), `max_plies` (default 30, clamped 4-40) |
 | GET    | `/api/games/{id}`                      | Game + analysis + opening |
 | POST   | `/api/players/{u}/analyze`             | Enqueue newest unanalyzed games up to body `limit` (capped by `engine.analyze_limit`), or explicit body `game_ids`; 202 with queued+remaining. "Unanalyzed" includes games whose stored analysis predates `engine.ANALYSIS_VERSION` (enqueue and `remaining` alike), so an engine version bump re-queues stored games automatically. Optional body `since`/`until`/`time_class` scope the bulk path — both the enqueue and `remaining` (`game_ids` ignores them). Zero resolved games starts no run and still answers 202, so `limit: 0` is a pure "how much is left?" probe and `queued=0, remaining=0` is a backfill's termination signal |
 | GET    | `/api/players/{u}/analyze/progress`    | SSE stream of pool progress events |
@@ -152,7 +152,7 @@ unexpected to 500.
   fallback), no row → `None` → the prompts render exactly as before.
   Report scope never embeds it (the report is the profile's own
   source).
-- Chat (docs/future-improvements/coach-chat.md is the design
+- Chat (docs/archive/coach-chat.md is the design
   record). The stored transcript is the source of truth; the API
   layer never interprets `provider_state`, only persists and returns
   it. Per message: load thread + transcript, build the per-thread

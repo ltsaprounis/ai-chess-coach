@@ -267,8 +267,9 @@ configurable path, so no code changes and
 Packaging does not become a numbered component. It owns no module in
 `chess_coach`, adds no import boundary and needs no sub-agent, so it
 stays out of the component numbering and out of the import-linter
-contracts — the same call [player-profile.md](player-profile.md)
-made for keeping the profile inside component 6.
+contracts — the same call
+[player-profile.md](../archive/player-profile.md) made for keeping
+the profile inside component 6.
 
 Two changes are worth making deliberately rather than by accident:
 

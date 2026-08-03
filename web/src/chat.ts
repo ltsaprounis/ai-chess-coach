@@ -23,8 +23,7 @@ export type ChatStreamEvent = {
  * persisted server-side along with the provider's opaque resume token
  * (`provider_state`; null when the provider can't resume, or replayed
  * from scratch). Mirrors the backend's `ChatEvent` model at
- * `type="done"` (docs/future-improvements/coach-chat.md, "The
- * provider seam").
+ * `type="done"` (docs/archive/coach-chat.md, "The provider seam").
  */
 export type ChatDone = {
   text: string;

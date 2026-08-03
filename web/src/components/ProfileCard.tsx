@@ -187,8 +187,8 @@ function milestoneRows(profile: PlayerProfile): Milestone[] {
  * The Coach page's player-profile card (docs/08-frontend.md): the
  * always-free facts distilled by `build_profile` plus, once
  * generated, the stored LLM narrative — a modest first surface per
- * docs/future-improvements/player-profile.md. Purely presentational,
- * mirroring how `ExplainPanel`/`ChatPanel` sit apart from their data
+ * docs/archive/player-profile.md. Purely presentational, mirroring
+ * how `ExplainPanel`/`ChatPanel` sit apart from their data
  * hooks: the Coach page owns the `GET`/`POST /profile` queries and
  * only hands this component the resolved data plus the generate
  * callback.

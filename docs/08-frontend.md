@@ -149,7 +149,7 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
    Charts are custom SVG components — no chart library.
 5. **Openings explorer** (`/players/{username}/openings`) — the
    per-color repertoire move tree from `GET /players/{u}/openings/
-   tree` (docs/future-improvements/openings-explorer.md), one fetch
+   tree` (docs/archive/openings-explorer.md), one fetch
    per (color, filters); every drill is client-side. A color toggle
    (White/Black) plus the Dashboard's time-window/time-control
    filters (`useStatsFilters`, same shared localStorage selection)
@@ -337,11 +337,15 @@ model each mirrors (see [GUIDELINES.md](GUIDELINES.md)).
   (`web/src/api.ts`) wraps the generated types and is the only place
   URLs appear.
 - A shared `Layout` (`web/src/components/Layout.tsx`) wraps every page
-  with the app header — brand, a saved-players switcher (from
-  `GET /api/players`), the always-available section tabs (Games /
-  Dashboard / Openings / Coach, pointing at the current player,
-  remembered in localStorage via `currentPlayer.ts`), and a Settings
-  link — so navigation lives in one place instead of per-page links.
+  with the app header — brand, the always-available section tabs
+  (Games / Dashboard / Openings / Coach, pointing at the current
+  player, remembered in localStorage via `currentPlayer.ts`), and a
+  Settings link — so navigation lives in one place instead of
+  per-page links. Switching players happens in Settings, which owns
+  the `GET /api/players` roster; a switcher in the header itself is
+  proposed, not built
+  ([codebase-assessment-2026-07-30.md](codebase-assessment-2026-07-30.md),
+  F12 and P2.1).
 - The coach chat is one shared `ChatPanel` component
   (`components/ChatPanel.tsx`) with two mounts (Game page,
   game-scoped; Coach page, report-scoped) driven by a `useChat`

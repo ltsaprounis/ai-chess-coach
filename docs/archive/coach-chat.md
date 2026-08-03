@@ -1,9 +1,12 @@
 # Coach chat — follow-up conversations grounded in tools
 
-Status: built 2026-07-30. The contracts migrated into the component
-docs (03, 06, 07, 08 + domain), which are authoritative; this doc
-remains the design record, and its "Open questions and risks"
-section carries the follow-ups accepted at review time. Expands
+Status: built 2026-07-30, archived 2026-08-03. The contracts migrated
+into the component docs (03, 06, 07, 08 + domain), which are
+authoritative; this doc remains the design record. Its "Open
+questions and risks" section carries the follow-ups accepted at
+review time. None of them are load-bearing, and all of them are now
+tracked as one entry under "Housekeeping worth scheduling" in
+[NEW-FEATURE-PROPOSAL.md](../NEW-FEATURE-PROPOSAL.md). Expands
 backlog item 8
 ("Ask a follow-up question",
 [NEW-FEATURE-PROPOSAL.md](../NEW-FEATURE-PROPOSAL.md)), which flagged
