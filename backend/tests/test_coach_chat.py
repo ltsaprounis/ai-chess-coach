@@ -215,6 +215,30 @@ def test_chat_instructions_do_not_ban_the_seed_they_ship_with() -> None:
     assert "The facts stated in the context above are established" in context
 
 
+def test_chat_instructions_coverage_honesty_bullet_covers_scan_continuation() -> None:
+    """docs/06-coach.md, "Chat" > "Instructions": the coverage-honesty
+    bullet also tells the model to continue a truncated scan from its
+    own resume cursor before concluding, when the question spans the
+    student's whole history -- rather than answering from the partial
+    sweep that missed the live recall failure this behaviour fixes."""
+    report = build_report("testuser", scenario_games())
+    context = render_report_chat_context(report, engine_available=True)
+
+    assert (
+        "- **Coverage honesty.** When you answer from a find_games or "
+        "scan_games result, state its own totals and denominators -- how "
+        "many matched, how many were scanned, how many had no analysis "
+        "-- and offer to widen the search rather than presenting a "
+        "partial look as the whole picture. Matches are EXAMPLES to "
+        "read, never a tendency: only compare_groups establishes one. "
+        "When a scan_games result is truncated and the question spans "
+        "the student's whole history, continue the sweep from the "
+        "result's own resume cursor -- repeat scan_games with until set "
+        "to the stated resume value -- before concluding, rather than "
+        "answering from the partial sweep."
+    ) in context
+
+
 def test_render_report_chat_context_turning_points_carry_no_citation_handle() -> None:
     """docs/archive/coach-chat.md, "Link discipline": chat has
     no append_game_links pass, so a [gN] handle here would never resolve --
@@ -301,6 +325,8 @@ class _StubChatToolkit:
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
         offset: int = 0,
     ) -> GameSearchPage:
@@ -312,6 +338,8 @@ class _StubChatToolkit:
                 "time_class": time_class,
                 "since": since,
                 "until": until,
+                "min_rating": min_rating,
+                "max_rating": max_rating,
                 "limit": limit,
                 "offset": offset,
             }
@@ -336,6 +364,8 @@ class _StubChatToolkit:
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
     ) -> ScanOutcome:
         self.scan_games_calls.append(
@@ -347,6 +377,8 @@ class _StubChatToolkit:
                 "time_class": time_class,
                 "since": since,
                 "until": until,
+                "min_rating": min_rating,
+                "max_rating": max_rating,
                 "limit": limit,
             }
         )
@@ -1178,6 +1210,23 @@ def test_get_game_tool_schema_offers_optional_ply() -> None:
     assert providers_module._GET_GAME_TOOL_SCHEMA["required"] == ["game_id"]  # pyright: ignore[reportPrivateUsage]
 
 
+def test_find_games_and_scan_games_schemas_offer_the_rating_band() -> None:
+    """docs/06-coach.md: `min_rating`/`max_rating` filter on the
+    student's own rating at game time and are declared once, in the
+    shared `_GAME_FILTER_PROPERTIES` dict, so find_games and scan_games
+    cannot drift apart on them (the comment above that dict says so).
+    """
+    filter_props = providers_module._GAME_FILTER_PROPERTIES  # pyright: ignore[reportPrivateUsage]
+    assert filter_props["min_rating"]["type"] == "integer"
+    assert filter_props["max_rating"]["type"] == "integer"
+
+    find_props = providers_module._FIND_GAMES_TOOL_SCHEMA["properties"]  # pyright: ignore[reportPrivateUsage]
+    scan_props = providers_module._SCAN_GAMES_TOOL_SCHEMA["properties"]  # pyright: ignore[reportPrivateUsage]
+    for props in (find_props, scan_props):
+        assert props["min_rating"]["type"] == "integer"
+        assert props["max_rating"]["type"] == "integer"
+
+
 async def test_get_game_ply_appends_position_block_after_move_sheet() -> None:
     detail = _widened_sheet_game()
     toolkit = _StubChatToolkit(game_detail=detail)
@@ -1262,6 +1311,58 @@ def test_render_scan_outcome_states_skipped_unanalyzed_when_nonzero() -> None:
     )
 
 
+def test_render_scan_outcome_truncated_with_resume_appends_continuation() -> None:
+    """docs/06-coach.md, "Chat": a truncated sweep is always continuable
+    exactly where it stopped -- the preamble names the resume date and
+    the epoch to pass back as `until`."""
+    outcome = ScanOutcome(
+        eligible=983,
+        scanned=800,
+        unverified_scanned=0,
+        skipped_unanalyzed=0,
+        truncated=True,
+        resume_until=1_704_067_200,
+        matches=[],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Scanned the newest 800 of 983 games matching the filters (0 "
+        "without analysis: soundness unverified; truncated: yes). "
+        "Covered down to 2024-01-01; to continue the sweep, repeat the "
+        "call with until=1704067200.\n"
+        "No games matched."
+    )
+
+
+def test_render_scan_outcome_truncated_without_resume_until_omits_continuation() -> (
+    None
+):
+    """Defensive case: the contract sets `resume_until` iff `truncated`,
+    but a truncated outcome with no resume cursor must not crash and
+    must render exactly as it did before the continuation sentence
+    existed."""
+    outcome = ScanOutcome(
+        eligible=100,
+        scanned=80,
+        unverified_scanned=0,
+        skipped_unanalyzed=0,
+        truncated=True,
+        resume_until=None,
+        matches=[],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert text == (
+        "Scanned the newest 80 of 100 games matching the filters (0 "
+        "without analysis: soundness unverified; truncated: yes).\n"
+        "No games matched."
+    )
+    assert "Covered down to" not in text
+
+
 async def test_call_scan_games_parses_match_and_filters() -> None:
     toolkit = _StubChatToolkit(scan_outcome=_scan_outcome())
 
@@ -1270,6 +1371,8 @@ async def test_call_scan_games_parses_match_and_filters() -> None:
         {
             "match": [{"event": "sacrifice", "piece": "queen", "sound_only": True}],
             "opponent": "hikaru",
+            "min_rating": 1400,
+            "max_rating": 1600,
             "limit": 5,
         },
     )
@@ -1278,10 +1381,52 @@ async def test_call_scan_games_parses_match_and_filters() -> None:
     [call] = toolkit.scan_games_calls
     assert call["opponent"] == "hikaru"
     assert call["limit"] == 5
+    assert call["min_rating"] == 1400
+    assert call["max_rating"] == 1600
     spec = cast("ScanSpec", call["spec"])
     assert spec.match == [
         ScanEventSpec(event="sacrifice", piece="queen", sound_only=True)
     ]
+
+
+async def test_call_scan_games_omits_rating_band_by_default() -> None:
+    """Both filters default to None -- a call that never mentions the
+    rating band must not silently apply one."""
+    toolkit = _StubChatToolkit(scan_outcome=_scan_outcome())
+
+    await providers_module._call_scan_games(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit),
+        {"match": [{"event": "castled"}]},
+    )
+
+    [call] = toolkit.scan_games_calls
+    assert call["min_rating"] is None
+    assert call["max_rating"] is None
+
+
+async def test_call_find_games_passes_the_rating_band_through() -> None:
+    toolkit = _StubChatToolkit(games=[_sample_game_summary()])
+
+    await providers_module._call_find_games(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit),
+        {"opponent": "hikaru", "min_rating": 1400, "max_rating": 1600},
+    )
+
+    [call] = toolkit.find_games_calls
+    assert call["min_rating"] == 1400
+    assert call["max_rating"] == 1600
+
+
+async def test_call_find_games_omits_rating_band_by_default() -> None:
+    toolkit = _StubChatToolkit(games=[_sample_game_summary()])
+
+    await providers_module._call_find_games(  # pyright: ignore[reportPrivateUsage]
+        cast("ChatToolkit", toolkit), {"opponent": "hikaru"}
+    )
+
+    [call] = toolkit.find_games_calls
+    assert call["min_rating"] is None
+    assert call["max_rating"] is None
 
 
 async def test_call_scan_games_parses_a_chain_with_the_slice_2_fields() -> None:
@@ -1559,6 +1704,8 @@ async def test_copilot_provider_chat_streams_text_tool_then_done(
             "time_class": None,
             "since": None,
             "until": None,
+            "min_rating": None,
+            "max_rating": None,
             "limit": 10,
             "offset": 0,
         }
@@ -1658,6 +1805,8 @@ async def test_copilot_provider_chat_renders_all_three_data_tools(
             "time_class": None,
             "since": None,
             "until": None,
+            "min_rating": None,
+            "max_rating": None,
             "limit": 10,
             "offset": 0,
         }

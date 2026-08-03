@@ -1845,7 +1845,11 @@ _CHAT_INSTRUCTIONS = (
     "many matched, how many were scanned, how many had no analysis -- "
     "and offer to widen the search rather than presenting a partial "
     "look as the whole picture. Matches are EXAMPLES to read, never a "
-    "tendency: only compare_groups establishes one.\n"
+    "tendency: only compare_groups establishes one. When a scan_games "
+    "result is truncated and the question spans the student's whole "
+    "history, continue the sweep from the result's own resume cursor -- "
+    "repeat scan_games with until set to the stated resume value -- "
+    "before concluding, rather than answering from the partial sweep.\n"
     "- **Dates.** Game times are stored as UTC epoch seconds. When the "
     'student names a calendar day ("the game on March 7th"), widen the '
     "search by a day on each side before concluding nothing matches -- "

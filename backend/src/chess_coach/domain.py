@@ -897,12 +897,15 @@ class ScanOutcome(BaseModel):
     "Chat").
 
     `eligible` counts every stored game matching the metadata
-    filters; `scanned` those actually inspected (the candidate cap
-    bounds it); `unverified_scanned` the scanned games with no
-    stored analysis — moves-only events still match there, with
-    eval-backed annotations rendered as unverified;
+    filters; `scanned` those actually inspected (a wall-time budget
+    bounds it, newest first); `unverified_scanned` the scanned games
+    with no stored analysis — moves-only events still match there,
+    with eval-backed annotations rendered as unverified;
     `skipped_unanalyzed` the games an eval-reading event could not
-    inspect at all.
+    inspect at all. When the budget ran out (`truncated`),
+    `resume_until` is the oldest scanned game's `end_time`: passing
+    it back as `until` continues the sweep exactly where this one
+    stopped, since everything at or after it is already covered.
     """
 
     eligible: int
@@ -910,6 +913,7 @@ class ScanOutcome(BaseModel):
     unverified_scanned: int
     skipped_unanalyzed: int
     truncated: bool
+    resume_until: int | None = None  # set iff truncated
     matches: list[ScanMatch]
 
 

@@ -3002,17 +3002,26 @@ def test_chat_toolkit_scan_games_eval_reading_denominators(
     assert outcome.unverified_scanned == 0
 
 
-def test_chat_toolkit_scan_games_truncated_flips_past_the_candidate_cap(
+def test_chat_toolkit_scan_games_covers_the_whole_archive_in_one_call(
     client: TestClient,
     db_path: Path,
     stub_registry: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`truncated` tells the model the candidate cap actually cut the
-    fetch short of `eligible` -- shrink the cap so a small fixture set
-    can exercise it without seeding hundreds of games."""
-    monkeypatch.setattr(chat_module, "_SCAN_CANDIDATE_CAP", 2)
-    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(5)]
+    """Replays a live recall failure (docs/07-api.md, "Chat"): 983
+    eligible games and the old 800-candidate cap cut the sweep at late
+    April, missing the match that sat in the 183-game tail. A chunked,
+    wall-time-budgeted sweep has to do what the count cap could not --
+    cover an archive bigger than the old cap in a single call. Shrink
+    `_SCAN_CHUNK` so a ~30-game fixture (more than the old cap would have
+    been, proportionally) still exercises several chunk iterations, with
+    the only match on the single oldest game -- the one the old cap's
+    truncation would have missed."""
+    monkeypatch.setattr(chat_module, "_SCAN_CHUNK", 8)
+    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(30)]
+    games[0] = make_game(
+        id="g-0", username="testuser", san_moves=_CASTLE_MOVES, end_time=0
+    )
     seed(db_path, games)
     thread: Any = create_thread(client, "testuser", scope="report").json()
     provider = stub_provider(stub_registry, "claude")
@@ -3026,35 +3035,89 @@ def test_chat_toolkit_scan_games_truncated_flips_past_the_candidate_cap(
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     [outcome] = outcomes
-    assert outcome.eligible == 5
-    assert outcome.scanned == 2  # the shrunk cap, not the true eligible count
-    assert outcome.truncated is True
-
-
-def test_chat_toolkit_scan_games_not_truncated_under_the_cap(
-    client: TestClient,
-    db_path: Path,
-    stub_registry: dict[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(chat_module, "_SCAN_CANDIDATE_CAP", 5)
-    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(5)]
-    seed(db_path, games)
-    thread: Any = create_thread(client, "testuser", scope="report").json()
-    provider = stub_provider(stub_registry, "claude")
-    outcomes: list[ScanOutcome] = []
-
-    async def probe(toolkit: ChatToolkit) -> None:
-        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
-        outcomes.append(await toolkit.scan_games(spec))
-
-    provider.chat_toolkit_probe = probe
-    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
-
-    [outcome] = outcomes
-    assert outcome.eligible == 5
-    assert outcome.scanned == 5
+    assert outcome.eligible == 30
+    assert outcome.scanned == 30  # every chunk ran; nothing left uncovered
     assert outcome.truncated is False
+    assert outcome.resume_until is None
+    assert [m.game.id for m in outcome.matches] == ["g-0"]  # the oldest game
+
+
+def test_chat_toolkit_scan_games_budget_truncates_after_a_full_chunk(
+    client: TestClient,
+    db_path: Path,
+    stub_registry: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero wall-time budget still lets the first chunk run -- the
+    budget is only checked between chunks, never before the first one --
+    and truncation reports `resume_until` as the oldest scanned game's
+    `end_time`, ready to resume the sweep from exactly there."""
+    monkeypatch.setattr(chat_module, "_SCAN_CHUNK", 8)
+    monkeypatch.setattr(chat_module, "_SCAN_TIME_BUDGET_S", 0.0)
+    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(30)]
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [outcome] = outcomes
+    assert outcome.eligible == 30
+    assert outcome.scanned == 8  # exactly one chunk before the budget cut in
+    assert outcome.truncated is True
+    # newest first: the first chunk covers end_time 29..22, so 22 is the
+    # oldest scanned game -- everything at or after it is covered.
+    assert outcome.resume_until == 22
+
+
+def test_chat_toolkit_scan_games_resume_until_continues_the_sweep(
+    client: TestClient,
+    db_path: Path,
+    stub_registry: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The truncated call's `resume_until`, passed back as `until`, picks
+    the sweep back up exactly where the first call stopped: the two
+    calls' `scanned` counts union to the whole archive with no overlap
+    (`until` is exclusive, and `resume_until` is a game already covered),
+    and the second call reaches the tail match the first call's budget
+    never let it see."""
+    monkeypatch.setattr(chat_module, "_SCAN_CHUNK", 8)
+    monkeypatch.setattr(chat_module, "_SCAN_TIME_BUDGET_S", 0.0)
+    games = [make_game(id=f"g-{i}", username="testuser", end_time=i) for i in range(30)]
+    games[0] = make_game(
+        id="g-0", username="testuser", san_moves=_CASTLE_MOVES, end_time=0
+    )
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        first = await toolkit.scan_games(spec)
+        outcomes.append(first)
+        assert first.resume_until is not None
+        # The first call already proved truncation under a zero budget;
+        # give the continuation a real one so it can run to completion
+        # and actually reach the tail.
+        monkeypatch.setattr(chat_module, "_SCAN_TIME_BUDGET_S", 12.0)
+        outcomes.append(await toolkit.scan_games(spec, until=first.resume_until))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    first, second = outcomes
+    assert first.truncated is True
+    assert second.truncated is False
+    assert first.scanned + second.scanned == first.eligible
+    assert [m.game.id for m in second.matches] == ["g-0"]
 
 
 def test_chat_toolkit_scan_games_match_limit_clamps_to_server_cap(
@@ -3139,6 +3202,61 @@ def test_chat_toolkit_scan_games_logs_wall_time(
         post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     assert any("scan_games" in record.message for record in caplog.records)
+
+
+def test_chat_toolkit_find_games_and_scan_games_filter_by_rating(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """`min_rating`/`max_rating` pass straight through to `GameFilters`
+    -- inclusive bounds on the student's own rating at game time, applied
+    by storage's shared clause builder to `find_games` and `scan_games`
+    alike (docs/06-coach.md, "Chat")."""
+    seed(
+        db_path,
+        [
+            make_game(
+                id="low",
+                username="testuser",
+                player_rating=1200,
+                san_moves=_CASTLE_MOVES,
+                end_time=1,
+            ),
+            make_game(
+                id="mid",
+                username="testuser",
+                player_rating=1500,
+                san_moves=_CASTLE_MOVES,
+                end_time=2,
+            ),
+            make_game(
+                id="high",
+                username="testuser",
+                player_rating=1800,
+                san_moves=_CASTLE_MOVES,
+                end_time=3,
+            ),
+        ],
+    )
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    pages: list[GameSearchPage] = []
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        pages.append(await toolkit.find_games(min_rating=1300, max_rating=1700))
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(
+            await toolkit.scan_games(spec, min_rating=1300, max_rating=1700)
+        )
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    [page] = pages
+    assert [g.id for g in page.games] == ["mid"]
+    [outcome] = outcomes
+    assert outcome.eligible == 1
+    assert [m.game.id for m in outcome.matches] == ["mid"]
 
 
 # --- profile scoping (docs/07-api.md, "Player profile") ------------------

@@ -219,14 +219,17 @@ class ChatToolkit(Protocol):
                          time_class: TimeClass | None = None,
                          since: int | None = None,
                          until: int | None = None,
+                         min_rating: int | None = None,
+                         max_rating: int | None = None,
                          limit: int = 10,
                          offset: int = 0) -> GameSearchPage
     async def get_game(self, game_id: str) -> GameDetail | None
     async def opening_stats(self) -> list[OpeningStats]
     # The event scan (see "Chat" > "Tools"): coach owns the event
     # detectors and rendering; the API implementation owns the
-    # candidate fetch, the denominators, and the caps. Metadata
-    # filters mean exactly what find_games' do.
+    # candidate fetch, the denominators, and the wall-time budget.
+    # Metadata filters mean exactly what find_games' do; the rating
+    # pair filters on the student's own rating at game time.
     async def scan_games(self, spec: ScanSpec, *,
                          opponent: str | None = None,
                          opening: str | None = None,
@@ -234,7 +237,18 @@ class ChatToolkit(Protocol):
                          time_class: TimeClass | None = None,
                          since: int | None = None,
                          until: int | None = None,
+                         min_rating: int | None = None,
+                         max_rating: int | None = None,
                          limit: int = 10) -> ScanOutcome
+    # The comparison guard, exposed so a run cannot obtain an unjudged
+    # percentage (see "Reading a comparison"). Returns the group's
+    # record and the rest of `within`, computed by subtraction -- the
+    # caller never supplies the other side. `prior_comparisons` seeds
+    # the BH family with whatever the profile already judged.
+    prior_comparisons: list[Comparison]
+    async def compare_games(self, group: ComparisonGroup,
+                            within: ComparisonGroup | None = None,
+                            ) -> tuple[Record, Record]
 
 # The scan event library behind `scan_games` (see "Chat" > "Tools"):
 # pure functions over ScanCandidate, no I/O, no engine. The API layer
@@ -246,15 +260,6 @@ class ChatToolkit(Protocol):
 def run_scan(candidates: list[ScanCandidate],
              spec: ScanSpec) -> list[ScanMatch]
 def spec_needs_evals(spec: ScanSpec) -> bool
-    # The comparison guard, exposed so a run cannot obtain an unjudged
-    # percentage (see "Reading a comparison"). Returns the group's
-    # record and the rest of `within`, computed by subtraction -- the
-    # caller never supplies the other side. `prior_comparisons` seeds
-    # the BH family with whatever the profile already judged.
-    prior_comparisons: list[Comparison]
-    async def compare_games(self, group: ComparisonGroup,
-                            within: ComparisonGroup | None = None,
-                            ) -> tuple[Record, Record]
 
 # Scope seeds — deterministic templates, snapshot-tested like every
 # other prompt. `render_game_chat_context` raises ValueError when
@@ -1362,8 +1367,14 @@ sound/unsound read is replaced by a mate-aware verdict: a slip when
 nothing was captured and the mate slowed or was lost, forcing the
 mate home when a real capture kept it at least as fast, and otherwise
 the facts with no verdict word, with `sound_only` excluding the slip
-class. Every rendered result opens with the `ScanOutcome`
-denominators, so coverage is a fact the model reads. Matches are
+class. Coverage is bounded by a wall-time budget, not a candidate
+count: the API layer sweeps newest-first until every eligible game
+is covered or the budget runs out, and a truncated result carries
+`resume_until`, rendered as "covered down to {date}; to continue,
+repeat with until={epoch}", so a sweep is always continuable
+exactly where it stopped. Every rendered result opens with the
+`ScanOutcome` denominators, so coverage is a fact the model reads.
+Matches are
 examples, never tendencies: scan dimensions are outcome-adjacent
 and must never become `ComparisonGroup` fields. The full design
 record with the archive measurements behind the gates is
@@ -1381,9 +1392,12 @@ links (`/games/{id}?ply={n}`) using ids returned by tools — never an
 invented id (see "Link discipline" in the design record for why
 there is no `append_game_links` pass here); coverage honesty — when
 answering from search or scan results, state the result's own
-totals and denominators and offer to widen, and report matches as
+totals and denominators and offer to widen, report matches as
 examples, never tendencies (tendencies go through
-`compare_groups`); dates — game times are UTC epoch seconds, so a
+`compare_groups`), and when a scan truncated and the question spans
+the student's whole history, continue from the result's own
+resume cursor before concluding rather than answering from the
+partial sweep; dates — game times are UTC epoch seconds, so a
 calendar date the student names is widened by a day on each side;
 and event fit — when no scan event or chain matches the question,
 say so and fall back to metadata search plus reading rather than

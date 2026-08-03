@@ -35,6 +35,7 @@ from chess_coach.domain import (
     PlayerReport,
     Record,
     Result,
+    ScanMatch,
     ScanOutcome,
     ScanSpec,
     TimeClass,
@@ -69,12 +70,22 @@ CHAT_MESSAGE_CAP = 40
 # can't render the whole archive into one tool result.
 _FIND_GAMES_LIMIT_CAP = 25
 
-# scan_games' candidate fetch cap: bounds the worst-case replay (plus SEE
-# for sacrifice steps) cost per call, however wide the model's own filters
-# are -- an unfiltered archive (thousands of games) never costs more than
-# this many replays. The outcome's `truncated` flag tells the model to
-# narrow the window instead of trusting a scan that stopped partway.
-_SCAN_CANDIDATE_CAP = 800
+# scan_games' fetch chunk: games fetched and scanned (replay plus SEE for
+# sacrifice steps) per iteration of the budgeted sweep below. Chunking
+# keeps memory flat across an archive-scale sweep and makes the wall-time
+# budget check granular -- the check only runs between chunks, so a
+# smaller chunk bounds how far one call can overrun the budget.
+_SCAN_CHUNK = 200
+
+# scan_games' wall-time budget per call: bounds turn latency, which is the
+# real constraint a candidate-count cap only approximated -- and badly. A
+# live recall failure exposed it: 983 eligible games, the old 800-candidate
+# cap cut the sweep at late April with the measured scan cost around
+# 7ms/game (983 games is ~7s), so the cap gave up three seconds before an
+# answer that was well within budget. The outcome's `truncated` flag plus
+# `resume_until` tell the model how to continue instead of just how far a
+# fixed cap got.
+_SCAN_TIME_BUDGET_S = 12.0
 
 # scan_games' match cap, independent of the candidate cap above: bounds the
 # tool-result size the same way _FIND_GAMES_LIMIT_CAP bounds find_games'.
@@ -240,6 +251,8 @@ class ApiChatToolkit:
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
         offset: int = 0,
     ) -> GameSearchPage:
@@ -256,6 +269,8 @@ class ApiChatToolkit:
             time_class=time_class,
             since=since,
             until=until,
+            min_rating=min_rating,
+            max_rating=max_rating,
             limit=min(max(limit, 0), _FIND_GAMES_LIMIT_CAP),
             offset=max(offset, 0),
         )
@@ -273,14 +288,16 @@ class ApiChatToolkit:
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
     ) -> ScanOutcome:
-        """The event scan (docs/06-coach.md, "Chat"): candidate fetch,
-        the outcome's denominators, and `run_scan` itself all run inside
-        one `run_in_threadpool` call, unlike every other tool on this
-        toolkit -- the replay-plus-SEE work is CPU-bound, so batching it
-        keeps the event loop free for SSE instead of bouncing back to it
-        between steps that don't need it.
+        """The event scan (docs/06-coach.md, "Chat"): a chunked
+        newest-first sweep, the outcome's denominators, and `run_scan`
+        itself all run inside one `run_in_threadpool` call, unlike every
+        other tool on this toolkit -- the replay-plus-SEE work is
+        CPU-bound, so batching it keeps the event loop free for SSE
+        instead of bouncing back to it between chunks that don't need it.
 
         Like `find_games`, the metadata filters are the model's own as
         given, with no intersection against the toolkit's own
@@ -291,21 +308,41 @@ class ApiChatToolkit:
         `self._username`, so there is no id path across players the way
         `get_game` has to guard against directly.
 
+        The sweep fetches `_SCAN_CHUNK`-sized pages via `scan_candidates`,
+        `offset` advancing by one chunk per iteration, and runs `run_scan`
+        per chunk. Offset paging is only ever stable within this one call,
+        on the shared WAL connection -- the cursor a caller replays across
+        *calls* is `resume_until` (until-based, see `ScanOutcome`'s
+        docstring), not an offset. The loop stops when a fetch comes back
+        under `_SCAN_CHUNK` rows (every matching candidate has now been
+        seen) or, after a chunk, the wall-time budget has run out; the
+        first chunk always runs regardless of the budget, since the
+        budget is only ever checked between chunks. Matches are capped at
+        `match_cap` like before, but the sweep keeps scanning chunks for
+        coverage even once the cap is full -- the denominators and the
+        resume cursor have to describe the whole sweep, so matches past
+        the cap are dropped from the response while still counted for
+        coverage.
+
         Denominators (docs/06-coach.md, "Chat"): `eligible` is every
-        stored game the metadata filters match, analyzed or not.
-        Sequences that read stored evals (`spec_needs_evals`) restrict
-        the candidate fetch to analyzed games and report the rest as
-        `skipped_unanalyzed`; moves-only sequences fetch everything up
-        to `_SCAN_CANDIDATE_CAP` and instead report `unverified_scanned`
-        -- the fetched candidates with no stored analysis, whose
-        eval-backed annotations render as unverified. `truncated` flags
-        when the candidate cap actually cut the fetch short of
-        `eligible`.
+        stored game the metadata filters match, analyzed or not, read
+        from `game_record` exactly as before. Sequences that read stored
+        evals (`spec_needs_evals`) restrict every chunk's fetch to
+        analyzed games and report the rest as `skipped_unanalyzed`;
+        moves-only sequences fetch everything and instead report
+        `unverified_scanned` -- the scanned candidates with no stored
+        analysis, whose eval-backed annotations render as unverified.
+        `truncated` flags a sweep the budget cut short of `eligible`; when
+        it does, `resume_until` is the oldest scanned game's `end_time`
+        so the caller can pass it back as `until` and continue exactly
+        where this call stopped.
         """
         needs_evals = spec_needs_evals(spec)
         match_cap = min(max(limit, 0), _SCAN_MATCH_CAP)
 
-        def make_filters(*, analyzed: bool | None, limit: int) -> GameFilters:
+        def make_filters(
+            *, analyzed: bool | None, limit: int, offset: int = 0
+        ) -> GameFilters:
             return GameFilters(
                 opponent=opponent,
                 opening_name_like=opening,
@@ -313,20 +350,45 @@ class ApiChatToolkit:
                 time_class=time_class,
                 since=since,
                 until=until,
+                min_rating=min_rating,
+                max_rating=max_rating,
                 analyzed=analyzed,
                 limit=limit,
+                offset=offset,
             )
 
         def scan() -> ScanOutcome:
             start = time.monotonic()
-            candidates = scan_candidates(
-                self._db,
-                self._username,
-                make_filters(
-                    analyzed=True if needs_evals else None,
-                    limit=_SCAN_CANDIDATE_CAP,
-                ),
-            )
+            fetch_analyzed = True if needs_evals else None
+            matches: list[ScanMatch] = []
+            scanned = 0
+            unverified_scanned = 0
+            oldest_scanned_end_time: int | None = None
+            truncated = False
+            offset = 0
+            while True:
+                chunk = scan_candidates(
+                    self._db,
+                    self._username,
+                    make_filters(
+                        analyzed=fetch_analyzed, limit=_SCAN_CHUNK, offset=offset
+                    ),
+                )
+                if chunk:
+                    oldest_scanned_end_time = chunk[-1].summary.end_time
+                scanned += len(chunk)
+                if not needs_evals:
+                    unverified_scanned += sum(
+                        1 for candidate in chunk if candidate.evals is None
+                    )
+                matches.extend(run_scan(chunk, spec))
+                if len(chunk) < _SCAN_CHUNK:
+                    break  # every matching candidate has now been fetched
+                if time.monotonic() - start > _SCAN_TIME_BUDGET_S:
+                    truncated = True
+                    break
+                offset += _SCAN_CHUNK
+
             eligible = game_record(
                 self._db, self._username, make_filters(analyzed=None, limit=0)
             ).games
@@ -337,20 +399,17 @@ class ApiChatToolkit:
                 if needs_evals
                 else 0
             )
-            scanned = len(candidates)
-            unverified_scanned = (
-                0
-                if needs_evals
-                else sum(1 for candidate in candidates if candidate.evals is None)
-            )
-            truncated = (eligible - skipped_unanalyzed) > scanned
-            matches = run_scan(candidates, spec)[:match_cap]
+            matches = matches[:match_cap]
+            resume_until = oldest_scanned_end_time if truncated else None
             elapsed = time.monotonic() - start
             logger.info(
-                "scan_games: %d candidates in %.2fs, %d matches",
+                "scan_games: scanned %d of %d eligible in %.2fs, "
+                "%d matches, truncated=%s",
                 scanned,
+                eligible,
                 elapsed,
                 len(matches),
+                truncated,
             )
             return ScanOutcome(
                 eligible=eligible,
@@ -358,6 +417,7 @@ class ApiChatToolkit:
                 unverified_scanned=unverified_scanned,
                 skipped_unanalyzed=skipped_unanalyzed,
                 truncated=truncated,
+                resume_until=resume_until,
                 matches=matches,
             )
 

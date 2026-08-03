@@ -390,9 +390,12 @@ exact until 2026-08, loosened because the filter's one consumer is
 a student half-remembering a username, and "ousaama" should find
 "ousaama78"), color, result, time_class, analyzed, since/until
 (epoch-second window, since inclusive, until exclusive — the same
-semantics every other windowed query here uses), and limit/offset
-paging. The name, opponent and window filters exist for the coach
-chat toolkit's `find_games` and `scan_games` tools
+semantics every other windowed query here uses), min_rating/
+max_rating (inclusive bounds on `player_rating`, the student's own
+rating at game time — "games where I'm 1200 and above" is a real
+question and dates were a poor proxy for it), and limit/offset
+paging. The name, opponent, window and rating filters exist for the
+coach chat toolkit's `find_games` and `scan_games` tools
 (docs/archive/coach-chat.md;
 docs/archive/coach-game-search.md), which query by what
 a student says — an opponent's name, an opening's name — rather

@@ -552,6 +552,73 @@ def test_game_filters_existing_fields_still_work_alongside_new_ones(db: Db) -> N
     ]
 
 
+def test_game_filters_min_rating_is_inclusive(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="below", player_rating=1199, end_time=1),
+            make_game(id="at", player_rating=1200, end_time=2),
+            make_game(id="above", player_rating=1201, end_time=3),
+        ],
+    )
+    ids = {g.id for g in list_games(db, "testuser", GameFilters(min_rating=1200))}
+    assert ids == {"at", "above"}  # the boundary itself is included
+
+
+def test_game_filters_max_rating_is_inclusive(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="below", player_rating=1199, end_time=1),
+            make_game(id="at", player_rating=1200, end_time=2),
+            make_game(id="above", player_rating=1201, end_time=3),
+        ],
+    )
+    ids = {g.id for g in list_games(db, "testuser", GameFilters(max_rating=1200))}
+    assert ids == {"below", "at"}  # the boundary itself is included
+
+
+def test_game_filters_min_and_max_rating_together_form_a_band(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="too-low", player_rating=999, end_time=1),
+            make_game(id="in-band-low", player_rating=1000, end_time=2),
+            make_game(id="in-band-high", player_rating=1400, end_time=3),
+            make_game(id="too-high", player_rating=1401, end_time=4),
+        ],
+    )
+    ids = {
+        g.id
+        for g in list_games(
+            db, "testuser", GameFilters(min_rating=1000, max_rating=1400)
+        )
+    }
+    assert ids == {"in-band-low", "in-band-high"}
+
+
+def test_game_record_and_list_games_agree_on_count_under_rating_filter(
+    db: Db,
+) -> None:
+    """The denominator-parity property the chat toolkit relies on: a
+    rating filter must narrow `game_record`'s W/D/L total and
+    `list_games`'s rows to the same scope."""
+    upsert_games(
+        db,
+        [
+            make_game(id="g1", result="win", player_rating=1200, end_time=1),
+            make_game(id="g2", result="loss", player_rating=1300, end_time=2),
+            make_game(id="g3", result="draw", player_rating=1500, end_time=3),
+        ],
+    )
+    filters = GameFilters(min_rating=1200, max_rating=1300)
+
+    record = game_record(db, "testuser", filters)
+    listed = list_games(db, "testuser", filters)
+    assert record.games == len(listed) == 2
+    assert {g.id for g in listed} == {"g1", "g2"}
+
+
 # --- scan_candidates (scan_games tool) -------------------------------------
 
 
@@ -668,6 +735,24 @@ def test_scan_candidates_and_list_games_agree_on_shared_filters(db: Db) -> None:
     list_ids = {g.id for g in list_games(db, "testuser", filters)}
     scan_ids = {c.summary.id for c in scan_candidates(db, "testuser", filters)}
     assert list_ids == scan_ids == {"g1"}
+
+
+def test_scan_candidates_honors_rating_filter(db: Db) -> None:
+    upsert_games(
+        db,
+        [
+            make_game(id="low", player_rating=1100, end_time=1),
+            make_game(id="mid", player_rating=1250, end_time=2),
+            make_game(id="high", player_rating=1400, end_time=3),
+        ],
+    )
+    ids = {
+        c.summary.id
+        for c in scan_candidates(
+            db, "testuser", GameFilters(min_rating=1200, max_rating=1300)
+        )
+    }
+    assert ids == {"mid"}
 
 
 def test_scan_candidates_count_matches_game_record_when_no_limit_truncates(

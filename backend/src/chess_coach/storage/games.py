@@ -56,6 +56,10 @@ class GameFilters(BaseModel):
     analyzed: bool | None = None
     since: int | None = None
     until: int | None = None
+    # Inclusive bounds on player_rating, the student's own rating at
+    # game time.
+    min_rating: int | None = None
+    max_rating: int | None = None
     limit: int = Field(default=100, ge=0)
     offset: int = Field(default=0, ge=0)
 
@@ -164,6 +168,12 @@ def _game_filter_clauses(
     if filters.until is not None:
         clauses.append("g.end_time < ?")
         params.append(filters.until)
+    if filters.min_rating is not None:
+        clauses.append("g.player_rating >= ?")
+        params.append(filters.min_rating)
+    if filters.max_rating is not None:
+        clauses.append("g.player_rating <= ?")
+        params.append(filters.max_rating)
     return clauses, params
 
 

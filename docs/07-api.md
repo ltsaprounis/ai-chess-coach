@@ -164,12 +164,17 @@ unexpected to 500.
   across players); `find_games` pairs its page with a `game_record`
   total over the same filters (shared clause builder, so the count
   cannot drift from the rows) into a `GameSearchPage`; `scan_games`
-  fetches up to `_SCAN_CANDIDATE_CAP` (800) candidates via
+  sweeps candidates newest-first in `_SCAN_CHUNK`-sized pages via
   `scan_candidates` — eval-reading events restrict to analyzed
-  games, move-only events take all — computes the `ScanOutcome`
-  denominators from `game_record`, runs coach's `run_scan` inside
-  the same threadpool call (the replay+SEE work is CPU-bound; the
-  event loop must stay free for SSE) and logs the scan wall time;
+  games, move-only events take all — running coach's `run_scan` per
+  chunk inside one threadpool call (the replay+SEE work is
+  CPU-bound; the event loop must stay free for SSE) until every
+  eligible game is covered or `_SCAN_TIME_BUDGET_S` runs out, so
+  coverage is bounded by latency rather than an arbitrary count;
+  a budget-truncated outcome carries `resume_until` (the oldest
+  scanned `end_time`, which as `until` continues the sweep exactly
+  where it stopped), the `ScanOutcome` denominators come from
+  `game_record`, and the scan wall time and coverage are logged;
   `opening_stats` applies the thread's window; `analyst` is the same
   `pool.eval_lines` wrapper explain uses, or None when the pool is
   down — then stream `provider.chat(...)` as SSE. Seeds: game scope

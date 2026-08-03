@@ -235,6 +235,18 @@ _GAME_FILTER_PROPERTIES: dict[str, Any] = {
         "type": "integer",
         "description": "Only games ending before this epoch second (exclusive).",
     },
+    "min_rating": {
+        "type": "integer",
+        "description": (
+            "Only games where the student's own rating at game time was at least this."
+        ),
+    },
+    "max_rating": {
+        "type": "integer",
+        "description": (
+            "Only games where the student's own rating at game time was at most this."
+        ),
+    },
 }
 
 _FIND_GAMES_TOOL_SCHEMA: dict[str, Any] = {
@@ -457,6 +469,8 @@ class ChatToolkit(Protocol):
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
         offset: int = 0,
     ) -> GameSearchPage: ...
@@ -465,8 +479,9 @@ class ChatToolkit(Protocol):
 
     # The event scan (docs/06-coach.md, "Chat" -- "Tools"): coach owns the
     # event detectors and rendering; the API implementation owns the
-    # candidate fetch, the denominators, and the caps. Metadata filters
-    # mean exactly what find_games' do.
+    # candidate fetch, the denominators, and the wall-time budget. Metadata
+    # filters mean exactly what find_games' do; the rating pair filters on
+    # the student's own rating at game time.
     async def scan_games(
         self,
         spec: ScanSpec,
@@ -477,6 +492,8 @@ class ChatToolkit(Protocol):
         time_class: TimeClass | None = None,
         since: int | None = None,
         until: int | None = None,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
         limit: int = 10,
     ) -> ScanOutcome: ...
 
@@ -1393,6 +1410,8 @@ async def _call_find_games(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
         time_class=_opt_time_class(args.get("time_class")),
         since=_opt_int(args.get("since")),
         until=_opt_int(args.get("until")),
+        min_rating=_opt_int(args.get("min_rating")),
+        max_rating=_opt_int(args.get("max_rating")),
         limit=int(limit) if isinstance(limit, (int, float)) else 10,
         offset=int(offset) if isinstance(offset, (int, float)) else 0,
     )
@@ -1607,6 +1626,8 @@ async def _call_scan_games(toolkit: ChatToolkit, args: dict[str, Any]) -> str:
         time_class=_opt_time_class(args.get("time_class")),
         since=_opt_int(args.get("since")),
         until=_opt_int(args.get("until")),
+        min_rating=_opt_int(args.get("min_rating")),
+        max_rating=_opt_int(args.get("max_rating")),
         limit=int(limit) if isinstance(limit, (int, float)) else 10,
     )
     return _render_scan_outcome(outcome)
@@ -1616,9 +1637,15 @@ def _scan_preamble(outcome: ScanOutcome) -> str:
     """The coverage-honesty statement every scan result opens with
     (docs/06-coach.md, "Chat"): scanned vs eligible, how many of those
     were unanalyzed (soundness on them is unverified, not assumed),
-    whether the candidate cap truncated the sweep, and -- only when it
-    happened at all -- how many more an eval-reading event had to skip
-    outright.
+    whether the wall-time budget truncated the sweep, and -- only when
+    it happened at all -- how many more an eval-reading event had to
+    skip outright.
+
+    A truncated sweep is always continuable exactly where it stopped:
+    `resume_until` is the oldest scanned game's `end_time`, so passing
+    it back as `until` picks up right after the covered slice. Stated
+    here as well as carried on the outcome, since the model reads this
+    preamble, not the struct.
     """
     truncated = "yes" if outcome.truncated else "no"
     # "all" belongs only to the untruncated case; a truncated sweep
@@ -1638,6 +1665,12 @@ def _scan_preamble(outcome: ScanOutcome) -> str:
         preamble += (
             f" {outcome.skipped_unanalyzed} more without analysis could "
             "not be scanned for this event at all."
+        )
+    if outcome.truncated and outcome.resume_until is not None:
+        preamble += (
+            f" Covered down to {_format_date(outcome.resume_until)}; to "
+            f"continue the sweep, repeat the call with "
+            f"until={outcome.resume_until}."
         )
     return preamble
 
