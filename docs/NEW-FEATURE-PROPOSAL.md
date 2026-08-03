@@ -277,3 +277,17 @@ anyone is waiting on. It touches no component contract as designed,
 and one assumption — that the CLI bundled inside the Claude SDK
 wheel can complete an interactive login — should be tested before
 the first slice.
+
+**Coach game search** (2026-08-03) is designed and waiting on a go:
+one new chat tool (`scan_games`, composable named events over stored
+analyses, reusing the highlights SEE machinery: sacrifices with
+piece tiers, comebacks, swings, delivered mates, castling, chained
+as "A then B within N plies") plus small retrieval fixes (search
+totals, substring opponent match, a move-sheet fix that today hides
+engine-best sacrifices, a FEN at any ply). The event definitions are
+already validated against the production archive
+([spike report](spike-reports/coach-game-search-events.md)): the
+dialogue that motivated the feature is captured, its near-misses
+rejected, 605 analyzed wins sweep in 4 s. Engine/data only, no
+migrations, no LLM cost beyond tool results:
+[coach-game-search.md](future-improvements/coach-game-search.md).
