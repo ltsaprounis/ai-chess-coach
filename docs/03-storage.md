@@ -147,6 +147,16 @@ def upsert_games(db: Db, games: list[Game]) -> None
 def list_games(db: Db, username: str,
                filters: GameFilters) -> list[GameSummary]
 def get_game(db: Db, game_id: str) -> GameDetail | None
+def scan_candidates(db: Db, username: str,
+                    filters: GameFilters) -> list[ScanCandidate]
+#   The chat scan tool's fetch (docs/06-coach.md, "Chat"): summary
+#   columns plus full san_moves and, via LEFT JOIN, evals — None on
+#   unanalyzed rows, exactly RepertoireGame's convention. No pgn
+#   ever rides along. Honors every GameFilters field including
+#   `analyzed` (None = all games) and `limit` as the candidate cap,
+#   newest first, through the same shared clause builder as
+#   list_games/game_record so a filter cannot come to mean two
+#   things.
 def list_players(db: Db) -> list[PlayerSummary]  # saved-players picker
 def latest_game_time(db: Db, username: str) -> int | None  # sync cut
 def games_needing_analysis(db, username: str, depth: int,
@@ -375,14 +385,18 @@ the whole archive uncapped
 (Game + optional analysis + opening) stays the full record;
 `GameFilters` is storage's own public parameter type:
 opening_eco (exact), opening_name_like (case-insensitive substring
-on the classified name), opponent (case-insensitive exact), color,
-result, time_class, analyzed, since/until (epoch-second window,
-since inclusive, until exclusive — the same semantics every other
-windowed query here uses), and limit/offset paging. The name,
-opponent and window filters exist for the coach chat toolkit's
-`find_games` tool (docs/archive/coach-chat.md), which
-queries by what a student says — an opponent's name, an opening's
-name — rather than by ECO code.
+on the classified name), opponent (case-insensitive substring —
+exact until 2026-08, loosened because the filter's one consumer is
+a student half-remembering a username, and "ousama" should find
+"ousaama78"), color, result, time_class, analyzed, since/until
+(epoch-second window, since inclusive, until exclusive — the same
+semantics every other windowed query here uses), and limit/offset
+paging. The name, opponent and window filters exist for the coach
+chat toolkit's `find_games` and `scan_games` tools
+(docs/archive/coach-chat.md;
+docs/future-improvements/coach-game-search.md), which query by what
+a student says — an opponent's name, an opening's name — rather
+than by ECO code.
 
 `game_record(db, username, filters) -> Record` counts W/D/L over the
 same filters, for the coach's comparison guard (docs/06-coach.md,

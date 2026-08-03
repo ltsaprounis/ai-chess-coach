@@ -98,8 +98,15 @@ benefits from.
 One new chat tool. The model composes one to three **named events
 from a fixed server-side library** into an ordered match sequence,
 plus the same metadata filters `find_games` takes; the server
-fetches matching analyzed games, replays each with python-chess
-against its stored evals, and returns capped match rows.
+fetches matching games, replays each with python-chess against its
+stored evals when it has them, and returns capped match rows.
+Recall-first extends to analysis coverage: events computable from
+the moves alone (`sacrifice`, `delivered_mate`, `castled`) scan
+**every** stored game, with eval-backed annotations marked
+unverified on unanalyzed games; only the events that read stored
+evals (`comeback`, `eval_swing`) are restricted to analyzed games.
+An unanalyzed remembered gem is therefore *found* either way; only
+its soundness check degrades, into an offer to analyze.
 No LLM tokens are spent scanning, no arbitrary code runs against the
 archive, and the vocabulary is closed by construction.
 
@@ -163,8 +170,10 @@ The gates:
 The annotations, carried on every match: `realizes` (the ply count
 within which the player's material actually dropped >= 2 below its
 pre-move level or mate was delivered, or `declined` when it never
-did), `sound` (eval after >= 0), `balanced_before` (eval before <=
-+2.0), and the eval-before/after pair. Realization was a 6-ply gate
+did; moves-only, so always present), `sound` (eval after >= 0),
+`balanced_before` (eval before <= +2.0), and the eval-before/after
+pair; the eval-backed three render as `unverified (unanalyzed)` on
+games without stored analysis. Realization was a 6-ply gate
 in the first design pass; the second measurement pass showed that
 filter hides 14 of 64 candidate games on the real archive,
 including a sound declined exchange sac from an equal position and
@@ -184,13 +193,14 @@ that from a digit stream.
 Every result opens with structural denominators, computed by the
 server from `game_record` over the same filters:
 
-    Scanned all 312 analyzed of 489 games matching the filters
-    (177 unanalyzed skipped; scan truncated: no).
+    Scanned all 489 games matching the filters (177 without
+    analysis: soundness unverified; scan truncated: no).
 
-Coverage honesty stops being something the model estimates and
-becomes something it reads. This is strictly better than the target
-dialogue: not "a dozen of your 489 wins" but every analyzed win, with
-the unanalyzed remainder named.
+For eval-reading events the unanalyzed games are skipped and the
+preamble says so instead. Coverage honesty stops being something
+the model estimates and becomes something it reads. This is
+strictly better than the target dialogue: not "a dozen of your 489
+wins" but every one, with the unverifiable remainder named.
 
 Composition is what makes a small exact vocabulary expressive. The
 flagship question is a chain, stated structurally instead of hoped
@@ -218,17 +228,20 @@ won game); the rinuf combination fires nothing at rook-or-queen
 tier. The archive sweep: 605 analyzed wins in ~4 s; 116 games carry
 a raw rook+ offer, the escalation gate keeps 60, and the
 annotations split those into the sound, balanced and realized
-subsets the model triages. Numbers, conditions, and what was not
-measured live in the
+subsets the model triages. (The spike ran over analyzed wins; the
+later all-games decision widens coverage, not definitions.)
+Numbers, conditions, and what was not measured live in the
 [spike report](../spike-reports/coach-game-search-events.md).
 
 Caps and cost: match cap 25; candidate cap 800 games per call,
 newest first, with a `truncated` flag telling the model to narrow the
-window rather than page. The sacrifice predicate costs roughly
+window rather than page. The candidate cap is what makes all-games
+scanning affordable: an unfiltered archive (8,200 games) never
+costs more than 800 replays. The sacrifice event costs roughly
 3-10 ms per game of replay plus SEE in a threadpool (the
 `/highlights` endpoint already set the precedent for this latency
-class); ~300 analyzed wins scan in a few seconds while the SSE tool
-event shows progress. Tool-result size: ~450-600 tokens for a
+class); a capped scan runs a few seconds while the SSE tool event
+shows progress. Tool-result size: ~450-600 tokens for a
 10-match scan, ~120 for a pinpoint one. No cache in v1: at ~2k games
 a repeat scan costs seconds, and determinism makes it identical; log
 scan wall time so a later LRU decision is data-driven.
@@ -335,9 +348,10 @@ Three bullets in `_CHAT_INSTRUCTIONS`
 
 - `domain.py`: `ScanSpec` (the ordered `match` list of event
   conditions), `ScanMatch`, `ScanOutcome`, `ScanCandidate` (a lean
-  storage row: summary + `san_moves` + `evals`, no pgn, following
-  the `RepertoireGame` precedent), and `GameSearchPage`. Component
-  docs updated in the same commit per the hard rule.
+  storage row: summary + `san_moves` + `evals`, evals `None` on
+  unanalyzed games exactly as `RepertoireGame` does, no pgn), and
+  `GameSearchPage`. Component docs updated in the same commit per
+  the hard rule.
 - `ChatToolkit` protocol
   ([providers.py:275](../../backend/src/chess_coach/coach/providers.py)):
   `scan_games(spec, *, filters...) -> ScanOutcome`; `find_games`
@@ -364,7 +378,8 @@ games, `compare_groups` proves differences.
 1. **main session**: contract commit above (domain types, protocol,
    doc updates).
 2. **storage-dev**: opponent substring flip + `scan_candidates(db,
-   username, filters) -> list[ScanCandidate]` (INNER JOIN analyses,
+   username, filters) -> list[ScanCandidate]` (LEFT JOIN analyses,
+   `evals` None on unanalyzed rows, honoring `filters.analyzed`,
    shared clause builder, newest first, no pgn hauled) + tests +
    [03-storage.md](../03-storage.md). ~0.5 day.
 3. **coach-dev**: `coach/scan.py`, pure functions over
@@ -469,15 +484,16 @@ Hermetic as always: no network, no real Stockfish, no LLM.
 
 ## Decisions to confirm before starting
 
-1. **The unanalyzed-game dead end.** ~700 of ~1,925 stored games
-   have no analysis; if the student's remembered game is one of
-   them, no design can verify soundness, and full analysis takes
-   minutes, far beyond a chat turn. Recommended: v1 says so plainly
-   ("this game isn't analyzed yet; run analysis and ask me again")
-   and links the game page. A bounded "analyze this one game from
-   chat" affordance is real follow-up work (it breaks the toolkit's
-   read-only rule and needs async progress) and should be its own
-   decision, not a rider on this one.
+1. **Verifying an unanalyzed find.** ~7,000 of ~8,200 stored games
+   have no analysis (2026-08-03). The all-games scan finds the
+   sacrifice in them anyway, but cannot verify soundness, and full
+   analysis takes minutes, far beyond a chat turn. Recommended: v1
+   says so plainly ("found it; it isn't analyzed yet, so run
+   analysis for the engine's verdict") and links the game page. A
+   bounded "analyze this one game from chat" affordance is real
+   follow-up work (it breaks the toolkit's read-only rule and needs
+   async progress) and should be its own decision, not a rider on
+   this one.
 2. **v1 event set.** Recommended: ship slice 1 with single-event
    `sacrifice` only; the other events and the multi-event sequence
    join follow in slice 2. The sacrifice tests are the ones that
