@@ -2,8 +2,8 @@
 
 Status: closed 2026-07-27, archived 2026-07-29. Items 1-5 and 7 all
 shipped (waves 1-7, `f90f97e` through the Coach-page warning); item 6
-was never started and moved on to
-[player-profile.md](../../future-improvements/player-profile.md).
+was not started here and moved on to
+[player-profile.md](../player-profile.md), which shipped 2026-07-30.
 Kept for its decisions and measurements. Original text follows, with
 only the item-6 row and cross-doc links updated for the move.
 
@@ -27,7 +27,7 @@ feature doc so implementers don't guess.
 | 3 | [03-faced-openings.md](03-faced-openings.md) | Chosen-vs-faced split in the repertoire | domain (main), storage-dev, coach-dev, frontend-dev | P1 | shipped `d2795a1`; label-coarseness revisit clause open |
 | 4 | [04-report-engine-tool.md](04-report-engine-tool.md) | Engine tool for the report path (finding 9) | coach-dev, api-dev | P2 | shipped `8c340d4`; live run 2026-07-27 exposed the FEN gap → wave-5 follow-up |
 | 5 | [05-drop-max-tokens.md](05-drop-max-tokens.md) | Remove the inert `LlmConfig.max_tokens` | main session only | P2 | shipped `f90f97e` |
-| 6 | [player-profile.md](../../future-improvements/player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | never started; moved to `future-improvements/` on archival |
+| 6 | [player-profile.md](../player-profile.md) | `PlayerProfile` + narrative (finding 11) | domain (main), coach-dev, storage-dev, api-dev, frontend-dev | P3 | not started in this iteration; moved to `future-improvements/` on archival, built 2026-07-30, now archived |
 | 7 | [07-analysis-coverage.md](07-analysis-coverage.md) | State analysis coverage; make backfill aimable | domain (main), storage-dev, coach-dev, api-dev, frontend-dev | P1 | complete: waves 5-7 (`c2f9f2c`, `0c836f0`, Coach-page warning 2026-07-27) |
 
 ## Decisions already made

@@ -1,9 +1,11 @@
 # Openings explorer — hierarchical repertoire page
 
-Status: built (2026-07-29). Each surface below has migrated into its
-owning component doc (03, 05, 07, 08, plus `domain` in
-docs/README.md), which are now the living contracts; this doc remains
-as the design record. The "Deferred" section is still open backlog.
+Status: built 2026-07-29, archived 2026-08-03. Each surface below has
+migrated into its owning component doc (03, 05, 07, 08, plus `domain`
+in docs/README.md), which are now the living contracts; this doc
+remains as the design record. The four items in "Deferred (recorded,
+not built)" are still open, and are carried as tier-2 item 10 in
+[NEW-FEATURE-PROPOSAL.md](../NEW-FEATURE-PROPOSAL.md).
 
 ## What it is and why
 

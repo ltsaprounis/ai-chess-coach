@@ -247,8 +247,8 @@ def player_openings_tree(
     min_games: int = 2,
     max_plies: int = 30,
 ) -> RepertoireTree:
-    """Per-color repertoire move tree (docs/future-improvements/
-    openings-explorer.md): drill from 1.e4 into any line, with games,
+    """Per-color repertoire move tree (docs/archive/openings-explorer.md):
+    drill from 1.e4 into any line, with games,
     score, eval, book status, and continuations at every node.
 
     `since`/`until`/`time_class` scope the games exactly like
@@ -1200,8 +1200,8 @@ async def regenerate_player_profile(
     )
 
 
-# --- Chat (docs/07-api.md "Chat"; docs/future-improvements/coach-chat.md
-# --- is the design record) ---------------------------------------------
+# --- Chat (docs/07-api.md "Chat"; docs/archive/coach-chat.md is the
+# --- design record) ----------------------------------------------------
 
 
 class ChatThreadCreateRequest(BaseModel):

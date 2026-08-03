@@ -16,6 +16,50 @@ keywords:
 estimated_reading_time: 22
 ---
 
+## Status (checked 2026-08-03)
+
+Open. This review is not archived and should not be read as history:
+its P0 and most of its P1 are still unaddressed in the current tree.
+The findings below are left exactly as written on 2026-07-30 so they
+stay usable as evidence; what has changed since is recorded only
+here.
+
+Closed since the review:
+
+* **F12, recurring-mistake links.** The Dashboard's example links now
+  carry `?ply={example_ply}` and land on the move
+  (`Dashboard.tsx`, commit `536dcc0`).
+* **F12, the header player switcher.** This was documentation drift,
+  not a code regression: the header never had a switcher, and
+  [08-frontend.md](08-frontend.md) claimed one. The doc now describes
+  what `Layout.tsx` renders. The product gap the finding names is
+  unchanged, and stays on the roadmap as P2.1: switching players
+  still means a detour through Settings.
+
+Partly addressed:
+
+* **F8**, failed single-game analysis. The Game page's analyze call
+  is now a mutation that starts polling only when the server confirms
+  `queued > 0`, so a rejected enqueue (409 run active, 503 no engine)
+  surfaces as an error instead of polling forever. The finding's own
+  case is untouched: a run that fails *after* enqueue still leaves
+  the page polling once a second, because the page does not consume
+  the SSE stream.
+* **F9**, silent truncation. `allGames`'s 50,000-row bound is now
+  documented and warned about as a pathological-loop guard rather
+  than a cap, which is the honest reading of it. It still returns the
+  accumulated rows as though they were complete, which is what the
+  finding asks to change.
+
+Everything else is unchanged: F1 through F7, F10, F11, the F12
+icon-only board controls, and the CI and testing recommendations. F1
+in particular still stands exactly as described: `_apply_migrations`
+runs `executescript`, then sets `user_version`, then commits, with no
+enclosing transaction.
+
+The Validation Snapshot below describes revision `60f245f` and is not
+re-measured here; test counts in particular have moved on.
+
 ## Executive Summary
 
 AI Chess Coach has a strong engineering foundation. Its component boundaries

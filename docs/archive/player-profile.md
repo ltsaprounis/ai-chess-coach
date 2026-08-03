@@ -1,8 +1,9 @@
 # Player profile — the durable artifact other features embed
 
-Status: built 2026-07-30, reworked the same day. The contracts
-migrated into the component docs (03, 06, 07, 08 + domain), which are
-authoritative; this doc remains the design record. Three details
+Status: built 2026-07-30, reworked the same day, archived 2026-08-03
+with nothing left open. The contracts migrated into the component
+docs (03, 06, 07, 08 + domain), which are authoritative; this doc
+remains the design record. Three details
 settled at build time differently from the spec below:
 `build_profile` takes the already-built `PlayerReport` rather than raw
 games (the aggregation runs once, in `build_report`; the profile
@@ -111,7 +112,8 @@ Do not start before these have landed and settled; both did, on
   (`player_profiles` table + accessors), [07-api.md](../07-api.md)
   (endpoints), [README.md](../README.md) (domain table).
 
-If [prompt-version-fingerprint.md](prompt-version-fingerprint.md)
+If
+[prompt-version-fingerprint.md](../future-improvements/prompt-version-fingerprint.md)
 lands first, the profile's `prompt_version` is a fingerprint from the
 start and the question above answers itself.
 

@@ -1,4 +1,4 @@
-"""Coach chat storage tests (docs/03-storage.md, docs/future-improvements/
+"""Coach chat storage tests (docs/03-storage.md, docs/archive/
 coach-chat.md) — migration 009, the thread/message repo, and the
 `GameFilters` additions the chat toolkit's `find_games` tool needs.
 """

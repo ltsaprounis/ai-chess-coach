@@ -33,8 +33,8 @@ class GameFilters(BaseModel):
     `AnalyzeRequest.limit` documents.
 
     `opening_name_like`, `opponent`, and `since`/`until` exist for the
-    coach chat toolkit's `find_games` tool (docs/future-improvements/
-    coach-chat.md), which queries by what a student says — an
+    coach chat toolkit's `find_games` tool (docs/archive/coach-chat.md),
+    which queries by what a student says — an
     opponent's name, an opening's name — rather than by ECO code.
     `since`/`until` are an epoch-second window (`since` inclusive,
     `until` exclusive), the same semantics every other windowed query

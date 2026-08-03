@@ -24,8 +24,9 @@ without one get throttled). A 404 on archives means unknown username
 and raises a typed `UnknownUserError`; other transport failures
 surface as the base `IngestionError`, also exported.
 
-Prior art: `~/repos/chess-guess` (`src/etl/ingest.py`, `process.py`)
-uses the same API and informed the normalization rules below.
+Prior art: an earlier private project of the author's (chess-guess)
+consumed the same API, and its ETL informed the normalization rules
+below. It is not a dependency and nothing here needs it.
 
 ## Normalization rules
 

@@ -1,7 +1,7 @@
 """Repertoire game repository (docs/03-storage.md).
 
-Feeds the openings-explorer tree (docs/future-improvements/
-openings-explorer.md): the one place storage hands out `san_moves`
+Feeds the openings-explorer tree (docs/archive/openings-explorer.md):
+the one place storage hands out `san_moves`
 (and evals) sliced rather than whole, documented on `RepertoireGame`
 in `domain.py`.
 """
@@ -23,7 +23,7 @@ def list_repertoire_games(
     time_class: TimeClass | None = None,
 ) -> list[RepertoireGame]:
     """Every stored game in scope, analyzed or not — the repertoire tree
-    input (docs/future-improvements/openings-explorer.md, "storage").
+    input (docs/archive/openings-explorer.md, "storage").
 
     LEFT JOIN on `analyses`: an unanalyzed game still comes back, with
     `evals=None`. Window semantics are identical to

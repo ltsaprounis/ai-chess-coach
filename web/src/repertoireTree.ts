@@ -1,5 +1,5 @@
 // Pure drilling logic for the Openings explorer page
-// (docs/future-improvements/openings-explorer.md): path resolution
+// (docs/archive/openings-explorer.md): path resolution
 // against the fetched tree, worst-line ranking, parity-based level
 // labels, children-table row merging (played + unplayed book moves),
 // URL path encode/decode, and small formatters. No fetching, no
@@ -14,7 +14,7 @@ import { formatPawns } from "./units.ts";
  * Whether the arriving move at `ply` was the player's own, given the
  * color the tree was built for — the same parity rule behind
  * `OpeningStats.faced` and this page's "Your move"/"Their move"
- * labels (docs/future-improvements/openings-explorer.md "Parity"):
+ * labels (docs/archive/openings-explorer.md "Parity"):
  * White's moves land on odd plies, Black's on even ones.
  */
 export function isPlayerPly(ply: number, color: Color): boolean {
@@ -82,7 +82,7 @@ export type WorstLine = {
 
 /**
  * Top `limit` player-level nodes ranked by impact = games x avg loss
- * (docs/future-improvements/openings-explorer.md "worst lines" —
+ * (docs/archive/openings-explorer.md "worst lines" —
  * "which line do I fix first"). Nodes with no analyzed games
  * (`avg_cp_loss === null`) are skipped rather than sorting as zero
  * impact, since that would rank an unanalyzed line above a genuinely
@@ -156,8 +156,9 @@ function inheritedLabel(
  * Children-table rows for `node`: every played child, plus the book's
  * unplayed continuations (`played: false`) that aren't already one of
  * those children. A book move is `played` exactly when it already has
- * a corresponding child (server-side, per docs/future-improvements/
- * openings-explorer.md), so filtering to `!played` is normally enough
+ * a corresponding child (server-side, per
+ * docs/archive/openings-explorer.md), so filtering to `!played` is
+ * normally enough
  * on its own — the extra SAN check just makes the no-duplicate
  * guarantee hold even if that invariant is ever violated.
  */

@@ -218,8 +218,7 @@ export const api = {
     ),
   /** Per-color repertoire move tree for the Openings explorer page —
    *  one fetch per (color, filters); the page drills client-side with
-   *  no further requests (docs/future-improvements/
-   *  openings-explorer.md). */
+   *  no further requests (docs/archive/openings-explorer.md). */
   openingsTree: async (
     username: string,
     query: OpeningsTreeQuery,

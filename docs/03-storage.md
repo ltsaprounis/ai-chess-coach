@@ -70,7 +70,7 @@ reports (                            -- cached whole-report coaching
                prompt_version)
 );
 chat_threads (                       -- coach chat conversations
-  -- (docs/future-improvements/coach-chat.md). The stored transcript
+  -- (docs/archive/coach-chat.md). The stored transcript
   -- is the conversation's single source of truth; provider-side
   -- sessions are a cache of it, keyed by the opaque provider_state
   id TEXT PRIMARY KEY,               -- uuid, minted by the API layer
@@ -228,9 +228,9 @@ def list_repertoire_games(
     db: Db, username: str, *, max_plies: int,
     since: int | None = None, until: int | None = None,
     time_class: TimeClass | None = None) -> list[RepertoireGame]
-#   The repertoire-tree input (docs/future-improvements/
-#   openings-explorer.md): every stored game in scope, analyzed or
-#   not — LEFT JOIN on analyses, so an unanalyzed game still comes
+#   The repertoire-tree input (docs/archive/openings-explorer.md):
+#   every stored game in scope, analyzed or not — LEFT JOIN on
+#   analyses, so an unanalyzed game still comes
 #   back with `evals=None`. Window semantics are identical to
 #   list_analyzed_games (since inclusive, until exclusive; time_class
 #   optional; all default to the full history). Newest-first order.
@@ -306,7 +306,7 @@ def save_player_profile(db: Db, username: str, *,
 #   one PlayerProfile. Returns the created_at it persisted — the same
 #   single-clock-read rule as save_report.
 
-# Chat threads (docs/future-improvements/coach-chat.md). Transcripts
+# Chat threads (docs/archive/coach-chat.md). Transcripts
 # are `domain.ChatMessage` rows; thread row types are storage's own
 # surface, like `CachedReport`.
 ChatScope = Literal["report", "game"]
@@ -380,7 +380,7 @@ result, time_class, analyzed, since/until (epoch-second window,
 since inclusive, until exclusive — the same semantics every other
 windowed query here uses), and limit/offset paging. The name,
 opponent and window filters exist for the coach chat toolkit's
-`find_games` tool (docs/future-improvements/coach-chat.md), which
+`find_games` tool (docs/archive/coach-chat.md), which
 queries by what a student says — an opponent's name, an opening's
 name — rather than by ECO code.
 
