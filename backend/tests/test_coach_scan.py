@@ -707,7 +707,7 @@ def test_chain_never_matches_out_of_order() -> None:
 
 def test_chain_castled_then_sacrifice_matches_in_order() -> None:
     """The "castled, then sacrificed" chain shape from the design doc
-    (docs/future-improvements/coach-game-search.md), demonstrated on
+    (docs/archive/coach-game-search.md), demonstrated on
     the kingside castle + Greek-gift shape rather than the spike's own
     (unavailable) archive game -- the chain mechanism is identical
     either side."""

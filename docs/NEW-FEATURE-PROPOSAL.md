@@ -27,7 +27,10 @@ regenerable coach explanations with the engine as an agentic tool;
 whole-report coaching advice that states its own analysis coverage; a
 per-time-control player profile whose context block the explain and
 game-chat prompts embed; and tool-grounded follow-up chat on both a
-game and a report. All gates green at 561 backend tests (5 of them
+game and a report, whose toolkit can scan move content across the
+whole archive: composable events (sacrifices by piece tier,
+comebacks, swings, delivered mates, castling) with honest coverage
+denominators. All gates green at 626 backend tests (5 of them
 opt-in against a real Stockfish) and 291 frontend.
 
 Two review cycles closed in July 2026 (the coach report rework and
@@ -236,6 +239,17 @@ faithfulness verifier over generated text.
   still unmeasured rather than unbuilt: how often a live provider
   actually resumes rather than replaying, and whether the
   ~40-message cap is anywhere near where context stops helping.
+- **Coach game search follow-ups** (its design record is archived;
+  these moved here first, per the archive rule). Cheapest last: a
+  bounded "analyze this one game from chat" affordance, so a scan
+  find in an unanalyzed game can get its engine verdict without
+  leaving the thread — it breaks the toolkit's read-only rule and
+  needs async progress, so it is its own design decision, not a
+  quick fix; the scan-result cache, gated on the wall-time log
+  `scan_games` now emits per scan (decide from data, not
+  anticipation); and a watch on `_CHAT_MAX_TURNS` (8), since a search
+  turn spends 3-4 calls, and if real turns hit the ceiling the bump
+  is one line.
 - **Docker packaging**: the install is five prerequisites deep and
   the C++ engine build is the step most likely to fail on someone
   else's machine. One `docker compose up` fixes that, and settles how
@@ -278,16 +292,13 @@ and one assumption — that the CLI bundled inside the Claude SDK
 wheel can complete an interactive login — should be tested before
 the first slice.
 
-**Coach game search** (2026-08-03) is designed and waiting on a go:
-one new chat tool (`scan_games`, composable named events over stored
-analyses, reusing the highlights SEE machinery: sacrifices with
-piece tiers, comebacks, swings, delivered mates, castling, chained
-as "A then B within N plies") plus small retrieval fixes (search
-totals, substring opponent match, a move-sheet fix that today hides
-engine-best sacrifices, a FEN at any ply). The event definitions are
-already validated against the production archive
-([spike report](spike-reports/coach-game-search-events.md)): the
-dialogue that motivated the feature is captured, its near-misses
-rejected, 605 analyzed wins sweep in 4 s. Engine/data only, no
-migrations, no LLM cost beyond tool results:
-[coach-game-search.md](future-improvements/coach-game-search.md).
+**Coach game search** was designed and built on the same day
+(2026-08-03), so it never joined the ordering: `scan_games` gives
+the chat agent composable named events over stored games (sacrifices
+with piece tiers, comebacks, swings, delivered mates, castling,
+chained as "A then B within N plies"), plus the retrieval fixes
+(search totals, substring opponent match, the move-sheet fix that
+had hidden engine-best sacrifices, a FEN at any ply). The design
+record and its archive-validated measurements are in
+[archive/coach-game-search.md](archive/coach-game-search.md); what
+it left open is one housekeeping entry above.

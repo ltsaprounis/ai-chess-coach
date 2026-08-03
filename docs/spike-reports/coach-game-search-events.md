@@ -1,7 +1,7 @@
 # Coach game search: event definitions spike
 
 Run 2026-08-03. Answers the definitions question in
-[future-improvements/coach-game-search.md](../future-improvements/coach-game-search.md):
+[archive/coach-game-search.md](../archive/coach-game-search.md):
 do the scan events discriminate on real data, and can event
 composition capture the target dialogue's queen-sacrifice game while
 rejecting its two named near-misses?

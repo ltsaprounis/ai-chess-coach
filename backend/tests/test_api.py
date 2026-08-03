@@ -3124,7 +3124,7 @@ def test_chat_toolkit_scan_games_logs_wall_time(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The design doc gates a future cache decision on this number
-    (docs/future-improvements/coach-game-search.md), so it must actually
+    (docs/archive/coach-game-search.md), so it must actually
     be emitted."""
     seed(db_path, [make_game(id="g-1", username="testuser", san_moves=_CASTLE_MOVES)])
     thread: Any = create_thread(client, "testuser", scope="report").json()

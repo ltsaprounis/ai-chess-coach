@@ -1,5 +1,5 @@
 """Coach chat storage tests (docs/03-storage.md, docs/archive/
-coach-chat.md, docs/future-improvements/coach-game-search.md) —
+coach-chat.md, docs/archive/coach-game-search.md) —
 migration 009, the thread/message repo, the `GameFilters` additions
 the chat toolkit's `find_games` tool needs, and `scan_candidates`, the
 `scan_games` tool's fetch.
@@ -427,7 +427,7 @@ def test_clear_chat_provider_state_is_scoped_to_its_thread(db: Db) -> None:
 
 def test_game_filters_opponent_is_case_insensitive_substring(db: Db) -> None:
     """Loosened from exact match in 2026-08
-    (docs/future-improvements/coach-game-search.md): the filter's one
+    (docs/archive/coach-game-search.md): the filter's one
     consumer is a student half-remembering a username, so a partial,
     differently-cased guess must still find the real one."""
     upsert_games(db, [make_game(id="g1", opponent="ousaama78")])

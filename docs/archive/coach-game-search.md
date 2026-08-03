@@ -1,11 +1,21 @@
 # Coach game search: predicate scans and honest coverage
 
-Status: designed 2026-08-03, not built; event definitions validated
-against the production archive the same day
-([spike report](../spike-reports/coach-game-search-events.md)).
+Status: designed and built 2026-08-03, same day. The contracts are
+authoritative in docs 03/06/07 and `domain`; this record keeps the
+reasoning and the measurements. Event definitions were validated
+against the production archive before the build
+([spike report](../spike-reports/coach-game-search-events.md), which
+stays in spike-reports as live evidence for the deferred cache
+decision), and the built toolkit was smoke-tested end to end against
+a copy of the production DB: the target dialogue's queen sacrifice
+surfaces by pinpoint, sweep and chain scans; its two near-misses
+stay silent. What the build left open moved to
+[NEW-FEATURE-PROPOSAL.md](../NEW-FEATURE-PROPOSAL.md) housekeeping
+before archiving (see "Decisions", updated with resolutions).
+
 Written against a target dialogue ("find games where I sacrificed my
 rook or queen and won decisively", then "what about the game with
-ousaama78 on the 7th of March 2026?") that today's chat agent cannot
+ousaama78 on the 7th of March 2026?") that the chat agent could not
 answer well. Three candidate designs were drafted and adversarially
 reviewed; this doc records the winning hybrid, extended with event
 composition after the spike showed the definitions hold on real
@@ -482,30 +492,24 @@ Hermetic as always: no network, no real Stockfish, no LLM.
 - **Turn budget.** The flagship turn spends 3-4 of 8 tool calls;
   a correction round fits, but thinly. See decision 3.
 
-## Decisions to confirm before starting
+## Decisions, with how they resolved (2026-08-03)
 
 1. **Verifying an unanalyzed find.** ~7,000 of ~8,200 stored games
-   have no analysis (2026-08-03). The all-games scan finds the
-   sacrifice in them anyway, but cannot verify soundness, and full
-   analysis takes minutes, far beyond a chat turn. Recommended: v1
-   says so plainly ("found it; it isn't analyzed yet, so run
-   analysis for the engine's verdict") and links the game page. A
-   bounded "analyze this one game from chat" affordance is real
-   follow-up work (it breaks the toolkit's read-only rule and needs
-   async progress) and should be its own decision, not a rider on
-   this one.
-2. **v1 event set.** Recommended: ship slice 1 with single-event
-   `sacrifice` only; the other events and the multi-event sequence
-   join follow in slice 2. The sacrifice tests are the ones that
-   need care, and shipping everything together dilutes that
-   attention. `ScanSpec.match` is a list from day one, so slice 2
-   changes no contract. (Composition itself is decided: the event
-   definitions were validated against the production archive before
-   this section was last updated.)
-3. **`_CHAT_MAX_TURNS`.** Leave at 8 (recommended) or bump to 10 now
-   that a search turn legitimately spends 4 calls before writing.
-   Leaving it forces the model to be deliberate; bumping it is a
-   one-line change later if real turns hit the ceiling.
-4. **Opponent substring flip.** Verified chat-only today, but it is
-   a semantics change to a documented filter. Confirm no planned
-   HTTP exposure of `opponent` expects exact matching.
+   have no analysis. The all-games scan finds the sacrifice in them
+   anyway, but cannot verify soundness, and full analysis takes
+   minutes, far beyond a chat turn. Resolved as recommended: the
+   prompt has the coach say so plainly and link the game. The
+   bounded "analyze this one game from chat" affordance (it breaks
+   the toolkit's read-only rule and needs async progress) moved to
+   the backlog's housekeeping list as its own decision.
+2. **v1 event set.** Resolved: built in two gated phases within one
+   build day: the sacrifice event with its full fixture battery
+   first, then the remaining events and the sequence join.
+   `ScanSpec.match` was a list from day one, so phase 2 changed no
+   contract.
+3. **`_CHAT_MAX_TURNS`.** Resolved: left at 8. A search turn spends
+   3-4 calls; if real turns hit the ceiling, the bump is a one-line
+   change, noted on the backlog watch list.
+4. **Opponent substring flip.** Resolved: shipped. Verified
+   chat-only (no HTTP route sets the filter), and docs/03 records
+   the loosening and its reason.

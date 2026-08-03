@@ -1362,7 +1362,7 @@ denominators, so coverage is a fact the model reads. Matches are
 examples, never tendencies: scan dimensions are outcome-adjacent
 and must never become `ComparisonGroup` fields. The full design
 record with the archive measurements behind the gates is
-[future-improvements/coach-game-search.md](future-improvements/coach-game-search.md)
+[archive/coach-game-search.md](archive/coach-game-search.md)
 and its spike report.
 
 **Instructions.** The chat system prompt carries the explain

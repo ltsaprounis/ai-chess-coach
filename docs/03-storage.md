@@ -394,7 +394,7 @@ semantics every other windowed query here uses), and limit/offset
 paging. The name, opponent and window filters exist for the coach
 chat toolkit's `find_games` and `scan_games` tools
 (docs/archive/coach-chat.md;
-docs/future-improvements/coach-game-search.md), which query by what
+docs/archive/coach-game-search.md), which query by what
 a student says — an opponent's name, an opening's name — rather
 than by ECO code.
 
