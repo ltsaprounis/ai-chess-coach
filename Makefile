@@ -1,5 +1,17 @@
 ENGINE_SRC := engines/stockfish/src
 
+# Everything a fresh clone needs. Submodules first (the opening book
+# is a hard startup requirement, not just the engine), then the two
+# dependency installs, then the Stockfish build last, since it is the
+# slowest step and the only optional one: a missing C++ toolchain
+# fails after you already have a runnable app. Safe to re-run.
+.PHONY: install
+install:
+	git submodule update --init
+	cd backend && uv sync
+	cd web && pnpm install --frozen-lockfile
+	$(MAKE) engine
+
 .PHONY: engine
 engine:
 	git submodule update --init engines/stockfish

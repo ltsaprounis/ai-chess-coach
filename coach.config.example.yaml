@@ -1,6 +1,7 @@
 # AI Chess Coach configuration. Copy to coach.config.yaml and edit.
-# Every key is optional — omitted keys use the defaults shown here.
-# Secrets never go in this file: export ANTHROPIC_API_KEY instead.
+# Every key is optional; omitted keys use the defaults shown here.
+# Secrets never go in this file. Nothing needs one today: both coach
+# providers ride a local CLI login.
 
 engine:
   depth: 16        # Stockfish search depth per position
@@ -24,15 +25,13 @@ thresholds:        # centipawn loss per judgment
 #   sac_points: 2        # min material (SEE, pawn units) given up
 #   best_tolerance_cp: 0  # max cp_loss to still count as engine-best
 #   winning_cap_cp: 200   # eval before the move must be <= this
-#                         # (player POV) — not already winning
+#                         # (player POV): not already winning
 #   sound_floor_cp: 0     # eval after the move must be >= this
-#                         # (player POV) — still sound afterwards
+#                         # (player POV): still sound afterwards
 
 # coach:            # roster of selectable coaches shown in the UI
-#   # Providers: claude-agent-sdk rides your Claude Code login and
-#   # github-copilot rides your GitHub Copilot CLI login (no API
-#   # keys needed); anthropic (needs ANTHROPIC_API_KEY) and
-#   # azure-foundry are planned.
+#   # Two providers: claude-agent-sdk rides your Claude Code login,
+#   # github-copilot rides your GitHub Copilot CLI login.
 #   agents:
 #     - id: claude
 #       label: Claude
@@ -41,14 +40,14 @@ thresholds:        # centipawn loss per judgment
 #     - id: copilot
 #       label: Copilot
 #       provider: github-copilot
-#       # Any id your Copilot plan serves; rosters drift over time —
-#       # list yours with the SDK's client.list_models().
+#       # Any id your Copilot plan serves; rosters drift over time,
+#       # so list yours with the SDK's client.list_models().
 #       model: gpt-5.6-sol
 #   default_agent: claude   # default: the first agent's id
 
 server:
   port: 8000       # .claude/launch.json hardcodes this port for the
-                   # browser-preview launcher — change both together
+                   # browser-preview launcher; change both together
 
 storage:
   db_path: data/coach.sqlite3   # repo-root relative; created on demand

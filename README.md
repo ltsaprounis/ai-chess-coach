@@ -9,42 +9,60 @@ lives only in the `web/` frontend.
 
 ## Features
 
-- **Sync** — fetch and cache a chess.com player's games (no auth
+- **Sync**: fetch and cache a chess.com player's games (no auth
   needed) and classify each opening against the lichess ECO database.
-- **Analyze** — run Stockfish over every position, flagging
-  inaccuracies, mistakes, and blunders and computing ACPL by game
-  phase, with a live progress stream.
-- **Explain a move** — ask the coach why a specific move was a mistake
-  and what to play instead; explanations stream in and are cached.
-- **Live eval** — toggle a Stockfish candidate-lines panel for any
+- **Analyze**: run Stockfish over every position of a game, flagging
+  inaccuracies, mistakes and blunders and computing average loss per
+  move by phase, with a live progress stream.
+- **Explain a move**: ask the coach what went wrong on any move in an
+  analyzed game, and what to play instead.
+- **Live eval**: toggle a Stockfish candidate-lines panel for any
   position on the board.
-- **Report & repertoire** — a weakness report and a worst-first
-  opening table, plus full LLM coaching advice on request.
+- **Dashboard & report**: rating and activity charts, analysis trends,
+  brilliancies and blunders, a weakness report and a per-time-control
+  player profile, plus full LLM coaching advice on request.
+- **Openings explorer**: drill from the first move into any line, with
+  your games, score and eval at every node.
+- **Chat**: follow-up questions about a game or a report, answered
+  against your own games, repertoire and the engine.
 
 LLM calls only ever fire when you ask for them, and every result is
 cached so repeats don't re-bill.
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (Python 3.12+)
-- Node 22 LTS and [pnpm](https://pnpm.io)
-- A C++ toolchain to build Stockfish (or `brew install stockfish` and
-  set `engine.bin_path` in your config)
+- **git** and **make**: install and most commands below are make
+  targets. The server will not boot without the lichess opening-book
+  submodule, which it loads at startup.
+- **[uv](https://docs.astral.sh/uv/)**: it fetches the pinned Python
+  3.12 itself, so no system Python is needed.
+- **Node 22 LTS** and **[pnpm](https://pnpm.io) 11** (CI's version; the
+  committed lockfile needs pnpm 9 or newer).
+- **A C++ toolchain, plus `curl` or `wget`** to build Stockfish, which
+  downloads its NNUE net during the build. On macOS the Xcode Command
+  Line Tools cover git, make, clang and curl in one install.
+  Alternatively `brew install stockfish` and set `engine.bin_path`
+  (see [Configuration](#configuration)).
+
+Nothing else is needed to sync, analyze, browse openings or read the
+report. The LLM features (explain, advice, chat, profile) ride a local
+CLI login; see [Coaching](#coaching-llm-providers).
 
 ## Quickstart
 
 ```bash
-git clone --recurse-submodules git@github.com:ltsaprounis/ai-chess-coach.git
+git clone https://github.com/ltsaprounis/ai-chess-coach.git
 cd ai-chess-coach
-
-make engine                              # build Stockfish from the submodule
-cd backend && uv sync && cd ..           # backend deps
-cd web && pnpm install && cd ..          # frontend deps
+make install   # submodules, backend + frontend deps, Stockfish build
 ```
 
-Then run the app — two ways:
+If only the last step fails you are missing a C++ toolchain, and
+everything but engine analysis still works. Build it later with
+`make engine`, or install Stockfish yourself and set `engine.bin_path`.
 
-**Whole app on one port** (simplest — good for trying it out):
+Then run the app. Two ways:
+
+**Whole app on one port** (simplest, good for trying it out):
 
 ```bash
 make serve   # builds the frontend, then serves UI + API on one port
@@ -52,8 +70,8 @@ make serve   # builds the frontend, then serves UI + API on one port
 
 Open **http://localhost:8000**; re-run to pick up frontend changes.
 
-**Frontend dev with hot reload** — run the API and the Vite dev
-server side by side (two terminals):
+**Frontend dev with hot reload**: run the API and the Vite dev server
+side by side (two terminals):
 
 ```bash
 make dev-api          # API on :8000; leave it running
@@ -64,52 +82,61 @@ Open **http://localhost:5173**.
 
 ## Coaching (LLM providers)
 
-Two providers work today, both chosen because they ride a login you
-likely already have and need **no API key or separate billing**:
+Two providers work today. Both ride a login you likely already have,
+with **no separate billing**:
 
-- **`claude-agent-sdk`** (default) — uses your local Claude Code login.
-- **`github-copilot`** — uses your GitHub Copilot CLI login (premium
-  requests against your Copilot seat).
+- **`claude-agent-sdk`** (default): needs the `claude`
+  ([Claude Code](https://claude.com/claude-code)) CLI installed and
+  logged in.
+- **`github-copilot`**: needs the GitHub Copilot CLI installed and
+  logged in (`copilot login`). Requests count against your Copilot
+  seat.
 
-Keyed providers (**`anthropic`** via `ANTHROPIC_API_KEY`, and
-**`azure-foundry`**) are planned — each slots in behind the same
-provider seam. Configure the selectable coach roster under `coach:` in
-your config; see [docs/06-coach.md](docs/06-coach.md).
+Configure the coach roster under `coach:` in your config: shape and
+rules in [docs/01-config.md](docs/01-config.md), providers in
+[docs/06-coach.md](docs/06-coach.md).
 
 ## Configuration
 
-Optional. Copy [`coach.config.example.yaml`](coach.config.example.yaml)
-to `coach.config.yaml` and edit; every key has a default (engine depth,
-thresholds, coach roster, port, DB path). Secrets go in environment
-variables, never the file (e.g. `ANTHROPIC_API_KEY`).
+Optional: every key has a default (engine depth, thresholds, coach
+roster, port, DB path). Copy
+[`coach.config.example.yaml`](coach.config.example.yaml) to
+`coach.config.yaml` and edit. Two things worth knowing:
+
+- If you use your own Stockfish rather than the build `make install`
+  produces, the config is **not** optional: set `engine.bin_path`, or
+  every analysis call returns 503.
+- Changing `server.port` also means updating the proxy target in
+  `web/vite.config.ts` and the API port in `.claude/launch.json`.
 
 ## Development
 
 ```bash
-make check     # backend: ruff + pyright + import-linter + pytest
+make check     # backend: ruff check + format check + pyright
+               #          + import-linter + pytest
 make gen-api   # regenerate the frontend's OpenAPI types after API changes
+
+pnpm --dir web lint && pnpm --dir web typecheck && \
+  pnpm --dir web test && pnpm --dir web build
 ```
 
+Both gates run in CI. `make check` skips the tests marked `engine`,
+which need a built Stockfish; run those with
+`cd backend && uv run pytest -m engine`. Git hooks are in
+[`.pre-commit-config.yaml`](.pre-commit-config.yaml). Install
+`pre-commit` separately (it is not a project dependency) and run
+`pre-commit install` to activate them.
+
 Only `chess_coach.api` composes the other components; they talk through
-shared domain types with boundaries enforced by import-linter in CI.
-Read [docs/GUIDELINES.md](docs/GUIDELINES.md) before contributing, and
-[docs/README.md](docs/README.md) for the architecture. FastAPI's own
+shared domain types, with the boundaries enforced by import-linter in
+CI. Read [docs/GUIDELINES.md](docs/GUIDELINES.md) before contributing,
+and [docs/README.md](docs/README.md) for the architecture. FastAPI's own
 API docs are at `http://localhost:8000/docs`.
 
 ## License
 
-Copyright (C) 2026 ltsaprounis. Licensed under the [GNU General Public
-License v3.0 or later](LICENSE).
-
-The choice follows from `python-chess` (GPL-3.0-or-later), which the
-backend imports directly across its engine, coach, openings and
-ingestion components. The assembled application is therefore already a
-combined work covered by the GPL, and the project is licensed to say so
-rather than leave a permissive label on something that is not. Hosting
-it as a service is not distribution — this is the GPL, not the AGPL —
-but any build handed to someone else carries GPL terms and must come
-with its corresponding source.
-
-Other bundled dependencies keep their own licenses: Stockfish (GPLv3)
-runs as a separate process, and the lichess openings database (CC0) is a
-git submodule.
+Copyright (C) 2026 ltsaprounis. Licensed under
+[GPL-3.0-or-later](LICENSE), because the project builds on
+[python-chess](https://github.com/niklasf/python-chess) and
+[Stockfish](https://github.com/official-stockfish/Stockfish), both
+GPL-3.
