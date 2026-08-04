@@ -29,7 +29,7 @@ lives only in the `web/` frontend.
 LLM calls only ever fire when you ask for them, and every result is
 cached so repeats don't re-bill.
 
-## Screenshots
+## Examples
 
 Chat about any analyzed game, with the eval chart, judged move list
 and live engine panel alongside. Here the coach walks through a
