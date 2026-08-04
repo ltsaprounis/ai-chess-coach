@@ -742,8 +742,7 @@ The highest-value missing tests mirror the findings:
 
 CI runs lint, format, strict typing, import contracts, tests, and frontend
 builds in separate jobs in
-[ci.yml](../.github/workflows/ci.yml). Lockfiles are committed and frontend
-installation is frozen.
+[ci.yml](../.github/workflows/ci.yml).
 
 Recommended CI improvements:
 
@@ -777,8 +776,8 @@ opening attribution, analysis coverage, and engine reproducibility.
 
 The toolchain is small and coherent. `make check`, `make serve`,
 `make gen-api`, and `make backfill` cover the important developer workflows.
-Python and Node versions are pinned, local hooks cover the fast Python path,
-and the frontend lockfile includes a registry-agnostic guard.
+Python and Node versions are pinned, and local hooks cover the fast
+Python path.
 
 The cost of this depth is contract drift. Confirmed mismatches include:
 

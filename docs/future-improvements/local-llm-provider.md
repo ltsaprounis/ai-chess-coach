@@ -172,15 +172,10 @@ subprocess rather than a linked library.
 | `onnxruntime-genai` | wheels for macOS 12+ arm64, Windows x64/arm64, Linux x64/arm64, py3.11–3.14, MIT | yes, native grammar support | narrow ONNX model library; no Metal path, so slow on Apple Silicon |
 | `mlx-lm` | Apple Silicon only | **none at all** | fast, but Mac-only and unconstrained — cannot be the accessibility answer |
 
-An earlier draft dismissed `llama-cpp-python` over a supposed
-lockfile-URL policy. That objection was simply wrong — `uv.lock`
-carries ~491 pythonhosted URLs — and the follow-up worry that a
-per-backend wheel index is awkward to lock turned out to be wrong
-too. What replaced them is a real limitation, found only by
-opening the package. (Update 2026-08-04: lockfiles are no longer
-committed at all; direct deps are pinned in `pyproject.toml` and
-`uv.lock` is gitignored, so lockfile contents cannot be an
-objection either way.)
+An earlier draft dismissed `llama-cpp-python` over packaging
+concerns (whether a per-backend wheel index locks cleanly) that did
+not survive scrutiny. What replaced them is a real limitation,
+found only by opening the package.
 
 **It does not inherit llama.cpp's tool-call autoparser.** The
 lazy-GBNF, derive-the-grammar-from-any-Jinja-template mechanism

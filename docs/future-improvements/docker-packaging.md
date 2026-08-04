@@ -211,8 +211,7 @@ Details that are easy to get wrong:
 - **There is no committed lockfile to freeze.** Direct dependencies
   are pinned exactly in `web/package.json` and lockfiles are
   per-machine (gitignored), so the build runs plain `pnpm install`
-  against whatever registry it is handed and resolves transitives at
-  build time.
+  and resolves transitives at build time.
 - **Set `storage.db_path: /data/coach.sqlite3`** in the mounted config
   so the database lands on the one volume. WAL means the volume also
   carries `-wal` and `-shm` files, and rules out a network filesystem.
@@ -313,9 +312,8 @@ Two changes are worth making deliberately rather than by accident:
   rests on and has not been tested — verify before slice 1.
 - **Copilot's runtime download at first use** means the coach path
   reaches the network unless pre-seeded with
-  `python -m copilot download-runtime` at build time. On a
-  restricted network that is also where the build is most likely
-  to fail.
+  `python -m copilot download-runtime` at build time. That download
+  is also the build step most likely to fail.
 - **Chat resume copies credentials.** The SDK may materialise a
   temporary `CLAUDE_CONFIG_DIR`, copying `.credentials.json` and
   `.claude.json`, when resuming a session. The copy should land in
