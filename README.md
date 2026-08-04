@@ -29,6 +29,26 @@ lives only in the `web/` frontend.
 LLM calls only ever fire when you ask for them, and every result is
 cached so repeats don't re-bill.
 
+## Screenshots
+
+Chat about any analyzed game, with the eval chart, judged move list
+and live engine panel alongside. Here the coach walks through a
+queen-sac mating attack:
+
+![Game view: coach chat on a queen sacrifice](images/queen-sac.png)
+
+Ask about a single move and the coach explains it from the engine's
+refutation. This one is about the quiet king move that throws a
+drawn rook endgame:
+
+![Explain a move: why Ke7 throws the draw](images/blunder-king-endgame.png)
+
+Ask across your whole archive — the chat scans every game for sound
+rook-or-better sacrifices, separates the real ones from mop-ups, and
+cites the exact games it found:
+
+![Chat retrieval: sound rook sacrifices across the archive](images/retrieval-rook-sac.png)
+
 ## Prerequisites
 
 - **git** and **make**: install and most commands below are make
