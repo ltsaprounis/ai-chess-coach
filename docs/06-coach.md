@@ -1004,8 +1004,8 @@ resolution, and a verdict. The rules:
   reports the family size back. At an unadjusted 2σ that is roughly
   one spurious tendency every two or three students before the run
   asks anything at all. BH controls the false-discovery rate, which is
-  the right error to control here — a missed tendency costs a bullet, a fabricated one is
-  pasted into every later prompt.
+  the right error to control here — a missed tendency costs a bullet,
+  a fabricated one is pasted into every later prompt.
 - **The verdict is rendered, the arithmetic is not.** Both renderers
   state "within noise" or the plain difference; neither prints sigmas
   or p-values, which are not this audience's vocabulary.
