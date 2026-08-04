@@ -48,7 +48,7 @@ class GameFilters(BaseModel):
     opening_name_like: str | None = None  # case-insensitive substring
     # Case-insensitive substring, loosened from exact match in 2026-08:
     # the filter's one consumer is a student half-remembering a
-    # username, and "ousaama" should find "ousaama78".
+    # username, and "rival" should find "rival78".
     opponent: str | None = None
     color: Color | None = None
     result: Result | None = None

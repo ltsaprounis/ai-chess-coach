@@ -57,20 +57,20 @@ N plies of the previous match.
 ## Raw results: the three dialogue games
 
 The target dialogue names one positive and two near-misses, all in
-the archive and analyzed:
+the archive and analyzed (opponent handles removed):
 
 | Game | Expected | Sacrifice events found |
 |---|---|---|
-| vs ousaama78 (2026-03-07) | queen sac, mate | ply 39 `Qxg7+`, queen, net 6, eval +9.2 → #5, sound, not balanced-before |
-| vs abd_ennouer (27...Qxe1+ while winning) | none | none: answering the check cannot win the queen, so SEE finds no offer |
-| vs rinuf (15...Nxd4 combination) | none rook+ | none rook+ (one net-2 minor event at ply 12, correctly small) |
+| 2026-03-07 game | queen sac, mate | ply 39 `Qxg7+`, queen, net 6, eval +9.2 → #5, sound, not balanced-before |
+| 27...Qxe1+ while winning | none | none: answering the check cannot win the queen, so SEE finds no offer |
+| 15...Nxd4 combination | none rook+ | none rook+ (one net-2 minor event at ply 12, correctly small) |
 
-Composition matches on the ousaama78 game, against real plies:
+Composition matches on the 2026-03-07 game, against real plies:
 
 - `sacrifice(queen)` then `delivered_mate` within 12: plies 39 → 49
 - `castled(long)` then `sacrifice(queen)`: plies 37 → 39 (the real
   19.O-O-O before 20.Qxg7+)
-- On abd_ennouer, no sacrifice chain fires, but `comeback` does at
+- On the Qxe1+ game, no sacrifice chain fires, but `comeback` does at
   ply 46 (worst stored eval −14.4 in a won game), which is that
   game's true story: the dialogue's "king hunt" was a conversion
   after the opponent cracked.

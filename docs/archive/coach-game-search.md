@@ -15,7 +15,7 @@ before archiving (see "Decisions", updated with resolutions).
 
 Written against a target dialogue ("find games where I sacrificed my
 rook or queen and won decisively", then "what about the game with
-ousaama78 on the 7th of March 2026?") that the chat agent could not
+rival78 on the 7th of March 2026?") that the chat agent could not
 answer well. Three candidate designs were drafted and adversarially
 reviewed; this doc records the winning hybrid, extended with event
 composition after the spike showed the definitions hold on real
@@ -225,17 +225,18 @@ wrong event. Replay from the standard start is guaranteed because
 ingestion drops `SetUp`/`FEN` games
 ([normalize.py:125](../../backend/src/chess_coach/ingestion/normalize.py)).
 
-**Validated against real data.** The three games the target dialogue
-names are all in the production archive, analyzed, and a prototype
-of these exact definitions (reusing highlights' SEE helpers
-verbatim) behaves correctly on each: the ousaama78 game fires
-`sacrifice` exactly once, at ply 39 `Qxg7+` (queen, net 6, eval
-+9.2 before, mate-in-5 after, sound, realizes in 1); the
-abd_ennouer game fires **no** sacrifice for 27...Qxe1+, because SEE
-sees that answering the check cannot win the queen, while
-`comeback` fires at its true story (worst stored eval −14.4 in a
-won game); the rinuf combination fires nothing at rook-or-queen
-tier. The archive sweep: 605 analyzed wins in ~4 s; 116 games carry
+**Validated against real data** (opponent handles anonymized). The
+three games the target dialogue names are all in the production
+archive, analyzed, and a prototype of these exact definitions
+(reusing highlights' SEE helpers verbatim) behaves correctly on
+each: the rival78 game fires `sacrifice` exactly once, at ply 39
+`Qxg7+` (queen, net 6, eval +9.2 before, mate-in-5 after, sound,
+realizes in 1); the rival2 game fires **no** sacrifice for
+27...Qxe1+, because SEE sees that answering the check cannot win
+the queen, while `comeback` fires at its true story (worst stored
+eval −14.4 in a won game); the rival3 combination fires nothing at
+rook-or-queen tier. The archive sweep: 605 analyzed wins in ~4 s;
+116 games carry
 a raw rook+ offer, the escalation gate keeps 60, and the
 annotations split those into the sound, balanced and realized
 subsets the model triages. (The spike ran over analyzed wins; the
@@ -263,7 +264,7 @@ scan wall time so a later LRU decision is data-driven.
   to the `LIKE`-with-escape pattern `opening_name_like` already
   uses. Verified safe: the chat toolkit is the only consumer of
   `GameFilters.opponent`; the HTTP surface never sets it. Typo
-  tolerance directly serves the "ousaama78" turn, where the
+  tolerance directly serves the "rival78" turn, where the
   remembered username is itself suspect.
 - **`find_games` returns a page, not a bare list.** New domain type
   `GameSearchPage`: `games`, `total`, `offset`. The total comes from

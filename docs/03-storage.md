@@ -387,8 +387,8 @@ the whole archive uncapped
 opening_eco (exact), opening_name_like (case-insensitive substring
 on the classified name), opponent (case-insensitive substring —
 exact until 2026-08, loosened because the filter's one consumer is
-a student half-remembering a username, and "ousaama" should find
-"ousaama78"), color, result, time_class, analyzed, since/until
+a student half-remembering a username, and "rival" should find
+"rival78"), color, result, time_class, analyzed, since/until
 (epoch-second window, since inclusive, until exclusive — the same
 semantics every other windowed query here uses), min_rating/
 max_rating (inclusive bounds on `player_rating`, the student's own

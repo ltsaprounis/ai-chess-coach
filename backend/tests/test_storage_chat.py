@@ -430,16 +430,16 @@ def test_game_filters_opponent_is_case_insensitive_substring(db: Db) -> None:
     (docs/archive/coach-game-search.md): the filter's one
     consumer is a student half-remembering a username, so a partial,
     differently-cased guess must still find the real one."""
-    upsert_games(db, [make_game(id="g1", opponent="ousaama78")])
+    upsert_games(db, [make_game(id="g1", opponent="rival78")])
 
     def ids(opponent: str) -> list[str]:
         return [
             g.id for g in list_games(db, "testuser", GameFilters(opponent=opponent))
         ]
 
-    assert ids("ousaama78") == ["g1"]
-    assert ids("OUSAAMA78") == ["g1"]
-    assert ids("ousaama") == ["g1"]  # half-remembered, digits dropped
+    assert ids("rival78") == ["g1"]
+    assert ids("RIVAL78") == ["g1"]
+    assert ids("rival") == ["g1"]  # half-remembered, digits dropped
     assert ids("zzz") == []
 
 
@@ -703,7 +703,7 @@ def test_scan_candidates_and_list_games_agree_on_shared_filters(db: Db) -> None:
         [
             make_game(
                 id="g1",
-                opponent="ousaama78",
+                opponent="rival78",
                 result="win",
                 time_class="blitz",
                 end_time=100,
@@ -717,7 +717,7 @@ def test_scan_candidates_and_list_games_agree_on_shared_filters(db: Db) -> None:
             ),
             make_game(
                 id="g3",
-                opponent="ousaama78",
+                opponent="rival78",
                 result="win",
                 time_class="rapid",  # wrong time_class: excluded
                 end_time=300,
@@ -726,7 +726,7 @@ def test_scan_candidates_and_list_games_agree_on_shared_filters(db: Db) -> None:
     )
 
     filters = GameFilters(
-        opponent="ousaama",  # partial, substring match
+        opponent="rival",  # partial, substring match
         result="win",
         time_class="blitz",
         since=50,
