@@ -177,7 +177,10 @@ lockfile-URL policy. That objection was simply wrong — `uv.lock`
 carries ~491 pythonhosted URLs — and the follow-up worry that a
 per-backend wheel index is awkward to lock turned out to be wrong
 too. What replaced them is a real limitation, found only by
-opening the package.
+opening the package. (Update 2026-08-04: lockfiles are no longer
+committed at all; direct deps are pinned in `pyproject.toml` and
+`uv.lock` is gitignored, so lockfile contents cannot be an
+objection either way.)
 
 **It does not inherit llama.cpp's tool-call autoparser.** The
 lazy-GBNF, derive-the-grammar-from-any-Jinja-template mechanism

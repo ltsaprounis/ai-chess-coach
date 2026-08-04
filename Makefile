@@ -9,7 +9,7 @@ ENGINE_SRC := engines/stockfish/src
 install:
 	git submodule update --init
 	cd backend && uv sync
-	cd web && pnpm install --frozen-lockfile
+	cd web && pnpm install
 	$(MAKE) engine
 
 .PHONY: engine

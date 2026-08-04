@@ -9,11 +9,16 @@ where a component doc and this file conflict, this file wins.
 
 Fast, strict, and few in number.
 
+Dependency policy, both stacks: direct dependencies are pinned
+exactly in the manifests (`backend/pyproject.toml`,
+`web/package.json`); lockfiles are per-machine and gitignored, so
+each install resolves transitives fresh. Do not commit a lockfile.
+
 ### Backend (Python 3.12+, everything outside `web/`)
 
 | Concern         | Tool             | Notes                         |
 |-----------------|------------------|-------------------------------|
-| Env + packages  | uv               | lockfile committed            |
+| Env + packages  | uv               | exact pins; lockfile ignored  |
 | Lint + format   | ruff             | lint and format, no Black     |
 | Type checking   | pyright (strict) | CI gate, not editor-only      |
 | Tests           | pytest           | fixtures over mocks           |
@@ -30,7 +35,7 @@ everything that crosses a component boundary.
 | Concern       | Tool            | Notes                          |
 |---------------|-----------------|--------------------------------|
 | Runtime       | Node 22 LTS     | pinned: `.nvmrc` + engines     |
-| Packages      | pnpm            |                                |
+| Packages      | pnpm            | exact pins; lockfile ignored   |
 | Lint + format | Biome           | one tool, no ESLint/Prettier   |
 | Types         | `tsc --strict`  | plus `noUncheckedIndexedAccess`|
 | Tests         | Vitest          |                                |

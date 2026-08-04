@@ -13,6 +13,11 @@ node_modules/
 dist/
 web/openapi.json
 
+# Lockfiles are per-machine, not committed: direct dependencies are
+# pinned exactly in backend/pyproject.toml and web/package.json.
+web/pnpm-lock.yaml
+backend/uv.lock
+
 # Local data and secrets
 coach.config.yaml
 data/

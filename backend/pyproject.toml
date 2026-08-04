@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "chess.com game analysis with Stockfish and LLM coaching"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.12"
+# Direct dependencies are pinned exactly: uv.lock is per-machine
+# (gitignored, see the repo .gitignore), so these pins are what makes
+# fresh clones and CI reproduce the tested direct-dependency set.
 dependencies = [
-    "claude-agent-sdk>=0.1",
+    "claude-agent-sdk==0.2.126",
     # GPLv3+ and imported directly, so the assembled app is a combined
     # work under the GPL. That is now the project's own license too
     # (GPL-3.0-or-later, matching upstream), so there is nothing latent
@@ -13,24 +16,24 @@ dependencies = [
     # Keep it that way: a permissive relicense would need this
     # dependency gone first. (Stockfish is a subprocess, so it stays a
     # separate work regardless.)
-    "chess>=1.11",
-    "fastapi>=0.115",
-    "github-copilot-sdk>=1.0.8",
-    "httpx>=0.28",
-    "pydantic>=2.10",
-    "pyyaml>=6.0",
-    "sse-starlette>=2.1",
-    "uvicorn>=0.34",
+    "chess==1.11.2",
+    "fastapi==0.139.2",
+    "github-copilot-sdk==1.0.8",
+    "httpx==0.28.1",
+    "pydantic==2.13.4",
+    "pyyaml==6.0.3",
+    "sse-starlette==3.4.6",
+    "uvicorn==0.51.0",
 ]
 
 [dependency-groups]
 dev = [
-    "import-linter>=2.1",
-    "pyright>=1.1.390",
-    "pytest>=8.3",
-    "pytest-asyncio>=0.25",
-    "ruff>=0.9",
-    "types-pyyaml>=6.0",
+    "import-linter==2.13",
+    "pyright==1.1.411",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.15.22",
+    "types-pyyaml==6.0.12.20260518",
 ]
 
 [build-system]

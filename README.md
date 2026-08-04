@@ -56,8 +56,7 @@ cites the exact games it found:
   submodule, which it loads at startup.
 - **[uv](https://docs.astral.sh/uv/)**: it fetches the pinned Python
   3.12 itself, so no system Python is needed.
-- **Node 22 LTS** and **[pnpm](https://pnpm.io) 11** (CI's version; the
-  committed lockfile needs pnpm 9 or newer).
+- **Node 22 LTS** and **[pnpm](https://pnpm.io) 11** (CI's version).
 - **A C++ toolchain, plus `curl` or `wget`** to build Stockfish, which
   downloads its NNUE net during the build. On macOS the Xcode Command
   Line Tools cover git, make, clang and curl in one install.

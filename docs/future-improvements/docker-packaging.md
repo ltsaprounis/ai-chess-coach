@@ -190,7 +190,7 @@ should name the fix — see the slices.
             git submodule build of engines/stockfish
             explicit ARCH; NNUE net fetched during build
 2  web      node 22 + pnpm 11
-            pnpm install --frozen-lockfile; pnpm build -> web/dist
+            pnpm install; pnpm build -> web/dist
 3  runtime  python 3.12-slim, non-root user, /app as REPO_ROOT
             uv sync (editable) + copied stockfish, web/dist, TSVs
 ```
@@ -208,10 +208,11 @@ Details that are easy to get wrong:
   field, so Corepack cannot infer it; CI's `pnpm/action-setup@v6` with
   `version: 11` is the only pin in the repo. Node 22 comes from
   `web/.nvmrc` and `engines`.
-- **Never regenerate the lockfile in the build.** A pre-commit hook
-  fails any `web/pnpm-lock.yaml` containing a tarball or `http(s)://`
-  URL, so the build must use `--frozen-lockfile` against the public
-  registry and must not bake a mirror into the lockfile.
+- **There is no committed lockfile to freeze.** Direct dependencies
+  are pinned exactly in `web/package.json` and lockfiles are
+  per-machine (gitignored), so the build runs plain `pnpm install`
+  against whatever registry it is handed and resolves transitives at
+  build time.
 - **Set `storage.db_path: /data/coach.sqlite3`** in the mounted config
   so the database lands on the one volume. WAL means the volume also
   carries `-wal` and `-shm` files, and rules out a network filesystem.
@@ -312,9 +313,9 @@ Two changes are worth making deliberately rather than by accident:
   rests on and has not been tested — verify before slice 1.
 - **Copilot's runtime download at first use** means the coach path
   reaches the network unless pre-seeded with
-  `python -m copilot download-runtime` at build time. On a machine
-  behind a corporate npm proxy that is also where the build is most
-  likely to fail.
+  `python -m copilot download-runtime` at build time. On a
+  restricted network that is also where the build is most likely
+  to fail.
 - **Chat resume copies credentials.** The SDK may materialise a
   temporary `CLAUDE_CONFIG_DIR`, copying `.credentials.json` and
   `.claude.json`, when resuming a session. The copy should land in
