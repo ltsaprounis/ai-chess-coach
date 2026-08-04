@@ -1,5 +1,6 @@
 """AnalysisRun pub/sub unit tests (the SSE fanout core), plus the
-registry eviction sweep (CODEBASE-ASSESSMENT.md finding 6)."""
+registry eviction sweep (docs/codebase-assessment-2026-07-30.md
+finding 6)."""
 
 from chess_coach.api.runs import AnalysisRun, evict_finished
 from chess_coach.engine import Progress

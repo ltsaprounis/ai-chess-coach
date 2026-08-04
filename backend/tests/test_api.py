@@ -1116,10 +1116,10 @@ async def test_shutdown_awaits_cancelled_analysis_tasks_before_closing_the_pool(
     actually finish unwinding its cancellation -- not just have
     `.cancel()` called on it -- before pool.close() runs, since close()
     quits the same engine workers a task can be mid-`analyse` on
-    (CODEBASE-ASSESSMENT.md finding 1). Drives the lifespan directly
-    (rather than through TestClient) so the test controls exactly when
-    the run task starts and observes ordering without any HTTP layer in
-    between.
+    (docs/codebase-assessment-2026-07-30.md finding 1). Drives the
+    lifespan directly (rather than through TestClient) so the test
+    controls exactly when the run task starts and observes ordering
+    without any HTTP layer in between.
     """
     order: list[str] = []
 
@@ -1177,10 +1177,11 @@ def test_runs_registry_never_evicts_an_active_run(
     monkeypatch: pytest.MonkeyPatch,
     stub_registry: dict[str, object],
 ) -> None:
-    """The eviction sweep (CODEBASE-ASSESSMENT.md finding 6) only ever
-    touches finished runs: a run whose task is still going must stay
-    queryable -- and keep guarding the one-run-per-player 409 -- no
-    matter how many other runs finish and get swept around it."""
+    """The eviction sweep (docs/codebase-assessment-2026-07-30.md
+    finding 6) only ever touches finished runs: a run whose task is
+    still going must stay queryable -- and keep guarding the
+    one-run-per-player 409 -- no matter how many other runs finish and
+    get swept around it."""
     monkeypatch.setattr(routes, "MAX_FINISHED_RUNS", 1)
     seed(
         db_path,
