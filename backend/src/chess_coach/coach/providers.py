@@ -167,7 +167,12 @@ _SCAN_GAMES_TOOL_DESCRIPTION = (
     "establishes a tendency; scan dimensions must never be treated as one.\n"
     "An offer made while a forced mate was already available is never a "
     "sacrifice -- the detail states whether it forced the mate home or was "
-    "a slip the advantage absorbed."
+    "a slip the advantage absorbed.\n"
+    "A sacrifice hit's ply anchors at the move after which the piece "
+    "first sits capturable, not necessarily the move that offered it: "
+    "when that move answered a check, or the piece fell only through a "
+    "forcing sequence, an earlier move made the actual offer. Read the "
+    "preceding moves before saying which move sacrificed."
 )
 
 _COMPARE_TOOL_DESCRIPTION = (

@@ -1383,7 +1383,7 @@ and its spike report.
 
 **Instructions.** The chat system prompt carries the explain
 register rules (club player, the idea before the number, no
-redundant annotation) plus five chat-specific rules: the facts the
+redundant annotation) plus six chat-specific rules: the facts the
 seed states are established and may be used and quoted, while any
 claim past them — another game, another result, a move not shown —
 must come from a tool result in this conversation, never from
@@ -1397,11 +1397,16 @@ examples, never tendencies (tendencies go through
 `compare_groups`), and when a scan truncated and the question spans
 the student's whole history, continue from the result's own
 resume cursor before concluding rather than answering from the
-partial sweep; dates — game times are UTC epoch seconds, so a
-calendar date the student names is widened by a day on each side;
-and event fit — when no scan event or chain matches the question,
-say so and fall back to metadata search plus reading rather than
-stretching the nearest event.
+partial sweep; featuring a sacrifice — before offering a specific
+scan_games hit as an example, read its surrounding moves with
+`get_game` and, when the flagged ply answered a check or the piece
+fell only through a forcing sequence, attribute the sacrifice to
+the move before it, confirmed with `analyze_position`; dates —
+game times are UTC epoch seconds, so a calendar date the student
+names is widened by a day on each side; and event fit — when no
+scan event or chain matches the question, say so and fall back to
+metadata search plus reading rather than stretching the nearest
+event.
 
 The first rule is *stated versus recalled*, not context versus
 tools, and the distinction is load-bearing. Scoped to the whole
