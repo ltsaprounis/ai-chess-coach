@@ -96,6 +96,39 @@ PROMOTION_MOVES = [
     "d6",
 ]  # fmt: skip
 
+# The forced-reply provenance shape (docs/06-coach.md, "Chat"): Black
+# castles queenside (Kc8, rook lifted to e8 at ply 18 -- the last
+# freely-chosen move, the initiator), then White's knight forks Kc8 and
+# Re8 with check at ply 19 (10.Nxd6+, verified: d6 attacks both c8 and
+# e8). python-chess gives four legal replies here -- Kb8, Kd8, Qxd6,
+# exd6 -- so this is the general, not single-reply, shape: the queen on
+# c7 and the e7 pawn can both recapture on d6 (the f8 bishop cannot,
+# blocked by the still-unmoved e7 pawn). Ply 20 (10...Kb8) is the
+# flagged ply: gain_before is forced to 0 (in check), the opponent's
+# best SEE gain after Kb8 is the rook on e8 for net 2 (knight 3 for
+# rook 5), the escalation floor exactly. Ply 21 (11.Nxe8) realizes it
+# in 1 more ply.
+FORK_BY_CHECK_MOVES = [
+    "e4", "d6", "d4", "Nf6", "Nc3", "c6", "Nf3", "Qc7", "Bc4", "Bg4",
+    "h3", "Bxf3", "Qxf3", "Nbd7", "O-O", "O-O-O", "Nb5", "Rde8",
+    "Nxd6+", "Kb8", "Nxe8",
+]  # fmt: skip
+
+# The consecutive-checks shape: Black's initiator (ply 18, 9...h6, the
+# last freely-chosen move) is followed by TWO forced replies in a row
+# -- ply 19 (10.Nxa7+) Kb8 (the only legal move: verified, no other
+# black piece covers a7 or b8's other neighbours), then ply 21
+# (11.Nxc6+) Kc8 -- before the rook on d8 is first SEE-capturable
+# (knight nets 2 there: rook 5 for knight 3). The provenance clause
+# must walk back over BOTH forced replies to ply 18 (9...h6), and must
+# name the FIRST checking move, ply 19 (10.Nxa7+), not the second, ply
+# 21 (11.Nxc6+).
+CONSECUTIVE_CHECKS_MOVES = [
+    "e4", "d6", "d4", "Nf6", "Nc3", "c6", "Nf3", "Qc7", "Bc4", "Bg4",
+    "h3", "Bxf3", "Qxf3", "Nbd7", "O-O", "O-O-O", "Nb5", "h6",
+    "Nxa7+", "Kb8", "Nxc6+", "Kc8",
+]  # fmt: skip
+
 
 def _candidate(
     game_id: str,
@@ -264,6 +297,12 @@ def test_in_check_ply_counts_prior_gain_as_zero() -> None:
     out the escalation and refuse to fire. The rule forces gain_before
     to 0 instead, and this move fires anyway, proving the rule is what
     fired it.
+
+    No `forced_reply` argument is passed (the default `None`), the
+    documented fallback for an in-check hit with no replayed history to
+    find an initiator in (docs/06-coach.md, "Chat") -- so the detail
+    must carry no provenance clause, byte-identical to before that
+    clause existed.
     """
     board = chess.Board("r3k3/8/8/8/1b6/8/8/R3K3 w - - 0 1")
     assert board.is_check()
@@ -276,6 +315,11 @@ def test_in_check_ply_counts_prior_gain_as_zero() -> None:
 
     assert hit is not None
     assert "rook sac, net 5" in hit.detail
+    assert hit.detail == (
+        "rook sac, net 5 (gave the rook for nothing); declined; unverified (unanalyzed)"
+    )
+    assert "in check since" not in hit.detail
+    assert "last free move" not in hit.detail
 
 
 # --- annotations: sound, balanced_before, eval pair, unanalyzed --------
@@ -560,6 +604,166 @@ def test_forced_home_counterfactual_never_reclassifies_as_a_slip() -> None:
     assert "gave the queen for a bishop" in detail
     assert "slip" not in detail
     assert run_scan([candidate], _spec(piece="queen", sound_only=True)) != []
+
+
+# --- forced-reply provenance (docs/06-coach.md, "Chat") ----------------
+#
+# A hit fires on the forced reply to a fork delivered by check (the
+# offer is invisible to SEE at the offering move itself), so the detail
+# carries a deterministic clause naming the checking move and the last
+# freely-chosen move before it -- verified end to end via `run_scan` on
+# FORK_BY_CHECK_MOVES/CONSECUTIVE_CHECKS_MOVES above, then in isolation
+# on `_check_sacrifice` directly for the pieces a full replay cannot
+# easily pin (a truncated eval list, a single-legal-reply position).
+
+
+def test_provenance_clause_names_the_checking_move_and_the_initiator() -> None:
+    candidate = _candidate("fork", FORK_BY_CHECK_MOVES, color="black")
+
+    matches = run_scan([candidate], _spec(piece="rook"))
+
+    assert len(matches) == 1
+    [hit] = matches[0].hits
+    assert hit.ply == 20
+    assert hit.san == "Kb8"
+    assert hit.fen_before == (
+        "2k1rb1r/ppqnpppp/2pN1n2/8/2BPP3/5Q1P/PPP2PP1/R1B2RK1 b - - 0 10"
+    )
+    assert hit.detail == (
+        "rook sac, net 2 (gave the rook for nothing); realizes in 1; "
+        "unverified (unanalyzed); in check since 10.Nxd6+; last free "
+        "move 9...Rde8"
+    )
+
+
+def test_provenance_clause_walks_back_over_consecutive_forced_replies() -> None:
+    """Two forced in-check replies -- ply 20 (10...Kb8), ply 22
+    (11...Kc8) -- separate the flagged ply from ply 18 (9...h6), the
+    last freely-chosen move; the clause must still find it, and must
+    name the FIRST checking move, ply 19 (10.Nxa7+), not the second,
+    ply 21 (11.Nxc6+), that actually exposed the rook."""
+    candidate = _candidate("consecutive", CONSECUTIVE_CHECKS_MOVES, color="black")
+
+    matches = run_scan([candidate], _spec(piece="rook"))
+
+    assert len(matches) == 1
+    [hit] = matches[0].hits
+    assert hit.ply == 22
+    assert hit.san == "Kc8"
+    assert hit.detail == (
+        "rook sac, net 2 (gave the rook for nothing); declined; "
+        "unverified (unanalyzed); in check since 10.Nxa7+; last free "
+        "move 9...h6"
+    )
+
+
+def test_provenance_clause_reads_the_initiators_eval_not_the_flagged_moves() -> None:
+    """Overrides at plies 17/18 (the initiator's own before/after pair)
+    pin the clause's eval parenthetical; a poison override at ply 19
+    (the flagged move's own "before", read by the *main* clause a step
+    later) must never leak into the provenance clause -- proving it
+    reads `forced_reply.initiator_idx`, not the flagged move's `idx`."""
+    candidate = _candidate(
+        "fork-eval",
+        FORK_BY_CHECK_MOVES,
+        color="black",
+        analyzed=True,
+        eval_overrides={
+            17: {"eval_cp": -84},  # eval before ply 18 (the initiator)
+            18: {"eval_cp": -58, "judgment": "inaccuracy"},  # initiator's own
+            19: {"eval_cp": 12345},  # poison: must not reach the clause
+        },
+    )
+
+    matches = run_scan([candidate], _spec(piece="rook"))
+
+    detail = matches[0].hits[0].detail
+    assert detail == (
+        "rook sac, net 2 (gave the rook for nothing); realizes in 1; "
+        "sound; balanced before; eval -123.45 -> +0.00; in check since "
+        "10.Nxd6+; last free move 9...Rde8 (eval +0.84 -> +0.58, "
+        "inaccuracy)"
+    )
+    provenance = detail.split("in check since", 1)[1]
+    assert "12345" not in provenance
+    assert "123.45" not in provenance
+
+
+def test_provenance_clause_present_but_no_eval_parenthetical_when_unanalyzed() -> None:
+    candidate = _candidate("fork-unanalyzed", FORK_BY_CHECK_MOVES, color="black")
+
+    matches = run_scan([candidate], _spec(piece="rook"))
+
+    detail = matches[0].hits[0].detail
+    assert "in check since 10.Nxd6+; last free move 9...Rde8" in detail
+    assert "unverified (unanalyzed)" in detail
+    assert "eval" not in detail.split("last free move", 1)[1]
+
+
+def test_provenance_clause_omits_eval_when_evals_dont_cover_the_initiator() -> None:
+    """Pins the code guard, not a real production path: storage returns
+    per-game evals full-or-None (there is no mechanism that yields a
+    list stopping partway through a game -- the scan's own resume
+    cursor is game-granular, not ply-granular), so this truncates one
+    by hand to exercise `_provenance_clause`'s length check directly.
+    The clause still names the checking move and the initiator, with
+    no eval parenthetical -- there is nothing there to read."""
+    candidate = _candidate(
+        "fork-partial-evals", FORK_BY_CHECK_MOVES, color="black", analyzed=True
+    )
+    truncated = candidate.model_copy(update={"evals": candidate.evals[:10]})  # type: ignore[union-attr]
+
+    matches = run_scan([truncated], _spec(piece="rook"))
+
+    detail = matches[0].hits[0].detail
+    assert "in check since 10.Nxd6+; last free move 9...Rde8" in detail
+    assert "eval" not in detail.split("last free move", 1)[1]
+
+
+def test_only_legal_reply_marker_appears_when_the_check_has_one_answer() -> None:
+    """A hand-built board (the same direct-`_check_sacrifice` convention
+    as `test_in_check_ply_counts_prior_gain_as_zero`): White's king has
+    exactly one legal reply to the bishop check -- Kf2 -- because three
+    of its usual four flight squares are occupied by extra bishops
+    placed there for this test; the rook hang (a1 to the a8 rook) is
+    the same shape that test uses. `forced_reply` is supplied directly
+    rather than derived from a replay, since this test targets
+    `_check_sacrifice` in isolation."""
+    board = chess.Board("r3k3/8/8/8/1b6/8/4B3/R2BKB2 w - - 0 1")
+    assert board.is_check()
+    assert board.legal_moves.count() == 1
+    move = board.parse_san("Kf2")
+    step = ScanEventSpec(event="sacrifice", piece="minor")
+    forced_reply = scan_module._ForcedReplyContext(  # pyright: ignore[reportPrivateUsage]
+        initiator_idx=0, initiator_san="e4", checking_san="Bb4+"
+    )
+
+    hit = scan_module._check_sacrifice(  # pyright: ignore[reportPrivateUsage]
+        board, move, 0, "Kf2", [], None, True, step, forced_reply
+    )
+
+    assert hit is not None
+    assert hit.detail == (
+        "rook sac, net 5 (gave the rook for nothing); declined; "
+        "unverified (unanalyzed); in check since 1...Bb4+; last free "
+        "move 1.e4; only legal reply"
+    )
+
+
+def test_not_in_check_hits_carry_no_provenance_clause() -> None:
+    """The queen-sac golden (docs/06-coach.md, ply 9, not in check):
+    the detail must be byte-identical to before this clause existed."""
+    candidate = _candidate("legal", LEGALS_MATE_MOVES)
+
+    matches = run_scan([candidate], _spec(piece="queen"))
+
+    detail = matches[0].hits[0].detail
+    assert detail == (
+        "queen sac, net 5 (gave the queen for a pawn); realizes in 1; "
+        "unverified (unanalyzed)"
+    )
+    assert "in check since" not in detail
+    assert "last free move" not in detail
 
 
 # --- run_scan plumbing --------------------------------------------------

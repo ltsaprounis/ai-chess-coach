@@ -1381,6 +1381,39 @@ record with the archive measurements behind the gates is
 [archive/coach-game-search.md](archive/coach-game-search.md)
 and its spike report.
 
+**Anchor.** A `sacrifice` hit's `ply` anchors at the move *after
+which* the piece first sits SEE-capturable, never necessarily the
+move that offered it. The escalation gate reads the opponent's best
+SEE gain immediately before the flagged move as zero whenever the
+mover was in check (`gain_before`, since a null move has no coherent
+meaning there), and that zeroing is exactly what lets a forced reply
+re-register an offer the opponent actually created on the
+intervening move: a fork delivered by check is a two-move tactic
+invisible to SEE at the offering move itself. This convention has
+always held but was undocumented outside the design record
+(archive/coach-game-search.md) before this paragraph.
+
+**Forced-reply provenance.** When the flagged move itself answered a
+check, its detail carries a deterministic clause naming that
+sequence, so the model never has to read a FEN to spot the check the
+"featuring a sacrifice" chat rule above asks it to attribute the
+sacrifice past: the checking move and the last freely-chosen move
+before it — walking back over any further forced replies to find one
+— each with its move-number prefix ("26.Nxd6+", "25...Qf3"); that
+freely-chosen move's own stored eval pair and judgment word, player
+POV, when stored evals cover that ply (omitted, not guessed, when
+they do not — in practice, an unanalyzed candidate); and an "only
+legal reply" marker when the check left no other legal answer. The
+clause states facts only, with no causal blame — the chat rule is
+what tells the model how to read it. The clause says "in check
+*since*" the checking move, never "from" it: a further forced reply
+can sit between the named checking move and the flagged move, so the
+flagged move itself answers a later check, not the named one —
+"from" would misstate that. The clause is absent when the flagged
+move was not played in check, and equally when it was but no earlier
+freely-chosen move exists in the replayed game (an in-check hit with
+nothing behind it to anchor to).
+
 **Instructions.** The chat system prompt carries the explain
 register rules (club player, the idea before the number, no
 redundant annotation) plus six chat-specific rules: the facts the
@@ -1401,7 +1434,8 @@ partial sweep; featuring a sacrifice — before offering a specific
 scan_games hit as an example, read its surrounding moves with
 `get_game` and, when the flagged ply answered a check or the piece
 fell only through a forcing sequence, attribute the sacrifice to
-the move before it, confirmed with `analyze_position`; dates —
+the last freely-chosen move before it, confirmed with
+`analyze_position`; dates —
 game times are UTC epoch seconds, so a calendar date the student
 names is widened by a day on each side; and event fit — when no
 scan event or chain matches the question, say so and fall back to

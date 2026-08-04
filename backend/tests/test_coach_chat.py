@@ -1240,13 +1240,21 @@ async def test_get_game_ply_appends_position_block_after_move_sheet() -> None:
 
 
 def _scan_outcome() -> ScanOutcome:
+    # The detail carries a forced-reply provenance clause (docs/06-
+    # coach.md, "Chat"): ply 39 (20.Qxg7+) answered a check, so it
+    # names the checking move and the last free move before it, with
+    # that move's own eval pair and judgment when covered -- the
+    # two-move shape a real scan_games sacrifice hit can now render,
+    # not just the not-in-check case the previous golden here pinned.
     hit = ScanHit(
         ply=39,
         san="Qxg7+",
         fen_before="8/6k1/6q1/8/8/8/6K1/8 w - - 0 1",
         detail=(
             "queen sac, net 5 (gave the queen for a pawn); realizes in 1; "
-            "sound; already winning before; eval +9.20 -> #5"
+            "sound; already winning before; eval +9.20 -> #5; in check "
+            "since 19...Nf3+; last free move 19.Qh5 (eval +7.80 -> "
+            "+8.10, good)"
         ),
     )
     match = ScanMatch(game=_sample_game_summary(), hits=[hit])
@@ -1268,8 +1276,9 @@ def test_render_scan_outcome_preamble_and_match_golden() -> None:
         "analysis: soundness unverified; truncated: no).\n"
         "- 2026-06-01, white vs hikaru, win, blitz, Ruy Lopez -- id `g-1`\n"
         "  20.Qxg7+: queen sac, net 5 (gave the queen for a pawn); "
-        "realizes in 1; sound; already winning before; eval +9.20 -> #5 "
-        "(`8/6k1/6q1/8/8/8/6K1/8 w - - 0 1`)"
+        "realizes in 1; sound; already winning before; eval +9.20 -> #5; "
+        "in check since 19...Nf3+; last free move 19.Qh5 (eval +7.80 -> "
+        "+8.10, good) (`8/6k1/6q1/8/8/8/6K1/8 w - - 0 1`)"
     )
 
 

@@ -123,6 +123,57 @@ class _Occurrence:
     hit: ScanHit
 
 
+@dataclass
+class _PlayerMoveRecord:
+    """One of the player's own moves seen so far in `_sacrifice_occurrences`'
+    replay: its 0-based index (matching every other `idx` in this module,
+    ply - 1) and whether it was played while in check. The raw material
+    `_forced_reply_context` walks backward over to find the initiator
+    behind a forced reply (docs/06-coach.md, "Chat")."""
+
+    idx: int
+    in_check: bool
+
+
+@dataclass
+class _ForcedReplyContext:
+    """The forced sequence behind an in-check sacrifice hit
+    (docs/06-coach.md, "Chat"): the initiator's own 0-based index (for
+    eval lookups, same convention as `idx` everywhere else here) and
+    SAN, plus the SAN of the opponent's checking move that started the
+    sequence -- always the very next ply, since moves strictly
+    alternate."""
+
+    initiator_idx: int
+    initiator_san: str
+    checking_san: str
+
+
+def _forced_reply_context(
+    history: list[_PlayerMoveRecord], san_moves: list[str]
+) -> _ForcedReplyContext | None:
+    """The forced-reply provenance behind an in-check hit
+    (docs/06-coach.md, "Chat"): walk the player's own prior moves
+    backward, skipping the ones played while in check, to the most
+    recent one that was not -- the last freely-chosen move before the
+    forced sequence. The opponent's move right after it is what started
+    the sequence, since moves alternate one at a time, so no separate
+    opponent-move history is needed. `None` when every prior player
+    move in `history` was itself made in check, or `history` is empty
+    -- the direct-`_check_sacrifice` fallback (e.g. a hand-built
+    in-check board with no replayed history): there is no free move to
+    anchor to, so the caller renders no provenance clause at all.
+    """
+    for record in reversed(history):
+        if not record.in_check:
+            return _ForcedReplyContext(
+                initiator_idx=record.idx,
+                initiator_san=san_moves[record.idx],
+                checking_san=san_moves[record.idx + 1],
+            )
+    return None
+
+
 def run_scan(candidates: list[ScanCandidate], spec: ScanSpec) -> list[ScanMatch]:
     """Every candidate whose game contains a full match of `spec.match`,
     in game order encountered, each carrying the first such chain
@@ -194,6 +245,12 @@ def _sacrifice_occurrences(
     san_moves = candidate.san_moves
     board = chess.Board()
     occurrences: list[_Occurrence] = []
+    # The player's own moves seen so far, in order -- what a hit made
+    # while in check reads backward over to find its forced-reply
+    # provenance (docs/06-coach.md, "Chat"). Updated after each player
+    # move is considered as a candidate, never before, so a move never
+    # sees itself in its own lookback.
+    player_history: list[_PlayerMoveRecord] = []
 
     for idx, san in enumerate(san_moves):
         try:
@@ -203,19 +260,28 @@ def _sacrifice_occurrences(
 
         mover_is_white = board.turn == chess.WHITE
         is_player_move = mover_is_white == player_is_white
-        if is_player_move and move.promotion is None:
-            hit = _check_sacrifice(
-                board,
-                move,
-                idx,
-                san,
-                san_moves[idx + 1 :],
-                evals,
-                player_is_white,
-                step,
-            )
-            if hit is not None:
-                occurrences.append(_Occurrence(ply=idx + 1, hit=hit))
+        if is_player_move:
+            in_check = board.is_check()
+            if move.promotion is None:
+                forced_reply = (
+                    _forced_reply_context(player_history, san_moves)
+                    if in_check
+                    else None
+                )
+                hit = _check_sacrifice(
+                    board,
+                    move,
+                    idx,
+                    san,
+                    san_moves[idx + 1 :],
+                    evals,
+                    player_is_white,
+                    step,
+                    forced_reply,
+                )
+                if hit is not None:
+                    occurrences.append(_Occurrence(ply=idx + 1, hit=hit))
+            player_history.append(_PlayerMoveRecord(idx=idx, in_check=in_check))
         board.push(move)
 
     return occurrences
@@ -230,17 +296,31 @@ def _check_sacrifice(
     evals: list[MoveEval] | None,
     player_is_white: bool,
     step: ScanEventSpec,
+    forced_reply: _ForcedReplyContext | None = None,
 ) -> ScanHit | None:
     """`board_before` sits at the position before `move` (`board.turn` is
     the player). Mutated with real push/pop, like highlights' SEE, so the
-    lookahead sees actual legal-move generation."""
+    lookahead sees actual legal-move generation.
+
+    `forced_reply` is set by `_sacrifice_occurrences` only when `move`
+    was played while in check and a freely-chosen initiator exists in
+    the replayed history; direct callers (e.g. the hand-built in-check
+    fixture in tests) leave it `None` and get no provenance clause --
+    the documented fallback (docs/06-coach.md, "Chat").
+    """
     fen_before = board_before.fen()
     captured = (
         captured_piece(board_before, move) if board_before.is_capture(move) else None
     )
     captured_by_move = PIECE_POINTS.get(captured.symbol().lower(), 0) if captured else 0
-    gain_before = 0 if board_before.is_check() else _offer_before(board_before)
+    in_check = board_before.is_check()
+    gain_before = 0 if in_check else _offer_before(board_before)
     baseline_material = _material(board_before, player_is_white)
+    # Read before any push/pop mutates board_before below -- the count of
+    # legal replies to the check the player actually faced.
+    only_legal_reply = (
+        forced_reply is not None and board_before.legal_moves.count() == 1
+    )
 
     board_before.push(move)
     try:
@@ -308,6 +388,12 @@ def _check_sacrifice(
     if step.sound_only and analyzed and not counts_as_sound:
         return None
 
+    provenance = (
+        _provenance_clause(forced_reply, evals, player_is_white, only_legal_reply)
+        if forced_reply is not None
+        else ""
+    )
+
     detail = _render_sac_detail(
         piece_name=piece_name,
         net_points=offer_after,
@@ -319,8 +405,60 @@ def _check_sacrifice(
         before_str=before_str,
         after_str=after_str,
         mate_note=mate_note,
+        provenance=provenance,
     )
     return ScanHit(ply=idx + 1, san=san, fen_before=fen_before, detail=detail)
+
+
+def _move_number_prefix(ply: int) -> str:
+    """The move-number prefix for `ply` (1-based, matching `ScanHit.ply`):
+    "N." for White's move (odd ply), "N..." for Black's (even) -- e.g.
+    ply 50 (Black) renders "25...", ply 51 (White) "26." (docs/06-coach.md,
+    "Chat": the sacrifice provenance clause).
+    """
+    move_number = (ply + 1) // 2
+    return f"{move_number}." if ply % 2 == 1 else f"{move_number}..."
+
+
+def _provenance_clause(
+    forced_reply: _ForcedReplyContext,
+    evals: list[MoveEval] | None,
+    player_is_white: bool,
+    only_legal_reply: bool,
+) -> str:
+    """The deterministic forced-reply clause (docs/06-coach.md, "Chat"):
+    names the checking move and the last free move before it, so the
+    chat model reads the forced sequence off the detail itself instead
+    of having to spot a check in a FEN. Reads "since", never "from",
+    the checking move -- a further forced reply can sit between it and
+    the flagged move (the consecutive-checks shape), so the flagged
+    move itself may answer a *later* check than the one named here,
+    and "from" would misstate that. The eval parenthetical is included
+    only when stored evals cover the initiator's own ply; when they do
+    not (in practice, an unanalyzed candidate -- no code path here
+    yields a per-game evals list that stops partway through, so this
+    is a defensive guard, not a live production shape) it states the
+    sequence with no eval pair rather than guessing at one.
+    """
+    initiator_ply = forced_reply.initiator_idx + 1
+    checking_ply = forced_reply.initiator_idx + 2
+    initiator_ref = f"{_move_number_prefix(initiator_ply)}{forced_reply.initiator_san}"
+    checking_ref = f"{_move_number_prefix(checking_ply)}{forced_reply.checking_san}"
+
+    eval_note = ""
+    if evals is not None and forced_reply.initiator_idx < len(evals):
+        before_cp, before_mate = eval_before(evals, forced_reply.initiator_idx)
+        initiator_eval = evals[forced_reply.initiator_idx]
+        before_str = _pov_eval_str(before_cp, before_mate, player_is_white)
+        after_str = _pov_eval_str(
+            initiator_eval.eval_cp, initiator_eval.eval_mate, player_is_white
+        )
+        eval_note = f" (eval {before_str} -> {after_str}, {initiator_eval.judgment})"
+
+    clause = f"in check since {checking_ref}; last free move {initiator_ref}{eval_note}"
+    if only_legal_reply:
+        clause += "; only legal reply"
+    return clause
 
 
 def _player_mate(mate: int | None, player_is_white: bool) -> int | None:
@@ -487,6 +625,7 @@ def _render_sac_detail(
     before_str: str,
     after_str: str,
     mate_note: str,
+    provenance: str = "",
 ) -> str:
     captured_phrase = _captured_phrase(captured_name)
     parts = [
@@ -506,6 +645,13 @@ def _render_sac_detail(
         parts.append("sound" if verdict == "sound" else "unsound")
         parts.append("balanced before" if balanced_before else "already winning before")
         parts.append(f"eval {before_str} -> {after_str}")
+    # The forced-reply provenance clause (docs/06-coach.md, "Chat"):
+    # appended last, only when the flagged move answered a check and an
+    # initiator was found in the replayed history -- empty otherwise, so
+    # a not-in-check hit's detail is byte-identical to before this clause
+    # existed.
+    if provenance:
+        parts.append(provenance)
     return "; ".join(parts)
 
 

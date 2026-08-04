@@ -172,7 +172,13 @@ _SCAN_GAMES_TOOL_DESCRIPTION = (
     "first sits capturable, not necessarily the move that offered it: "
     "when that move answered a check, or the piece fell only through a "
     "forcing sequence, an earlier move made the actual offer. Read the "
-    "preceding moves before saying which move sacrificed."
+    "preceding moves before saying which move sacrificed. When the "
+    "flagged move answered a check AND a freely-chosen move exists "
+    "earlier in the game, the detail already names the forced "
+    "sequence -- the checking move and that last free move, with its "
+    "eval pair when known -- so read that clause off the detail "
+    "instead of inferring it from the board; it is absent when no "
+    "such free move exists in the game."
 )
 
 _COMPARE_TOOL_DESCRIPTION = (

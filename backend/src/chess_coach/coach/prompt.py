@@ -1810,10 +1810,10 @@ def format_cp_loss(cp_loss: int) -> str:
 # to when it cannot resume a warm session. Both seeds close with the same
 # engine-availability statement and the same chat instructions: the
 # explain register rules (club player, idea before number, no redundant
-# annotation) plus two chat-specific rules (stated facts are usable and
-# everything past them needs a tool result, and app-relative game links
-# minted only from tool-returned ids -- there is no append_game_links
-# pass here, so no [gN] handle citation is offered).
+# annotation) plus six chat-specific rules -- e.g. stated facts are
+# usable and everything past them needs a tool result, and app-relative
+# game links minted only from tool-returned ids (there is no
+# append_game_links pass here, so no [gN] handle citation is offered).
 #
 # The first of those is scoped to what the seed does *not* state on
 # purpose. Banning the seed itself -- which the rule did until the
