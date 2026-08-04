@@ -321,8 +321,11 @@ class ApiChatToolkit:
         `match_cap` like before, but the sweep keeps scanning chunks for
         coverage even once the cap is full -- the denominators and the
         resume cursor have to describe the whole sweep, so matches past
-        the cap are dropped from the response while still counted for
-        coverage.
+        the cap are dropped from `matches` but still counted in
+        `matched`, never silently gone. `match_cap` floors `limit` at 1
+        (not 0): a `limit=0` call still shows one match when any exist,
+        since a `matched` count with an empty `matches` list would be
+        unreachable -- there'd be no oldest-shown match to page from.
 
         Denominators (docs/06-coach.md, "Chat"): `eligible` is every
         stored game the metadata filters match, analyzed or not, read
@@ -338,7 +341,7 @@ class ApiChatToolkit:
         where this call stopped.
         """
         needs_evals = spec_needs_evals(spec)
-        match_cap = min(max(limit, 0), _SCAN_MATCH_CAP)
+        match_cap = min(max(limit, 1), _SCAN_MATCH_CAP)
 
         def make_filters(
             *, analyzed: bool | None, limit: int, offset: int = 0
@@ -399,15 +402,17 @@ class ApiChatToolkit:
                 if needs_evals
                 else 0
             )
+            matched = len(matches)
             matches = matches[:match_cap]
             resume_until = oldest_scanned_end_time if truncated else None
             elapsed = time.monotonic() - start
             logger.info(
                 "scan_games: scanned %d of %d eligible in %.2fs, "
-                "%d matches, truncated=%s",
+                "%d matches (%d shown), truncated=%s",
                 scanned,
                 eligible,
                 elapsed,
+                matched,
                 len(matches),
                 truncated,
             )
@@ -418,6 +423,7 @@ class ApiChatToolkit:
                 skipped_unanalyzed=skipped_unanalyzed,
                 truncated=truncated,
                 resume_until=resume_until,
+                matched=matched,
                 matches=matches,
             )
 

@@ -1374,6 +1374,13 @@ is covered or the budget runs out, and a truncated result carries
 repeat with until={epoch}", so a sweep is always continuable
 exactly where it stopped. Every rendered result opens with the
 `ScanOutcome` denominators, so coverage is a fact the model reads.
+Those denominators include `matched` -- every game the sweep found
+the chain in, counted before `matches` is trimmed to the call's
+`limit` -- and when the trim dropped anything, the preamble says how
+many are shown of how many matched and that repeating the call with
+`until` at the oldest shown match pages the older ones; exactly
+`limit` matches back is therefore never mistakable for the archive
+running dry.
 Matches are
 examples, never tendencies: scan dimensions are outcome-adjacent
 and must never become `ComparisonGroup` fields. The full design

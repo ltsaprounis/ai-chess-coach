@@ -906,6 +906,11 @@ class ScanOutcome(BaseModel):
     `resume_until` is the oldest scanned game's `end_time`: passing
     it back as `until` continues the sweep exactly where this one
     stopped, since everything at or after it is already covered.
+
+    `matched` counts every game the sweep found the full chain in,
+    before `matches` is trimmed to the call's limit -- so receiving
+    exactly `limit` matches is never mistakable for "that was all of
+    them". A truncated sweep counts only the slice it covered.
     """
 
     eligible: int
@@ -914,6 +919,7 @@ class ScanOutcome(BaseModel):
     skipped_unanalyzed: int
     truncated: bool
     resume_until: int | None = None  # set iff truncated
+    matched: int
     matches: list[ScanMatch]
 
 

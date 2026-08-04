@@ -161,6 +161,10 @@ _SCAN_GAMES_TOOL_DESCRIPTION = (
     "analysis (soundness on those is simply unverified, never assumed "
     "either way), and whether the scan was truncated. Report those "
     "numbers as given -- never estimate coverage yourself.\n"
+    "It also states how many games matched within the scanned slice, "
+    "since the match list itself is capped: when fewer are shown than "
+    "matched, page the rest by repeating the call with the `until` "
+    "value the result states.\n"
     'Matches are EXAMPLES to read, never a tendency: "2 of your last 10 '
     'games show a sound sacrifice" says nothing about how often that '
     "happens across the archive. compare_groups is the only tool that "
@@ -1657,6 +1661,18 @@ def _scan_preamble(outcome: ScanOutcome) -> str:
     it back as `until` picks up right after the covered slice. Stated
     here as well as carried on the outcome, since the model reads this
     preamble, not the struct.
+
+    `matched` -- every game the sweep found the full event chain in,
+    before `matches` was trimmed to the call's `limit` -- joins the same
+    denominators, so a model reading exactly `limit` matches back can
+    never mistake that for the archive running dry. It is omitted when
+    zero: stating "matched: 0" beside the "No games matched." line the
+    caller appends for that case would just repeat it. When the trim
+    dropped anything -- `matched` exceeds how many matches are actually
+    shown -- a second sentence states how many are shown of how many
+    matched and that repeating the call with `until` set to the oldest
+    shown match's date pages the rest, the same until-based mechanism
+    as the resume hint above.
     """
     truncated = "yes" if outcome.truncated else "no"
     # "all" belongs only to the untruncated case; a truncated sweep
@@ -1667,10 +1683,15 @@ def _scan_preamble(outcome: ScanOutcome) -> str:
         if not outcome.truncated
         else (f"the newest {outcome.scanned}")
     )
+    # "matched: 0" would just restate the "No games matched." line the
+    # caller appends when `matches` is empty, so it is stated only when
+    # there is something to count.
+    matched_clause = f"; matched: {outcome.matched}" if outcome.matched else ""
     preamble = (
         f"Scanned {scope} of {outcome.eligible} games "
         f"matching the filters ({outcome.unverified_scanned} without "
-        f"analysis: soundness unverified; truncated: {truncated})."
+        f"analysis: soundness unverified; truncated: {truncated}"
+        f"{matched_clause})."
     )
     if outcome.skipped_unanalyzed:
         preamble += (
@@ -1682,6 +1703,13 @@ def _scan_preamble(outcome: ScanOutcome) -> str:
             f" Covered down to {_format_date(outcome.resume_until)}; to "
             f"continue the sweep, repeat the call with "
             f"until={outcome.resume_until}."
+        )
+    if outcome.matches and outcome.matched > len(outcome.matches):
+        oldest = outcome.matches[-1].game.end_time
+        preamble += (
+            f" Showing the newest {len(outcome.matches)} of "
+            f"{outcome.matched} matches, down to {_format_date(oldest)}; "
+            f"to see older matches, repeat the call with until={oldest}."
         )
     return preamble
 

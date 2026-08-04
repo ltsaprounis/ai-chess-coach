@@ -390,6 +390,7 @@ class _StubChatToolkit:
             unverified_scanned=0,
             skipped_unanalyzed=0,
             truncated=False,
+            matched=0,
             matches=[],
         )
 
@@ -1264,6 +1265,7 @@ def _scan_outcome() -> ScanOutcome:
         unverified_scanned=177,
         skipped_unanalyzed=0,
         truncated=False,
+        matched=1,
         matches=[match],
     )
 
@@ -1273,7 +1275,7 @@ def test_render_scan_outcome_preamble_and_match_golden() -> None:
 
     assert text == (
         "Scanned all 489 of 489 games matching the filters (177 without "
-        "analysis: soundness unverified; truncated: no).\n"
+        "analysis: soundness unverified; truncated: no; matched: 1).\n"
         "- 2026-06-01, white vs hikaru, win, blitz, Ruy Lopez -- id `g-1`\n"
         "  20.Qxg7+: queen sac, net 5 (gave the queen for a pawn); "
         "realizes in 1; sound; already winning before; eval +9.20 -> #5; "
@@ -1289,6 +1291,7 @@ def test_render_scan_outcome_no_matches_still_states_denominators() -> None:
         unverified_scanned=3,
         skipped_unanalyzed=0,
         truncated=False,
+        matched=0,
         matches=[],
     )
 
@@ -1308,6 +1311,7 @@ def test_render_scan_outcome_states_skipped_unanalyzed_when_nonzero() -> None:
         unverified_scanned=0,
         skipped_unanalyzed=20,
         truncated=True,
+        matched=0,
         matches=[],
     )
 
@@ -1331,6 +1335,7 @@ def test_render_scan_outcome_truncated_with_resume_appends_continuation() -> Non
         skipped_unanalyzed=0,
         truncated=True,
         resume_until=1_704_067_200,
+        matched=0,
         matches=[],
     )
 
@@ -1359,6 +1364,7 @@ def test_render_scan_outcome_truncated_without_resume_until_omits_continuation()
         skipped_unanalyzed=0,
         truncated=True,
         resume_until=None,
+        matched=0,
         matches=[],
     )
 
@@ -1370,6 +1376,84 @@ def test_render_scan_outcome_truncated_without_resume_until_omits_continuation()
         "No games matched."
     )
     assert "Covered down to" not in text
+
+
+def test_render_scan_outcome_trimmed_pages_with_until_at_oldest_shown() -> None:
+    """docs/06-coach.md, "Chat": `matched` counts every game the sweep
+    found the chain in, before `matches` is trimmed to the call's
+    `limit`. When the trim dropped anything, the preamble says how many
+    are shown of how many matched and pages the rest with `until` set
+    to the oldest *shown* match's own date -- the same until-based
+    mechanism as the resume hint, so a 295-match sweep that shows only
+    2 can never read as "that was all of them" (the real case: a
+    rook-sacrifice scan had 295 matches and the game the user wanted
+    ranked #44, past a default limit of 10)."""
+    hit = ScanHit(
+        ply=10,
+        san="Rxe5",
+        fen_before="8/6k1/6q1/8/8/8/6K1/8 w - - 0 1",
+        detail="rook sac, net 3 (gave the rook for a pawn); sound",
+    )
+    newer = ScanMatch(game=_sample_game_summary(), hits=[hit])
+    older = ScanMatch(
+        game=_sample_game_summary().model_copy(
+            update={"id": "g-2", "end_time": 1_709_337_600}
+        ),
+        hits=[hit],
+    )
+    outcome = ScanOutcome(
+        eligible=489,
+        scanned=489,
+        unverified_scanned=0,
+        skipped_unanalyzed=0,
+        truncated=False,
+        matched=295,
+        matches=[newer, older],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert (
+        "Scanned all 489 of 489 games matching the filters (0 without "
+        "analysis: soundness unverified; truncated: no; matched: 295). "
+        "Showing the newest 2 of 295 matches, down to 2024-03-02; to see "
+        "older matches, repeat the call with until=1709337600.\n"
+    ) in text
+    # No cap number leaks into the renderer -- the API's match cap is
+    # not coach's to know or state.
+    assert "25" not in text
+    assert "raise limit" not in text and "increase limit" not in text
+
+
+def test_render_scan_outcome_untrimmed_states_matched_with_no_paging_sentence() -> None:
+    """The un-trimmed case (every match shown): the denominators state
+    `matched`, but there is nothing to page, so no "Showing the
+    newest"/"repeat the call with until=" sentence appears."""
+    hit = ScanHit(
+        ply=10,
+        san="Rxe5",
+        fen_before="8/6k1/6q1/8/8/8/6K1/8 w - - 0 1",
+        detail="rook sac, net 3 (gave the rook for a pawn); sound",
+    )
+    match = ScanMatch(game=_sample_game_summary(), hits=[hit])
+    outcome = ScanOutcome(
+        eligible=12,
+        scanned=12,
+        unverified_scanned=0,
+        skipped_unanalyzed=0,
+        truncated=False,
+        matched=1,
+        matches=[match],
+    )
+
+    text = providers_module._render_scan_outcome(outcome)  # pyright: ignore[reportPrivateUsage]
+
+    assert text.startswith(
+        "Scanned all 12 of 12 games matching the filters (0 without "
+        "analysis: soundness unverified; truncated: no; matched: 1).\n"
+    )
+    assert "Showing the newest" not in text
+    assert "repeat the call with until=" not in text
 
 
 async def test_call_scan_games_parses_match_and_filters() -> None:

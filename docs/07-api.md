@@ -174,7 +174,9 @@ unexpected to 500.
   a budget-truncated outcome carries `resume_until` (the oldest
   scanned `end_time`, which as `until` continues the sweep exactly
   where it stopped), the `ScanOutcome` denominators come from
-  `game_record`, and the scan wall time and coverage are logged;
+  `game_record`, `matched` counts every match found before the
+  match-cap trim drops any (the sweep keeps scanning for coverage
+  either way), and the scan wall time and coverage are logged;
   `opening_stats` applies the thread's window; `analyst` is the same
   `pool.eval_lines` wrapper explain uses, or None when the pool is
   down — then stream `provider.chat(...)` as SSE. Seeds: game scope

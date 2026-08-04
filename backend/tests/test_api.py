@@ -2970,6 +2970,7 @@ def test_chat_toolkit_scan_games_moves_only_denominators(
     assert outcome.unverified_scanned == 2  # g-3, g-4: not in `analyzed`
     assert outcome.truncated is False
     assert len(outcome.matches) == 5  # every game castles at ply 7
+    assert outcome.matched == len(outcome.matches)  # nothing trimmed
 
 
 def test_chat_toolkit_scan_games_eval_reading_denominators(
@@ -3074,6 +3075,7 @@ def test_chat_toolkit_scan_games_budget_truncates_after_a_full_chunk(
     # newest first: the first chunk covers end_time 29..22, so 22 is the
     # oldest scanned game -- everything at or after it is covered.
     assert outcome.resume_until == 22
+    assert outcome.matched == 0  # default san_moves never castles
 
 
 def test_chat_toolkit_scan_games_resume_until_continues_the_sweep(
@@ -3124,7 +3126,12 @@ def test_chat_toolkit_scan_games_match_limit_clamps_to_server_cap(
     client: TestClient, db_path: Path, stub_registry: dict[str, object]
 ) -> None:
     """The model's own `limit` is capped server-side the same way
-    `find_games`' is, independent of how many games actually match."""
+    `find_games`' is, independent of how many games actually match. The
+    trim keeps the newest matches (`matches[-1]` is the oldest shown),
+    which is the invariant the coach renderer's `until=matches[-1]...
+    end_time` paging hint depends on -- and passing that value back as
+    `until` reaches exactly the games the trim dropped, no more and no
+    less."""
     games = [
         make_game(id=f"g-{i}", username="testuser", san_moves=_CASTLE_MOVES, end_time=i)
         for i in range(30)
@@ -3136,14 +3143,55 @@ def test_chat_toolkit_scan_games_match_limit_clamps_to_server_cap(
 
     async def probe(toolkit: ChatToolkit) -> None:
         spec = ScanSpec(match=[ScanEventSpec(event="castled")])
-        outcomes.append(await toolkit.scan_games(spec, limit=9999))
+        first = await toolkit.scan_games(spec, limit=9999)
+        outcomes.append(first)
+        # Round-trip the paging hint: the oldest shown match's end_time,
+        # passed back as `until` (exclusive), should reach exactly the
+        # games the trim dropped.
+        page_cursor = first.matches[-1].game.end_time
+        outcomes.append(await toolkit.scan_games(spec, limit=9999, until=page_cursor))
+
+    provider.chat_toolkit_probe = probe
+    post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
+
+    first, second = outcomes
+    assert first.scanned == 30
+    assert len(first.matches) == 25  # _SCAN_MATCH_CAP, not the model's ask
+    assert first.matched == 30  # the full pre-trim count, all 30 castled
+    # newest-first sweep: the 25 shown are g-29..g-5, so g-5 (end_time 5)
+    # is the oldest shown and the paging cursor.
+    assert first.matches[-1].game.end_time == 5
+    assert second.matched == 5  # exactly the games the trim dropped
+    assert len(second.matches) == 5  # under the cap, so nothing trimmed
+
+
+def test_chat_toolkit_scan_games_zero_limit_still_shows_one_match(
+    client: TestClient, db_path: Path, stub_registry: dict[str, object]
+) -> None:
+    """`limit=0` (the tool schema sets no minimum) floors `match_cap` at
+    1 rather than 0: a `matched` count with an empty `matches` list would
+    be unreachable through the stated paging mechanism, since there'd be
+    no oldest-shown match to pass back as `until`."""
+    games = [
+        make_game(id=f"g-{i}", username="testuser", san_moves=_CASTLE_MOVES, end_time=i)
+        for i in range(5)
+    ]
+    seed(db_path, games)
+    thread: Any = create_thread(client, "testuser", scope="report").json()
+    provider = stub_provider(stub_registry, "claude")
+    outcomes: list[ScanOutcome] = []
+
+    async def probe(toolkit: ChatToolkit) -> None:
+        spec = ScanSpec(match=[ScanEventSpec(event="castled")])
+        outcomes.append(await toolkit.scan_games(spec, limit=0))
 
     provider.chat_toolkit_probe = probe
     post(client, f"/api/chat/threads/{thread['id']}/messages", json={"text": "hi"})
 
     [outcome] = outcomes
-    assert outcome.scanned == 30
-    assert len(outcome.matches) == 25  # _SCAN_MATCH_CAP, not the model's ask
+    assert outcome.matched == 5  # the full pre-trim count, all 5 castled
+    assert len(outcome.matches) == 1  # floored at 1, not 0
+    assert outcome.matches[0].game.id == "g-4"  # newest shown
 
 
 def test_chat_toolkit_scan_games_cross_player_guard(
