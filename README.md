@@ -154,8 +154,6 @@ API docs are at `http://localhost:8000/docs`.
 
 ## License
 
-Copyright (C) 2026 ltsaprounis. Licensed under
-[GPL-3.0-or-later](LICENSE), because the project builds on
+Licensed under [GPL-3.0-or-later](LICENSE), because the project builds on
 [python-chess](https://github.com/niklasf/python-chess) and
-[Stockfish](https://github.com/official-stockfish/Stockfish), both
-GPL-3.
+[Stockfish](https://github.com/official-stockfish/Stockfish), both GPL-3.
