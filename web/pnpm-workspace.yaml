@@ -1,0 +1,5 @@
+# Forces a patched js-yaml into the openapi-typescript > @redocly/
+# openapi-core dev-tool chain (GHSA-5p4m-2wfm-xmqj); js-yaml is not a
+# direct dependency, so it cannot be pinned in package.json.
+overrides:
+  js-yaml@4.3.0: 4.3.1

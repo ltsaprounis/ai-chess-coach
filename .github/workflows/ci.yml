@@ -22,6 +22,7 @@ jobs:
       - run: uv run pyright
       - run: uv run lint-imports --cache-dir .cache/import_linter
       - run: uv run pytest
+      - run: uv run pip-audit --local
 
   frontend:
     runs-on: ubuntu-latest
@@ -41,3 +42,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm audit --audit-level=high --ignore-registry-errors
