@@ -263,6 +263,16 @@ faithfulness verifier over generated text.
   covers its surface meanwhile: its sacrifice detail carries a
   mate-aware verdict, so a queen hung inside a mating net is
   labelled a slip, never technique.
+- **Dependency vulnerability scanning in CI** — **shipped**. `uv run
+  pip-audit --local` (backend) and `pnpm audit --audit-level=high`
+  (frontend) now gate both CI jobs (docs/GUIDELINES.md, "CI gates").
+  Caught two live high-severity findings on landing: `react-router`
+  (GHSA-qwww-vcr4-c8h2, bumped 7.18.1 → 7.18.2) and a dev-only
+  transitive `js-yaml` under `openapi-typescript` (GHSA-5p4m-2wfm-xmqj,
+  forced to 4.3.1 via `web/pnpm-workspace.yaml` `overrides`, since
+  lockfiles are gitignored and the direct dependency can't pin it).
+  `pip-audit` carries no severity data, so the backend gate blocks on
+  any finding; accepted risk goes through `--ignore-vuln`.
 - **Docker packaging**: the install is five prerequisites deep and
   the C++ engine build is the step most likely to fail on someone
   else's machine. One `docker compose up` fixes that, and settles how

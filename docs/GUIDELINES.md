@@ -121,9 +121,17 @@ Boundary discipline:
 CI runs on GitHub Actions (`.github/workflows/ci.yml`), one job per
 surface:
 Backend: `uv sync` → `ruff check` + `ruff format --check` →
-`pyright` → `lint-imports` → `pytest`.
+`pyright` → `lint-imports` → `pytest` → `pip-audit`.
 Frontend: `pnpm install` → Biome check → `tsc --noEmit` → Vitest →
-build. pre-commit runs the fast subset locally before each commit.
+build → `pnpm audit --audit-level=high`. pre-commit runs the fast
+subset locally before each commit.
+
+Dependency audits fail the build on any backend finding (`pip-audit`
+carries no severity data, so there is no threshold to filter on;
+accepted findings go through `--ignore-vuln`) and on
+high/critical-severity frontend findings (`pnpm audit` does report
+severity). Both run against whatever the manifests resolve to at CI
+time, since lockfiles are gitignored per the dependency policy above.
 
 ## Definition of done
 
